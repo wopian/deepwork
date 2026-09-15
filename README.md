@@ -25,7 +25,7 @@ The unpackaged Windows executable is `target/debug/deepwork.exe`. Browser-only V
 
 ## Implemented
 
-- Seeded, persistent pixel-column excavation; three excavation priorities and policies.
+- Seeded, persistent chunked excavation; three excavation priorities and policies.
 - Worker recruitment, housing, conveyor/processing capacity, resource buffers and raw sales.
 - 56 mineral feeds, colour-coded field guide, refined products, optional manufacturing and separation recipes.
 - Explicit alumina/electrolysis path, abstract mass-conserving recipe units, steel and component production.
@@ -36,7 +36,7 @@ The unpackaged Windows executable is `target/debug/deepwork.exe`. Browser-only V
 
 ## Current limits against the full design
 
-This is an early playable implementation, **not the finished campaign**. Remaining work is tracked in `IMPLEMENTATION_STATUS.md`. In particular, excavation uses column frontiers rather than a full branching tunnel/pathfinding system; production advances in one-second batches; offline simulation replays those batches. Rendering shows representative workers and machinery rather than authoritative transport entities. Mobile builds and live visual acceptance are not yet verified.
+This is an early playable implementation, **not the finished campaign**. Remaining work is tracked in `IMPLEMENTATION_STATUS.md`. In particular, chunked excavation supports reachable branching frontiers, while transport pathfinding is still pending; production advances in one-second batches; offline simulation replays those batches. Rendering shows representative workers and machinery rather than authoritative transport entities. Mobile builds and live visual acceptance are not yet verified.
 
 ## Toolchain notes
 

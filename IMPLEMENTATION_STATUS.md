@@ -17,7 +17,7 @@ Bun 1.4.0 / Vue 3 / Vite / PixiJS frontend and Tauri 2 / Rust backend are implem
 - Balance the first hour and multi-week progression with headless strategy runs and player testing. Current prices are provisional.
 - Add full audio mix, quality settings, numeric-format choice and colour-independent terrain patterns.
 - Verify mobile lifecycle/import/export, package Android/iOS/macOS/Linux, and test actual touch interaction and target FPS.
-- Run 30-minute memory/visual stress test, restart/import failure scenarios and concurrent-instance save protection.
+- Run 30-minute memory/visual stress test, restart/import failure scenarios scenarios; concurrent-instance locking and transactional command/import saves are implemented.
 
 ## Validation scope
 
