@@ -42,8 +42,14 @@ function draw() {
   rect(terrain, 0, 196, W, 12, 0xd8bc7d);
   for (let x = 0; x < 64; x++) {
     const h = g?.heights[x] ?? Math.floor(12 * Math.sin((x / 64) * Math.PI));
-    rect(terrain, 235 + x * 7, 208, 7, h * 7, 0x101820);
-    for (let y = Math.max(h, first); y < last; y++) {
+    for (let y = first; y < last; y++) {
+      const mask = g?.terrain.chunks[Math.floor(y / 64)];
+      const index = (y % 64) * 64 + x;
+      const open = g ? !!(mask && mask[index >> 3] & (1 << index % 8)) : y < h;
+      if (open) {
+        rect(terrain, 235 + x * 7, 208 + y * 7, 7, 7, 0x101820);
+        continue;
+      }
       const hash = BigInt.asUintN(
         64,
         (BigInt(g?.seed ?? 73429) +

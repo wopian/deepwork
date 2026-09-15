@@ -29,8 +29,8 @@ fn save(path: &Path, game: &Game) -> Result<(), String> {
 }
 fn load(path: &Path) -> Result<Game, String> {
     let raw = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let g: Game = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-    g.validate()?;
+    let mut g: Game = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    g.migrate()?;
     Ok(g)
 }
 #[tauri::command]
@@ -57,7 +57,7 @@ fn import_save(data: String, state: State<Runtime>) -> Result<Game, String> {
         return Err("Save exceeds 32 MB".into());
     }
     let mut candidate: Game = serde_json::from_str(&data).map_err(|e| e.to_string())?;
-    candidate.validate()?;
+    candidate.migrate()?;
     candidate.advance_offline(now(), &materials());
     save(&state.path, &candidate)?;
     *state.game.lock().map_err(|e| e.to_string())? = candidate.clone();

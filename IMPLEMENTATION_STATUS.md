@@ -6,7 +6,7 @@ Bun 1.4.0 / Vue 3 / Vite / PixiJS frontend and Tauri 2 / Rust backend are implem
 
 ## Required before calling the full plan complete
 
-- Replace column excavation with chunked terrain supporting reachable branching tunnels, supports, groundwater and heat gates.
+- Tune excavation policy and automatic support placement; sparse 64×64 masks, reachable frontiers, branching policies and equipment gates are implemented.
 - Model worker roles, route graphs, actual minecarts/trains/lifts, construction and district expansion. Tie each visual actor and building to authoritative state.
 - Run foreground simulation at 20 Hz and send deltas; implement offline boundary-event advancement rather than one-second replay.
 - Separate sorting and refining queues and make each production-strip metric reflect its own measured flow.

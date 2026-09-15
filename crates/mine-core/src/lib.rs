@@ -1,7 +1,8 @@
+pub mod terrain;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 pub const WIDTH: u32 = 64;
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Material {
     pub id: usize,
@@ -63,6 +64,8 @@ pub struct Game {
     pub reserve: BTreeMap<String, u64>,
     pub pinned: Option<String>,
     pub heights: Vec<u32>,
+    #[serde(default)]
+    pub terrain: terrain::Terrain,
     pub removed: Vec<Cell>,
     pub ore: BTreeMap<usize, u64>,
     pub hauled: BTreeMap<usize, u64>,
@@ -149,6 +152,7 @@ impl Game {
             reserve: BTreeMap::new(),
             pinned: None,
             heights: vec![0; 64],
+            terrain: terrain::Terrain::default(),
             removed: vec![],
             ore: BTreeMap::new(),
             hauled: BTreeMap::new(),
@@ -282,28 +286,51 @@ impl Game {
             if ore_total + mined * 1000 >= cap {
                 break;
             }
-            let mut cols: Vec<u32> = (0..WIDTH).collect();
-            cols.sort_by_key(|&x| {
-                let y = self.heights[x as usize];
-                match self.policy.as_str() {
-                    "depth" => y + x.abs_diff(32) * 10,
-                    "vein" => {
-                        y + if self.priorities.contains(&self.cell(x, y, cat)) {
-                            0
-                        } else {
-                            8
-                        }
+            let target = self
+                .terrain
+                .frontier
+                .iter()
+                .filter_map(|&key| {
+                    let (x, y) = (key % WIDTH, key / WIDTH);
+                    if y * 2 >= depth_limit {
+                        return None;
                     }
-                    _ => y,
-                }
-            });
-            let x = cols[0];
-            let y = self.heights[x as usize];
-            if y * 2 >= depth_limit {
+                    // Below the open pit, create a main shaft with branches every 12 rows.
+                    if self.policy != "bulk" && y >= 24 && x.abs_diff(32) > 1 && y % 12 > 1 {
+                        return None;
+                    }
+                    if y >= 150 && self.level("supports") == 0 {
+                        return None;
+                    }
+                    if y >= 350 && self.level("pump") == 0 {
+                        return None;
+                    }
+                    if y >= 750 && self.level("ventilation") == 0 {
+                        return None;
+                    }
+                    let score = match self.policy.as_str() {
+                        "depth" => -(y as i64) * 8 + x.abs_diff(32) as i64,
+                        "vein" => {
+                            y as i64
+                                - if self.priorities.contains(&self.cell(x, y, cat)) {
+                                    40
+                                } else {
+                                    0
+                                }
+                        }
+                        _ => y as i64,
+                    };
+                    Some((score, key))
+                })
+                .min()
+                .map(|(_, key)| key);
+            let Some(key) = target else { break };
+            let (x, y) = (key % WIDTH, key / WIDTH);
+            let id = self.cell(x, y, cat);
+            if !self.terrain.excavate(x, y) {
                 break;
             }
-            let id = self.cell(x, y, cat);
-            self.heights[x as usize] += 1;
+            self.heights[x as usize] = self.heights[x as usize].max(y + 1);
             self.removed.push(Cell { x, y, material: id });
             if self.removed.len() > 512 {
                 self.removed.drain(..256);
@@ -554,6 +581,9 @@ impl Game {
                     "capacity",
                     "reclaimer",
                     "manufacturing",
+                    "supports",
+                    "pump",
+                    "ventilation",
                 ];
                 if !allowed.contains(&a.target.as_str()) {
                     return Err("Unknown upgrade".into());
@@ -724,6 +754,17 @@ impl Game {
         self.last_sequence = a.sequence;
         Ok(())
     }
+    pub fn migrate(&mut self) -> Result<(), String> {
+        if self.version == 1 {
+            if self.heights.len() != 64 || self.heights.iter().any(|h| *h > 100000) {
+                return Err("Invalid legacy terrain".into());
+            }
+            self.terrain = terrain::Terrain::from_columns(&self.heights);
+            self.version = VERSION;
+        }
+        self.terrain.rebuild()?;
+        self.validate()
+    }
     pub fn validate(&self) -> Result<(), String> {
         if self.version != VERSION {
             return Err("Unsupported save version".into());
@@ -740,6 +781,14 @@ impl Game {
             || self.removed.len() > 512
         {
             return Err("Invalid save state".into());
+        }
+        if self
+            .terrain
+            .chunks
+            .iter()
+            .any(|(id, bytes)| *id >= 1563 || bytes.len() != 512)
+        {
+            return Err("Invalid terrain chunk".into());
         }
         let n = materials().len();
         if self

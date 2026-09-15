@@ -21,6 +21,7 @@ export interface Game {
   priorities: number[];
   reserve: Record<string, number>;
   heights: number[];
+  terrain: { chunks: Record<string, number[]>; revision: number };
   removed: { x: number; y: number; material: number }[];
   ore: Record<string, number>;
   hauled: Record<string, number>;
@@ -67,6 +68,9 @@ export function format(n: number | string) {
   }).format(v);
 }
 export const upgrades = [
+  ["supports", "Support workshop", "Support deep branching tunnels.", 100],
+  ["pump", "Drainage pumps", "Clear groundwater below 700 m.", 100],
+  ["ventilation", "Ventilation plant", "Manage heat below 1,500 m.", 100],
   ["worker", "Recruit minion", "More hands, more progress.", 25],
   ["housing", "Bunkhouse", "Room for four more workers.", 90],
   ["drill", "Powered picks", "Increase excavation work.", 100],
