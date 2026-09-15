@@ -1,0 +1,10 @@
+{
+  "identifier": "main",
+  "description": "Main game window",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}

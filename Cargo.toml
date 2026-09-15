@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/mine-core", "src-tauri"]
+resolver = "2"

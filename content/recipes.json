@@ -1,0 +1,347 @@
+[
+  {
+    "id": "steel",
+    "building": "steelworks",
+    "inputs": {
+      "iron": 2,
+      "coke": 1,
+      "lime": 1
+    },
+    "output": "steel"
+  },
+  {
+    "id": "aluminium",
+    "building": "electrolytic",
+    "inputs": {
+      "alumina": 1
+    },
+    "output": "aluminium"
+  },
+  {
+    "id": "bronze",
+    "building": "manufacturing",
+    "inputs": {
+      "copper": 3,
+      "tin": 1
+    },
+    "output": "bronze"
+  },
+  {
+    "id": "brass",
+    "building": "manufacturing",
+    "inputs": {
+      "copper": 3,
+      "zinc": 1
+    },
+    "output": "brass"
+  },
+  {
+    "id": "stainless",
+    "building": "manufacturing",
+    "inputs": {
+      "steel": 3,
+      "ferrochrome": 1,
+      "nickel": 1
+    },
+    "output": "stainless_steel"
+  },
+  {
+    "id": "tooling",
+    "building": "manufacturing",
+    "inputs": {
+      "steel": 3,
+      "tungsten": 1
+    },
+    "output": "tooling"
+  },
+  {
+    "id": "wiring",
+    "building": "manufacturing",
+    "inputs": {
+      "copper": 2,
+      "insulation": 1
+    },
+    "output": "wiring"
+  },
+  {
+    "id": "silicon",
+    "building": "chemical",
+    "inputs": {
+      "silica": 1
+    },
+    "output": "silicon"
+  },
+  {
+    "id": "batteries",
+    "building": "manufacturing",
+    "inputs": {
+      "lithium_carbonate": 2,
+      "graphite": 2,
+      "nickel": 1,
+      "cobalt": 1
+    },
+    "output": "batteries"
+  },
+  {
+    "id": "magnets",
+    "building": "manufacturing",
+    "inputs": {
+      "neodymium": 1,
+      "praseodymium": 1,
+      "iron": 3,
+      "borate": 1
+    },
+    "output": "magnets"
+  },
+  {
+    "id": "controls",
+    "building": "manufacturing",
+    "inputs": {
+      "silicon": 2,
+      "copper": 1,
+      "gallium": 1
+    },
+    "output": "precision_controls"
+  },
+  {
+    "id": "structures",
+    "building": "manufacturing",
+    "inputs": {
+      "steel": 4,
+      "ferrovanadium": 1
+    },
+    "output": "advanced_structure"
+  },
+  {
+    "id": "separate_gallium",
+    "building": "trace",
+    "inputs": {
+      "alumina": 1
+    },
+    "output": "gallium"
+  },
+  {
+    "id": "separate_indium",
+    "building": "trace",
+    "inputs": {
+      "zinc": 1
+    },
+    "output": "indium"
+  },
+  {
+    "id": "separate_germanium",
+    "building": "trace",
+    "inputs": {
+      "zinc": 1
+    },
+    "output": "germanium"
+  },
+  {
+    "id": "separate_selenium",
+    "building": "trace",
+    "inputs": {
+      "copper": 1
+    },
+    "output": "selenium"
+  },
+  {
+    "id": "separate_tellurium",
+    "building": "trace",
+    "inputs": {
+      "copper": 1
+    },
+    "output": "tellurium"
+  },
+  {
+    "id": "separate_rhenium",
+    "building": "trace",
+    "inputs": {
+      "molybdenum": 1
+    },
+    "output": "rhenium"
+  },
+  {
+    "id": "separate_hafnium",
+    "building": "trace",
+    "inputs": {
+      "zirconium": 1
+    },
+    "output": "hafnium"
+  },
+  {
+    "id": "separate_scandium",
+    "building": "trace",
+    "inputs": {
+      "nickel": 1
+    },
+    "output": "scandium"
+  },
+  {
+    "id": "separate_rubidium",
+    "building": "trace",
+    "inputs": {
+      "cesium": 1
+    },
+    "output": "rubidium"
+  },
+  {
+    "id": "separate_palladium",
+    "building": "trace",
+    "inputs": {
+      "platinum": 1
+    },
+    "output": "palladium"
+  },
+  {
+    "id": "separate_rhodium",
+    "building": "trace",
+    "inputs": {
+      "platinum": 1
+    },
+    "output": "rhodium"
+  },
+  {
+    "id": "separate_ruthenium",
+    "building": "trace",
+    "inputs": {
+      "platinum": 1
+    },
+    "output": "ruthenium"
+  },
+  {
+    "id": "separate_iridium",
+    "building": "trace",
+    "inputs": {
+      "platinum": 1
+    },
+    "output": "iridium"
+  },
+  {
+    "id": "separate_osmium",
+    "building": "trace",
+    "inputs": {
+      "platinum": 1
+    },
+    "output": "osmium"
+  },
+  {
+    "id": "separate_lanthanum",
+    "building": "trace",
+    "inputs": {
+      "light_rare_earths": 1
+    },
+    "output": "lanthanum"
+  },
+  {
+    "id": "separate_cerium",
+    "building": "trace",
+    "inputs": {
+      "light_rare_earths": 1
+    },
+    "output": "cerium"
+  },
+  {
+    "id": "separate_praseodymium",
+    "building": "trace",
+    "inputs": {
+      "light_rare_earths": 1
+    },
+    "output": "praseodymium"
+  },
+  {
+    "id": "separate_neodymium",
+    "building": "trace",
+    "inputs": {
+      "light_rare_earths": 1
+    },
+    "output": "neodymium"
+  },
+  {
+    "id": "separate_samarium",
+    "building": "trace",
+    "inputs": {
+      "light_rare_earths": 1
+    },
+    "output": "samarium"
+  },
+  {
+    "id": "separate_europium",
+    "building": "trace",
+    "inputs": {
+      "light_rare_earths": 1
+    },
+    "output": "europium"
+  },
+  {
+    "id": "separate_gadolinium",
+    "building": "trace",
+    "inputs": {
+      "heavy_rare_earths": 1
+    },
+    "output": "gadolinium"
+  },
+  {
+    "id": "separate_terbium",
+    "building": "trace",
+    "inputs": {
+      "heavy_rare_earths": 1
+    },
+    "output": "terbium"
+  },
+  {
+    "id": "separate_dysprosium",
+    "building": "trace",
+    "inputs": {
+      "heavy_rare_earths": 1
+    },
+    "output": "dysprosium"
+  },
+  {
+    "id": "separate_holmium",
+    "building": "trace",
+    "inputs": {
+      "heavy_rare_earths": 1
+    },
+    "output": "holmium"
+  },
+  {
+    "id": "separate_erbium",
+    "building": "trace",
+    "inputs": {
+      "heavy_rare_earths": 1
+    },
+    "output": "erbium"
+  },
+  {
+    "id": "separate_thulium",
+    "building": "trace",
+    "inputs": {
+      "heavy_rare_earths": 1
+    },
+    "output": "thulium"
+  },
+  {
+    "id": "separate_ytterbium",
+    "building": "trace",
+    "inputs": {
+      "heavy_rare_earths": 1
+    },
+    "output": "ytterbium"
+  },
+  {
+    "id": "separate_lutetium",
+    "building": "trace",
+    "inputs": {
+      "heavy_rare_earths": 1
+    },
+    "output": "lutetium"
+  },
+  {
+    "id": "separate_yttrium",
+    "building": "trace",
+    "inputs": {
+      "heavy_rare_earths": 1
+    },
+    "output": "yttrium"
+  }
+]

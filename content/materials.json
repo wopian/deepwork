@@ -1,0 +1,506 @@
+[
+  {
+    "id": 0,
+    "name": "Dirt",
+    "product": "fill",
+    "family": "physical",
+    "tier": 0,
+    "price": 1,
+    "color": "#806044"
+  },
+  {
+    "id": 1,
+    "name": "Stone",
+    "product": "aggregate",
+    "family": "physical",
+    "tier": 0,
+    "price": 2,
+    "color": "#8c9ba5"
+  },
+  {
+    "id": 2,
+    "name": "Quartz",
+    "product": "silica",
+    "family": "physical",
+    "tier": 0,
+    "price": 5,
+    "color": "#e8dfc8"
+  },
+  {
+    "id": 3,
+    "name": "Hematite",
+    "product": "iron",
+    "family": "furnace",
+    "tier": 0,
+    "price": 8,
+    "color": "#bd6550"
+  },
+  {
+    "id": 4,
+    "name": "Malachite",
+    "product": "copper",
+    "family": "chemical",
+    "tier": 0,
+    "price": 10,
+    "color": "#53ba88"
+  },
+  {
+    "id": 5,
+    "name": "Coal",
+    "product": "coke",
+    "family": "industrial",
+    "tier": 0,
+    "price": 6,
+    "color": "#47505c"
+  },
+  {
+    "id": 6,
+    "name": "Limestone",
+    "product": "lime",
+    "family": "industrial",
+    "tier": 0,
+    "price": 4,
+    "color": "#d8bc7d"
+  },
+  {
+    "id": 7,
+    "name": "Magnetite",
+    "product": "iron",
+    "family": "furnace",
+    "tier": 1,
+    "price": 8,
+    "color": "#59616d"
+  },
+  {
+    "id": 8,
+    "name": "Chalcopyrite",
+    "product": "copper",
+    "family": "sulfide",
+    "tier": 1,
+    "price": 10,
+    "color": "#d4a945"
+  },
+  {
+    "id": 9,
+    "name": "Cassiterite",
+    "product": "tin",
+    "family": "furnace",
+    "tier": 1,
+    "price": 12,
+    "color": "#b1afa0"
+  },
+  {
+    "id": 10,
+    "name": "Clay",
+    "product": "ceramics",
+    "family": "industrial",
+    "tier": 0,
+    "price": 4,
+    "color": "#b78365"
+  },
+  {
+    "id": 11,
+    "name": "Gypsum",
+    "product": "plaster",
+    "family": "industrial",
+    "tier": 1,
+    "price": 6,
+    "color": "#ded7cb"
+  },
+  {
+    "id": 12,
+    "name": "Feldspar",
+    "product": "ceramic_feed",
+    "family": "industrial",
+    "tier": 1,
+    "price": 7,
+    "color": "#d49c94"
+  },
+  {
+    "id": 13,
+    "name": "Halite",
+    "product": "salt",
+    "family": "chemical",
+    "tier": 1,
+    "price": 5,
+    "color": "#d2cadf"
+  },
+  {
+    "id": 14,
+    "name": "Potash",
+    "product": "potash",
+    "family": "chemical",
+    "tier": 2,
+    "price": 9,
+    "color": "#d7888e"
+  },
+  {
+    "id": 15,
+    "name": "Phosphate rock",
+    "product": "phosphate",
+    "family": "physical",
+    "tier": 2,
+    "price": 9,
+    "color": "#b1ad71"
+  },
+  {
+    "id": 16,
+    "name": "Fluorite",
+    "product": "fluorspar",
+    "family": "physical",
+    "tier": 2,
+    "price": 12,
+    "color": "#a28bca"
+  },
+  {
+    "id": 17,
+    "name": "Barite",
+    "product": "barite",
+    "family": "physical",
+    "tier": 2,
+    "price": 10,
+    "color": "#c7ad96"
+  },
+  {
+    "id": 18,
+    "name": "Talc",
+    "product": "talc",
+    "family": "industrial",
+    "tier": 1,
+    "price": 6,
+    "color": "#acbb9a"
+  },
+  {
+    "id": 19,
+    "name": "Mica",
+    "product": "insulation",
+    "family": "physical",
+    "tier": 1,
+    "price": 9,
+    "color": "#c8b480"
+  },
+  {
+    "id": 20,
+    "name": "Graphite",
+    "product": "graphite",
+    "family": "physical",
+    "tier": 2,
+    "price": 12,
+    "color": "#6c7c89"
+  },
+  {
+    "id": 21,
+    "name": "Sulfur",
+    "product": "sulfur",
+    "family": "chemical",
+    "tier": 2,
+    "price": 8,
+    "color": "#d9cb53"
+  },
+  {
+    "id": 22,
+    "name": "Sphalerite",
+    "product": "zinc",
+    "family": "sulfide",
+    "tier": 2,
+    "price": 15,
+    "color": "#cf9c5a"
+  },
+  {
+    "id": 23,
+    "name": "Galena",
+    "product": "lead",
+    "family": "furnace",
+    "tier": 1,
+    "price": 12,
+    "color": "#8b8dac"
+  },
+  {
+    "id": 24,
+    "name": "Bauxite",
+    "product": "aluminium",
+    "family": "electrolytic",
+    "tier": 3,
+    "price": 24,
+    "color": "#b76743"
+  },
+  {
+    "id": 25,
+    "name": "Pentlandite",
+    "product": "nickel",
+    "family": "sulfide",
+    "tier": 3,
+    "price": 26,
+    "color": "#c5b473"
+  },
+  {
+    "id": 26,
+    "name": "Cobalt ore",
+    "product": "cobalt",
+    "family": "chemical",
+    "tier": 3,
+    "price": 28,
+    "color": "#697ed0"
+  },
+  {
+    "id": 27,
+    "name": "Chromite",
+    "product": "ferrochrome",
+    "family": "furnace",
+    "tier": 3,
+    "price": 25,
+    "color": "#737388"
+  },
+  {
+    "id": 28,
+    "name": "Manganese ore",
+    "product": "ferromanganese",
+    "family": "furnace",
+    "tier": 2,
+    "price": 20,
+    "color": "#9983a0"
+  },
+  {
+    "id": 29,
+    "name": "Molybdenite",
+    "product": "molybdenum",
+    "family": "sulfide",
+    "tier": 4,
+    "price": 38,
+    "color": "#8799b2"
+  },
+  {
+    "id": 30,
+    "name": "Scheelite",
+    "product": "tungsten",
+    "family": "chemical",
+    "tier": 4,
+    "price": 40,
+    "color": "#c9b799"
+  },
+  {
+    "id": 31,
+    "name": "Wolframite",
+    "product": "tungsten",
+    "family": "chemical",
+    "tier": 4,
+    "price": 40,
+    "color": "#77677d"
+  },
+  {
+    "id": 32,
+    "name": "Ilmenite",
+    "product": "titanium",
+    "family": "chemical",
+    "tier": 4,
+    "price": 42,
+    "color": "#80808d"
+  },
+  {
+    "id": 33,
+    "name": "Rutile",
+    "product": "titanium",
+    "family": "chemical",
+    "tier": 4,
+    "price": 42,
+    "color": "#c38c62"
+  },
+  {
+    "id": 34,
+    "name": "Vanadium ore",
+    "product": "ferrovanadium",
+    "family": "chemical",
+    "tier": 4,
+    "price": 36,
+    "color": "#819c76"
+  },
+  {
+    "id": 35,
+    "name": "Pyrochlore",
+    "product": "ferroniobium",
+    "family": "chemical",
+    "tier": 4,
+    "price": 45,
+    "color": "#ae8b60"
+  },
+  {
+    "id": 36,
+    "name": "Tantalite",
+    "product": "tantalum",
+    "family": "chemical",
+    "tier": 5,
+    "price": 60,
+    "color": "#877b9b"
+  },
+  {
+    "id": 37,
+    "name": "Magnesite",
+    "product": "magnesium",
+    "family": "chemical",
+    "tier": 3,
+    "price": 24,
+    "color": "#c9beac"
+  },
+  {
+    "id": 38,
+    "name": "Zircon",
+    "product": "zirconium",
+    "family": "chemical",
+    "tier": 4,
+    "price": 40,
+    "color": "#c99976"
+  },
+  {
+    "id": 39,
+    "name": "Native gold",
+    "product": "gold",
+    "family": "physical",
+    "tier": 2,
+    "price": 45,
+    "color": "#f0c34f"
+  },
+  {
+    "id": 40,
+    "name": "Silver ore",
+    "product": "silver",
+    "family": "sulfide",
+    "tier": 2,
+    "price": 30,
+    "color": "#c8d5dc"
+  },
+  {
+    "id": 41,
+    "name": "Platinum concentrate",
+    "product": "platinum",
+    "family": "trace",
+    "tier": 5,
+    "price": 80,
+    "color": "#c9c9e2"
+  },
+  {
+    "id": 42,
+    "name": "Spodumene",
+    "product": "lithium_carbonate",
+    "family": "chemical",
+    "tier": 3,
+    "price": 32,
+    "color": "#c2b5d9"
+  },
+  {
+    "id": 43,
+    "name": "Lepidolite",
+    "product": "lithium_carbonate",
+    "family": "chemical",
+    "tier": 3,
+    "price": 32,
+    "color": "#b689b9"
+  },
+  {
+    "id": 44,
+    "name": "Beryl",
+    "product": "beryllium",
+    "family": "chemical",
+    "tier": 4,
+    "price": 42,
+    "color": "#69c3a7"
+  },
+  {
+    "id": 45,
+    "name": "Borates",
+    "product": "borate",
+    "family": "chemical",
+    "tier": 3,
+    "price": 20,
+    "color": "#ddd3bc"
+  },
+  {
+    "id": 46,
+    "name": "Stibnite",
+    "product": "antimony",
+    "family": "chemical",
+    "tier": 3,
+    "price": 28,
+    "color": "#929fac"
+  },
+  {
+    "id": 47,
+    "name": "Bismuth ore",
+    "product": "bismuth",
+    "family": "trace",
+    "tier": 4,
+    "price": 38,
+    "color": "#b095c7"
+  },
+  {
+    "id": 48,
+    "name": "Garnet",
+    "product": "abrasive",
+    "family": "physical",
+    "tier": 2,
+    "price": 20,
+    "color": "#b45266"
+  },
+  {
+    "id": 49,
+    "name": "Corundum",
+    "product": "abrasive",
+    "family": "physical",
+    "tier": 3,
+    "price": 24,
+    "color": "#ae719f"
+  },
+  {
+    "id": 50,
+    "name": "Diamond rock",
+    "product": "diamond",
+    "family": "physical",
+    "tier": 5,
+    "price": 100,
+    "color": "#8ddedb"
+  },
+  {
+    "id": 51,
+    "name": "Gem pocket",
+    "product": "gems",
+    "family": "physical",
+    "tier": 3,
+    "price": 65,
+    "color": "#69c8b0"
+  },
+  {
+    "id": 52,
+    "name": "Pollucite",
+    "product": "cesium",
+    "family": "chemical",
+    "tier": 5,
+    "price": 60,
+    "color": "#c5b5da"
+  },
+  {
+    "id": 53,
+    "name": "Bastnaesite",
+    "product": "light_rare_earths",
+    "family": "trace",
+    "tier": 5,
+    "price": 65,
+    "color": "#c99e75"
+  },
+  {
+    "id": 54,
+    "name": "Monazite",
+    "product": "light_rare_earths",
+    "family": "trace",
+    "tier": 5,
+    "price": 65,
+    "color": "#b8a25b"
+  },
+  {
+    "id": 55,
+    "name": "Xenotime",
+    "product": "heavy_rare_earths",
+    "family": "trace",
+    "tier": 5,
+    "price": 75,
+    "color": "#bd9472"
+  }
+]

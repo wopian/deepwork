@@ -1,0 +1,17 @@
+name: Checks
+on: [push, pull_request]
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - uses: dtolnay/rust-toolchain@stable
+      - run: bun run check:runtime
+      - run: bun install --frozen-lockfile
+      - run: bun test
+      - run: ./scripts/check-no-node.ps1
+      - run: cargo test -p mine-core --locked
+      - run: cargo check -p deepwork --locked
