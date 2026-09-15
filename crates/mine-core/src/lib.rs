@@ -1,3 +1,4 @@
+pub mod logistics;
 pub mod terrain;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -69,6 +70,10 @@ pub struct Game {
     pub removed: Vec<Cell>,
     pub ore: BTreeMap<usize, u64>,
     pub hauled: BTreeMap<usize, u64>,
+    #[serde(default)]
+    pub shipments: Vec<logistics::Shipment>,
+    #[serde(default)]
+    pub crew: logistics::Crew,
     pub products: BTreeMap<String, u64>,
     pub tailings: BTreeMap<usize, u64>,
     pub slag: u64,
@@ -156,6 +161,8 @@ impl Game {
             removed: vec![],
             ore: BTreeMap::new(),
             hauled: BTreeMap::new(),
+            shipments: vec![],
+            crew: logistics::Crew::assign(3, &BTreeMap::new()),
             products: BTreeMap::new(),
             tailings: BTreeMap::new(),
             slag: 0,
@@ -264,11 +271,11 @@ impl Game {
                 *b = b.saturating_sub(1)
             }
         }
+        self.crew = logistics::Crew::assign(self.workers, &self.levels);
         let cap = 20000 + 5000 * self.level("capacity") as u64;
         let ore_total: u64 = self.ore.values().sum();
         let mut mined = 0;
-        let digs = ((self.workers as f64
-            * 0.65
+        let digs = ((self.crew.diggers as f64
             * self.throughput("drill")
             * (1. + 0.05 * self.ranks.get("excavation").copied().unwrap_or(0) as f64))
             * (if !offline && self.boosts[0] > 0 {
@@ -342,7 +349,12 @@ impl Game {
                 self.site_discoveries += 1;
             }
         }
+        logistics::arrive(&mut self.shipments, &mut self.hauled, cap);
+        let (transport, speed) = logistics::mode(&self.levels);
+        let route_depth = self.depth();
+        let duration = 2 + route_depth / speed;
         let haul_rate = (1000.
+            * self.crew.haulers as f64
             * self.throughput("conveyor")
             * (1. + 0.05 * self.ranks.get("logistics").copied().unwrap_or(0) as f64)
             * (if self.level("conveyor") > 0 { 3. } else { 1. })
@@ -351,11 +363,23 @@ impl Game {
             } else {
                 1.
             })) as u64;
-        let mut remaining = haul_rate.min(cap.saturating_sub(self.hauled.values().sum()));
+        let mut remaining = haul_rate.min(cap.saturating_sub(
+            self.hauled.values().sum::<u64>()
+                + self.shipments.iter().map(|s| s.amount).sum::<u64>(),
+        ));
         for (&id, q) in &mut self.ore {
             let n = (*q).min(remaining);
             *q -= n;
-            *self.hauled.entry(id).or_default() += n;
+            if n > 0 {
+                self.shipments.push(logistics::Shipment {
+                    material: id,
+                    amount: n,
+                    remaining: duration,
+                    duration,
+                    depth: route_depth,
+                    mode: transport.into(),
+                });
+            }
             remaining -= n;
         }
         let power_demand =
@@ -584,6 +608,10 @@ impl Game {
                     "supports",
                     "pump",
                     "ventilation",
+                    "wheelbarrow",
+                    "minecart",
+                    "train",
+                    "survey",
                 ];
                 if !allowed.contains(&a.target.as_str()) {
                     return Err("Unknown upgrade".into());
@@ -791,6 +819,16 @@ impl Game {
             return Err("Invalid terrain chunk".into());
         }
         let n = materials().len();
+        if self.shipments.len() > 20000
+            || self.shipments.iter().any(|s| {
+                s.material >= n
+                    || s.amount > 1_000_000_000_000
+                    || s.duration > 100000
+                    || s.remaining > s.duration
+            })
+        {
+            return Err("Invalid cargo shipment".into());
+        }
         if self
             .products
             .values()
@@ -902,6 +940,7 @@ mod accounting_tests {
             + g.products.values().sum::<u64>()
             + g.tailings.values().sum::<u64>()
             + g.sold_mass
+            + g.shipments.iter().map(|s| s.amount).sum::<u64>()
             + g.delivered_mass;
         assert_eq!(mass, g.excavated * 1000);
         assert!(g.removed.len() <= 512);

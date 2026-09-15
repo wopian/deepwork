@@ -20,6 +20,15 @@ export interface Game {
   policy: string;
   priorities: number[];
   reserve: Record<string, number>;
+  shipments: {
+    material: number;
+    amount: number;
+    remaining: number;
+    duration: number;
+    depth: number;
+    mode: string;
+  }[];
+  crew: Record<string, number>;
   heights: number[];
   terrain: { chunks: Record<string, number[]>; revision: number };
   removed: { x: number; y: number; material: number }[];
@@ -68,6 +77,10 @@ export function format(n: number | string) {
   }).format(v);
 }
 export const upgrades = [
+  ["wheelbarrow", "Wheelbarrow fleet", "Faster short-distance hauling.", 100],
+  ["minecart", "Minecart railway", "Move cargo through deep shafts.", 100],
+  ["train", "Powered trains", "Reduce deep cargo transit time.", 100],
+  ["survey", "Survey office", "Assign a dedicated prospector.", 100],
   ["supports", "Support workshop", "Support deep branching tunnels.", 100],
   ["pump", "Drainage pumps", "Clear groundwater below 700 m.", 100],
   ["ventilation", "Ventilation plant", "Manage heat below 1,500 m.", 100],

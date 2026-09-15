@@ -97,11 +97,19 @@ function draw() {
     rect(terrain, x - 4, 142, 54, 8, 0xe8dfc8);
     rect(terrain, x + 14, 165, 13, 23, 0x101820);
   }
-  rect(terrain, 213, 170, 478, 8, 0x8c9ba5);
+  if (!g || g.levels.conveyor) rect(terrain, 213, 170, 478, 8, 0x8c9ba5);
   for (let x = 216; x < 690; x += 28) {
     rect(terrain, x, 178, 4, 22, 0xa67548);
   }
-  for (let i = 0; i < 3; i++) {
+  for (
+    let i = 0;
+    i <
+    (g
+      ? ["furnace", "chemical", "electrolytic"].filter((k) => g.levels[k])
+          .length
+      : 3);
+    i++
+  ) {
     let x = 715 + i * 68;
     rect(terrain, x, 136, 48, 51, 0x8c9ba5);
     rect(terrain, x + 8, 143, 30, 34, 0x101820);
@@ -180,9 +188,21 @@ onMounted(async () => {
       rect(actors, x - 1, y - 5, 7, 5, 0xe5a34d);
       rect(actors, x + 5, y - 8, 5, 2, 0x8c9ba5);
     }
-    for (let i = 0; i < 22; i++) {
-      const x = 220 + ((i * 23 + t * 0.7) % 467);
-      rect(actors, x, 164, 5, 5, i % 3 ? 0xd8bc7d : 0x53ba88);
+    for (const cargo of g?.shipments ?? []) {
+      const progress = 1 - cargo.remaining / cargo.duration;
+      const x = 235 + 32 * 7 + progress * 240;
+      const y = 208 + (((1 - progress) * cargo.depth) / 2) * 7;
+      rect(
+        actors,
+        x,
+        y,
+        9,
+        5,
+        parseInt(materials[cargo.material].color.slice(1), 16),
+      );
+      if (cargo.mode === "minecart" || cargo.mode === "train") {
+        rect(actors, x - 2, y + 5, 13, 4, 0x8c9ba5);
+      }
     }
   });
 });
