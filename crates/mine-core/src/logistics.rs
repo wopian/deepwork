@@ -94,8 +94,8 @@ pub fn route(
     }
     let mut points: Vec<[i32; 2]> = path.iter().map(|p| [p[0] as i32, p[1] as i32]).collect();
     let exit = *points.last().unwrap();
-    points.push([exit[0], -3]);
-    points.push([72, -3]);
+    points.push([exit[0], -24]);
+    points.push([576, -24]);
     let level = |id: &str| levels.get(id).copied().unwrap_or(0);
     let mut legs = Vec::new();
     for pair in points.windows(2) {
@@ -117,7 +117,8 @@ pub fn route(
         } else {
             ("carrying", "", 10.)
         };
-        let distance = (from[0].abs_diff(to[0]) + from[1].abs_diff(to[1])) as f64 * 2.;
+        let distance = (from[0].abs_diff(to[0]) + from[1].abs_diff(to[1])) as f64
+            / crate::geometry::CELLS_PER_METRE as f64;
         let factor = if surface { 1. } else { terrain_factor };
         let milliseconds = (1000. * distance * factor
             / (speed * (1. + 0.12 * level(building) as f64)))

@@ -71,6 +71,8 @@ impl From<Game> for Snapshot {
 struct Stream {
     identity: Option<(String, u32, u64)>,
     chunks: std::collections::BTreeMap<u32, Vec<u8>>,
+    visible: std::collections::BTreeMap<u32, Vec<u8>>,
+    revealed: std::collections::BTreeMap<u32, Vec<u8>>,
 }
 impl Stream {
     fn update(&mut self, g: &Game) -> Update {
@@ -85,9 +87,19 @@ impl Stream {
                 .terrain
                 .chunks
                 .retain(|id, bytes| self.chunks.get(id) != Some(bytes));
+            state
+                .terrain
+                .visible
+                .retain(|id, bytes| self.visible.get(id) != Some(bytes));
+            state
+                .terrain
+                .revealed
+                .retain(|id, bytes| self.revealed.get(id) != Some(bytes));
         }
         self.identity = Some((g.campaign_id.clone(), g.site, g.seed));
         self.chunks = g.terrain.chunks.clone();
+        self.visible = g.terrain.visible.clone();
+        self.revealed = g.terrain.revealed.clone();
         Update {
             state: state.into(),
             reset,

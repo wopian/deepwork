@@ -51,7 +51,12 @@ export interface Game {
   support_rows: number;
   support_work: number;
   heights: number[];
-  terrain: { chunks: Record<string, number[]>; revision: number };
+  terrain: {
+    chunks: Record<string, number[]>;
+    revealed: Record<string, number[]>;
+    visible: Record<string, number[]>;
+    revision: number;
+  };
   removed: { x: number; y: number; material: number }[];
   ore: Record<string, number>;
   hauled: Record<string, number>;
@@ -167,10 +172,9 @@ export async function start() {
       if (state.value && state.value.campaign_id !== g.campaign_id) return;
       if (update.reset) terrainEpoch.value++;
       if (!update.reset && state.value?.site === g.site) {
-        g.terrain.chunks = {
-          ...state.value.terrain.chunks,
-          ...g.terrain.chunks,
-        };
+        for (const key of ["chunks", "revealed", "visible"] as const) {
+          g.terrain[key] = { ...state.value.terrain[key], ...g.terrain[key] };
+        }
       }
       state.value = g;
     };

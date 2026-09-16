@@ -92,24 +92,37 @@ pub fn sample(seed: u64, profile: usize, x: u32, y: u32, catalogue: &[Material])
             );
             let cx = gx * 256 + (key % 256) as i64;
             let cy = gy * 256 + ((key >> 8) % 256) as i64;
-            let candidates: Vec<_> = catalogue
-                .iter()
-                .filter(|m| m.id > 1 && m.tier <= tier(cy / 4))
-                .collect();
-            if candidates.is_empty() {
-                continue;
-            }
-            let focus: Vec<_> = candidates
-                .iter()
-                .copied()
-                .filter(|m| sites()[profile].focus.contains(&m.id))
-                .collect();
+            type Pools = Vec<Vec<(Vec<usize>, Vec<usize>)>>;
+            static POOLS: std::sync::OnceLock<Pools> = std::sync::OnceLock::new();
+            let pools = POOLS.get_or_init(|| {
+                sites()
+                    .iter()
+                    .map(|site| {
+                        (0..6)
+                            .map(|band| {
+                                let all: Vec<_> = catalogue
+                                    .iter()
+                                    .filter(|m| m.id > 1 && m.tier <= band)
+                                    .map(|m| m.id)
+                                    .collect();
+                                let focus = all
+                                    .iter()
+                                    .copied()
+                                    .filter(|id| site.focus.contains(id))
+                                    .collect();
+                                (all, focus)
+                            })
+                            .collect()
+                    })
+                    .collect()
+            });
+            let (candidates, focus) = &pools[profile][tier(cy / 4) as usize];
             let pool = if key & 3 == 0 && !focus.is_empty() {
-                &focus
+                focus
             } else {
-                &candidates
+                candidates
             };
-            let material = pool[((key >> 16) as usize) % pool.len()];
+            let material = &catalogue[pool[((key >> 16) as usize) % pool.len()]];
             let shape = if material.name.contains("coal")
                 || material.name.contains("salt")
                 || material.name.contains("Gypsum")

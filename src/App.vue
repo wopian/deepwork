@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import World from "./World.vue";
+import { RESOURCE_UNIT, CELLS_PER_METRE } from "./geometry";
 import upgradeRequirements from "../content/upgrades.json";
 import profiles from "../content/sites.json";
 import recipes from "../content/recipes.json";
@@ -86,7 +87,9 @@ async function retirementCancel() {
   if (await act("cancel_retirement")) showRetire.value = false;
 }
 const hideOffline = ref(false);
-const depth = computed(() => Math.max(...(state.value?.heights ?? [0])) * 2);
+const depth = computed(() =>
+  Math.floor(Math.max(...(state.value?.heights ?? [0])) / CELLS_PER_METRE),
+);
 const filtered = computed(() =>
   materials.filter((m) =>
     (m.name + " " + m.product)
@@ -278,8 +281,9 @@ onMounted(start);
             >
           </label>
           <p class="crew-roster" v-if="state?.levels.supports">
-            Automatic supports ready to {{ state.support_rows * 2 }} m.
-            Construction progress {{ Math.floor(state.support_work / 10) }}%.
+            Automatic supports ready to
+            {{ state.support_rows / CELLS_PER_METRE }} m. Construction progress
+            {{ Math.floor(state.support_work / 10) }}%.
           </p>
           <div class="policy">
             <span>EXCAVATION STRATEGY</span
@@ -437,8 +441,10 @@ onMounted(start);
             <span
               >{{ c.product }}
               <small
-                >{{ format((state?.products[c.product] ?? 0) / 1000) }} /
-                {{ c.amount / 1000 }} units</small
+                >{{
+                  format((state?.products[c.product] ?? 0) / RESOURCE_UNIT)
+                }}
+                / {{ c.amount / RESOURCE_UNIT }} units</small
               ></span
             ><button
               :disabled="
@@ -538,7 +544,7 @@ onMounted(start);
       <h2>Recoverable process residues</h2>
       <div class="mineral-grid">
         <div v-for="(qty, name) in state?.trace_feed" class="inventory">
-          {{ name }} · {{ format(qty / 1000) }} units
+          {{ name }} · {{ format(qty / RESOURCE_UNIT) }} units
         </div>
       </div>
       <h2>Next equipment purchase</h2>
@@ -566,8 +572,9 @@ onMounted(start);
       <h2>Stockpile reserves</h2>
       <div class="mineral-grid">
         <div v-for="(qty, product) in state?.products" class="inventory">
-          <strong>{{ product }} · {{ format(qty / 1000) }} units</strong
-          ><button @click="act('reserve', String(product), 10000)">
+          <strong
+            >{{ product }} · {{ format(qty / RESOURCE_UNIT) }} units</strong
+          ><button @click="act('reserve', String(product), 10 * RESOURCE_UNIT)">
             Keep 10</button
           ><button @click="act('reserve', String(product), 0)">
             Sell surplus

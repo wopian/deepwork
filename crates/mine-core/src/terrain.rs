@@ -1,14 +1,19 @@
 //! Sparse excavation masks. Each chunk covers 64 × 64 cells; solid geology is seeded.
+use crate::geometry::{bit_index, chunk_id, chunk_origin, CHUNKS_ACROSS};
+pub use crate::geometry::{MAX_ROWS, WIDTH};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
-pub const WIDTH: u32 = 64;
-pub const MAX_ROWS: u32 = 100_000;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Terrain {
     /// One bit per excavated cell, encoded as bytes to stay exact across JSON/JS.
     pub chunks: BTreeMap<u32, Vec<u8>>,
     pub revision: u64,
+    #[serde(default)]
+    pub revealed: BTreeMap<u32, Vec<u8>>,
+    /// 255 means unknown. This is the only mineral data sent to the renderer.
+    #[serde(default)]
+    pub visible: BTreeMap<u32, Vec<u8>>,
     #[serde(skip)]
     pub frontier: BTreeSet<u32>,
     /// (distance, parent); snapshots share this immutable cache without copying it.
@@ -20,6 +25,8 @@ impl Default for Terrain {
         Self {
             chunks: BTreeMap::new(),
             revision: 0,
+            revealed: BTreeMap::new(),
+            visible: BTreeMap::new(),
             frontier: (0..WIDTH).collect(),
             routes: Arc::default(),
         }
@@ -30,10 +37,45 @@ impl Terrain {
         if x >= WIDTH || y >= MAX_ROWS {
             return false;
         }
-        let index = ((y % 64) * 64 + x) as usize;
+        let index = bit_index(x, y);
         self.chunks
-            .get(&(y / 64))
+            .get(&chunk_id(x, y))
             .is_some_and(|bytes| bytes[index / 8] & (1 << (index % 8)) != 0)
+    }
+    pub fn is_revealed(&self, x: u32, y: u32) -> bool {
+        let index = bit_index(x, y);
+        self.revealed
+            .get(&chunk_id(x, y))
+            .is_some_and(|mask| mask[index / 8] & (1 << (index % 8)) != 0)
+    }
+    pub fn reveal(
+        &mut self,
+        seed: u64,
+        profile: usize,
+        x: u32,
+        y: u32,
+        radius: u32,
+        cat: &[crate::Material],
+    ) -> Vec<usize> {
+        let mut found = std::collections::BTreeSet::new();
+        for py in y.saturating_sub(radius)..=y.saturating_add(radius).min(MAX_ROWS - 1) {
+            for px in x.saturating_sub(radius)..=x.saturating_add(radius).min(WIDTH - 1) {
+                if px.abs_diff(x).pow(2) + py.abs_diff(y).pow(2) > radius.pow(2)
+                    || self.is_revealed(px, py)
+                {
+                    continue;
+                }
+                let id = chunk_id(px, py);
+                let index = bit_index(px, py);
+                self.revealed.entry(id).or_insert_with(|| vec![0; 512])[index / 8] |=
+                    1 << (index % 8);
+                let material = crate::geology::sample(seed, profile, px, py, cat);
+                self.visible.entry(id).or_insert_with(|| vec![255; 4096])[index] = material as u8;
+                found.insert(material);
+                self.revision += 1;
+            }
+        }
+        found.into_iter().collect()
     }
     pub fn neighbors(x: u32, y: u32) -> impl Iterator<Item = (u32, u32)> {
         [
@@ -50,8 +92,11 @@ impl Terrain {
         if x >= WIDTH || y >= MAX_ROWS || !self.frontier.remove(&key) {
             return false;
         }
-        let index = ((y % 64) * 64 + x) as usize;
-        let bytes = self.chunks.entry(y / 64).or_insert_with(|| vec![0; 512]);
+        let index = bit_index(x, y);
+        let bytes = self
+            .chunks
+            .entry(chunk_id(x, y))
+            .or_insert_with(|| vec![0; 512]);
         bytes[index / 8] |= 1 << (index % 8);
         for (nx, ny) in Self::neighbors(x, y) {
             if !self.contains(nx, ny) {
@@ -79,7 +124,7 @@ impl Terrain {
         if self
             .chunks
             .iter()
-            .any(|(id, v)| *id >= (MAX_ROWS + 63) / 64 || v.len() != 512)
+            .any(|(id, v)| *id >= (MAX_ROWS + 63) / 64 * CHUNKS_ACROSS || v.len() != 512)
         {
             return Err("Invalid terrain chunk".into());
         }
@@ -90,8 +135,9 @@ impl Terrain {
                 for bit in 0..8 {
                     if byte & (1 << bit) != 0 {
                         let index = i * 8 + bit;
-                        let x = (index % 64) as u32;
-                        let y = chunk * 64 + (index / 64) as u32;
+                        let (cx, cy) = chunk_origin(chunk);
+                        let x = cx + (index % 64) as u32;
+                        let y = cy + (index / 64) as u32;
                         if y >= MAX_ROWS {
                             return Err("Terrain exceeds supported depth".into());
                         }
@@ -256,5 +302,31 @@ mod tests {
         for (x, h) in heights.iter().enumerate() {
             assert!(!t.contains(x as u32, *h));
         }
+    }
+}
+
+#[cfg(test)]
+mod reveal_tests {
+    use super::*;
+    #[test]
+    fn reveal_crosses_chunks_and_does_not_leak_hidden_materials() {
+        let mut t = Terrain::default();
+        assert!(t.visible.is_empty());
+        t.reveal(42, 0, 64, 64, 4, &crate::materials());
+        assert!(t.revealed.len() >= 3);
+        assert!(t.is_revealed(63, 64) && t.is_revealed(65, 64));
+        assert!(!t.is_revealed(69, 64));
+        for (&id, pixels) in &t.visible {
+            let (cx, cy) = chunk_origin(id);
+            for (index, &material) in pixels.iter().enumerate() {
+                assert_eq!(
+                    material != 255,
+                    t.is_revealed(cx + index as u32 % 64, cy + index as u32 / 64)
+                );
+            }
+        }
+        let encoded = serde_json::to_string(&t).unwrap();
+        let restored: Terrain = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(restored.visible, t.visible);
     }
 }

@@ -5,13 +5,15 @@ import { Application, Graphics, Text, Container } from "pixi.js";
 import "pixi.js/unsafe-eval";
 import { state, materials, terrainEpoch, format } from "./game";
 import { WasteParticles } from "./waste";
-import profiles from "../content/sites.json";
+import { TerrainView } from "./terrain-view";
+import { CELL_PIXEL, RESOURCE_UNIT } from "./geometry";
 import { routePosition, cargoPosition } from "./routes";
 import { preferences, productionAudio } from "./preferences";
 const host = ref<HTMLDivElement>();
 let app: Application | undefined;
 let world: Container;
 let terrain: Graphics;
+const fineTerrain = new TerrainView();
 let actors: Graphics;
 let wasteLabel: Text;
 let t = 0;
@@ -47,11 +49,13 @@ function draw() {
   const W = 1100;
   const first = Math.max(
     0,
-    Math.floor(-offsetY / ((app.screen.width / 1100) * zoom) / 7) - 30,
+    Math.floor(-offsetY / ((app.screen.width / 1100) * zoom) / CELL_PIXEL) - 30,
   );
   const last =
     first +
-    Math.ceil(app.screen.height / ((app.screen.width / 1100) * zoom) / 7) +
+    Math.ceil(
+      app.screen.height / ((app.screen.width / 1100) * zoom) / CELL_PIXEL,
+    ) +
     32;
   const stored = g
     ? Object.values(g.tailings).reduce((a, b) => a + b, 0) + g.slag + g.depleted
@@ -67,97 +71,16 @@ function draw() {
     first,
     last,
     Math.floor(stored / 3000),
-    Math.floor((g?.lifetime_waste ?? 0) / 1000),
+    Math.floor((g?.lifetime_waste ?? 0) / RESOURCE_UNIT),
     JSON.stringify(g?.levels),
   ].join(":");
   if (key === drawnKey) return;
   drawnKey = key;
   terrain.clear();
-  const pools = Array.from({ length: 6 }, (_, tier) => [
-    ...materials.filter((m) => m.tier <= tier),
-    ...materials.filter(
-      (m) => m.tier <= tier && profiles[g?.profile ?? 0].focus.includes(m.id),
-    ),
-  ]);
-  rect(terrain, 0, 190, W, (last + 5) * 7, 0x806044);
+  rect(terrain, 0, 190, W, (last + 5) * CELL_PIXEL, 0x806044);
   rect(terrain, 0, 188, W, 8, 0x6b8f47);
   rect(terrain, 0, 196, W, 12, 0xd8bc7d);
-  for (let x = 0; x < 64; x++) {
-    const h = g?.heights[x] ?? Math.floor(12 * Math.sin((x / 64) * Math.PI));
-    for (let y = first; y < last; y++) {
-      const mask = g?.terrain.chunks[Math.floor(y / 64)];
-      const index = (y % 64) * 64 + x;
-      const open = g ? !!(mask && mask[index >> 3] & (1 << index % 8)) : y < h;
-      if (open) {
-        rect(terrain, 235 + x * 7, 208 + y * 7, 7, 7, 0x101820);
-        continue;
-      }
-      const hash = BigInt.asUintN(
-        64,
-        (BigInt(g?.seed ?? 73429) +
-          BigInt(Math.floor(x / 4)) * 374761393n +
-          BigInt(Math.floor(y / 3)) * 668265263n) *
-          1274126177n,
-      );
-      const tier =
-        y * 2 < 100
-          ? 0
-          : y * 2 < 300
-            ? 1
-            : y * 2 < 700
-              ? 2
-              : y * 2 < 1500
-                ? 3
-                : y * 2 < 3000
-                  ? 4
-                  : 5;
-      const pool = pools[tier];
-      const id =
-        x >= 30 && x <= 34 && y % 24 < 3
-          ? [3, 5, 6][Math.floor(y / 24) % 3]
-          : hash % 100n < 55n
-            ? y < 4
-              ? 0
-              : 1
-            : pool[Number((hash >> 8n) % BigInt(pool.length))].id;
-      if (id > 1) {
-        const m = materials[id];
-        rect(
-          terrain,
-          235 + x * 7,
-          208 + y * 7,
-          6,
-          6,
-          parseInt(m.color.slice(1), 16),
-        );
-        // Shape marks distinguish deposits without relying only on hue.
-        if (id % 3 === 0)
-          rect(terrain, 235 + x * 7 + 2, 208 + y * 7, 1, 6, 0x101820);
-        else if (id % 3 === 1)
-          rect(terrain, 235 + x * 7 + 2, 208 + y * 7 + 2, 2, 2, 0x101820);
-        else rect(terrain, 235 + x * 7, 208 + y * 7 + 3, 6, 1, 0x101820);
-      } else if (hash % 9n === 0n) {
-        rect(terrain, 235 + x * 7, 208 + y * 7, 3, 2, 0x9d7751);
-      }
-    }
-  }
-  if (g?.levels.supports) {
-    for (
-      let y = Math.max(first, 150);
-      y < Math.min(last, g.support_rows);
-      y++
-    ) {
-      if (y % 12 !== 0) continue;
-      for (let x = 31; x <= 33; x++) {
-        const index = (y % 64) * 64 + x,
-          mask = g.terrain.chunks[Math.floor(y / 64)];
-        if (mask && mask[index >> 3] & (1 << index % 8)) {
-          rect(terrain, 235 + x * 7, 208 + y * 7, 7, 1, 0xa67548);
-          rect(terrain, 235 + x * 7, 208 + y * 7, 1, 7, 0xa67548);
-        }
-      }
-    }
-  }
+  fineTerrain.update(g?.terrain, first, last);
   // Fixed district slots grow upward, keeping routes and touch camera targets stable.
   const levels = g?.levels ?? {
     conveyor: 10,
@@ -267,12 +190,15 @@ function draw() {
   const storedWaste = g
     ? Object.values(g.tailings).reduce((a, b) => a + b, 0) + g.slag + g.depleted
     : 0;
-  wasteLabel.text = `LIFETIME ${format((g?.lifetime_waste ?? 0) / 1000)} units`;
+  wasteLabel.text = `LIFETIME ${format((g?.lifetime_waste ?? 0) / RESOURCE_UNIT)} units`;
   // Older spoil uses a bounded stack of coarse bands, independent of resource ledgers.
-  const strata = Math.min(12, Math.floor(Math.log2(1 + storedWaste / 1000)));
+  const strata = Math.min(
+    12,
+    Math.floor(Math.log2(1 + storedWaste / RESOURCE_UNIT)),
+  );
   for (let band = 0; band < strata; band++)
     rect(terrain, 925, 208 + band * 7, 150, 6, band % 2 ? 0x806044 : 0x8c9ba5);
-  const waste = Math.min(64, 12 + storedWaste / 3000);
+  const waste = Math.min(64, 12 + storedWaste / (3 * RESOURCE_UNIT));
   for (let i = 0; i < 18; i++) {
     let h = Math.max(0, waste - Math.abs(i - 9) * 4);
     rect(terrain, 939 + i * 7, 190 - h, 7, h, 0x8c9ba5);
@@ -296,7 +222,7 @@ onMounted(async () => {
   world = new Container();
   terrain = new Graphics();
   actors = new Graphics();
-  world.addChild(terrain, actors);
+  world.addChild(terrain, fineTerrain.layer, actors);
   app.stage.addChild(world);
   wasteLabel = new Text({
     text: "",
@@ -332,14 +258,16 @@ onMounted(async () => {
       const cell = state.value.removed[state.value.removed.length - 1]!;
       offsetX =
         app.screen.width / 2 -
-        (((235 + cell.x * 7) * app.screen.width) / 1100) * zoom;
+        (((235 + cell.x * CELL_PIXEL) * app.screen.width) / 1100) * zoom;
       offsetY =
         app.screen.height / 2 -
-        (((208 + cell.y * 7) * app.screen.width) / 1100) * zoom;
+        (((208 + cell.y * CELL_PIXEL) * app.screen.width) / 1100) * zoom;
     } else if (follow) {
       offsetY =
         80 -
-        ((Math.max(...(state.value?.heights ?? [0])) * 7 * app.screen.width) /
+        ((Math.max(...(state.value?.heights ?? [0])) *
+          CELL_PIXEL *
+          app.screen.width) /
           1100) *
           zoom;
     }
@@ -357,6 +285,8 @@ onMounted(async () => {
     if (g) {
       if (lastCampaign !== g.campaign_id) {
         lastCampaign = g.campaign_id;
+        fineTerrain.clear();
+        drawnKey = "";
         offsetX = 0;
         offsetY = 0;
         follow = false;
@@ -395,15 +325,15 @@ onMounted(async () => {
               )
             ];
           if (cell) {
-            x = 235 + cell.x * 7;
-            y = 208 + cell.y * 7 + 7;
+            x = 235 + cell.x * CELL_PIXEL;
+            y = 208 + cell.y * CELL_PIXEL + 7;
           }
         } else if (role === "haulers") {
           const cargo = g?.shipments[i % Math.max(1, g.shipments.length)];
           if (cargo?.path.length) {
             const points: [number, number][] = cargo.path.map(([px, py]) => [
-              235 + px * 7,
-              208 + py * 7 + 7,
+              235 + px * CELL_PIXEL,
+              208 + py * CELL_PIXEL + 7,
             ]);
             [x, y] = routePosition(
               points,
@@ -449,15 +379,18 @@ onMounted(async () => {
     for (const cargo of g?.shipments ?? []) {
       const progress = 1 - cargo.remaining / cargo.duration;
       const points: [number, number][] = cargo.path?.length
-        ? cargo.path.map(([x, y]) => [235 + x * 7, 208 + y * 7])
-        : [[459, 208 + (cargo.depth / 2) * 7]];
+        ? cargo.path.map(([x, y]) => [
+            235 + x * CELL_PIXEL,
+            208 + y * CELL_PIXEL,
+          ])
+        : [[459, 208 + cargo.depth * 4 * CELL_PIXEL]];
       points.push([points[points.length - 1]![0], 185], [735, 185]);
       const leg = cargoPosition(
         cargo.legs ?? [],
         cargo.duration - cargo.remaining,
       );
       const [x, y] = leg
-        ? [235 + leg.point[0] * 7, 208 + leg.point[1] * 7]
+        ? [235 + leg.point[0] * CELL_PIXEL, 208 + leg.point[1] * CELL_PIXEL]
         : routePosition(points, progress);
       const mode = leg?.mode ?? cargo.mode;
       rect(
@@ -479,6 +412,7 @@ onMounted(async () => {
   });
 });
 onBeforeUnmount(() => {
+  fineTerrain.clear();
   productionAudio(0);
   stopWatch();
   app?.destroy(true, { children: true });

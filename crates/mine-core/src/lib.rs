@@ -3,10 +3,11 @@ pub mod geology;
 pub mod geometry;
 pub mod logistics;
 pub mod terrain;
+pub use geometry::WIDTH;
+use geometry::{CELL_MASS, UNITS};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-pub const WIDTH: u32 = 64;
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 /// Deterministic fractional throughput without storing idle production credit.
 /// `rate` is thousandths of one work unit per tick; no multiplication by full age.
 fn work_budget(rate: u64, tick: u64) -> u64 {
@@ -38,7 +39,15 @@ pub struct Recipe {
 pub fn recipes() -> &'static [Recipe] {
     static CONTENT: std::sync::OnceLock<Vec<Recipe>> = std::sync::OnceLock::new();
     CONTENT.get_or_init(|| {
-        serde_json::from_str(include_str!("../../../content/recipes.json")).expect("valid recipes")
+        let mut entries: Vec<Recipe> =
+            serde_json::from_str(include_str!("../../../content/recipes.json"))
+                .expect("valid recipes");
+        for recipe in &mut entries {
+            for amount in recipe.inputs.values_mut() {
+                *amount *= 64;
+            }
+        }
+        entries
     })
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -76,8 +85,15 @@ pub struct UpgradeRequirement {
 pub fn requirements() -> &'static [UpgradeRequirement] {
     static DATA: std::sync::OnceLock<Vec<UpgradeRequirement>> = std::sync::OnceLock::new();
     DATA.get_or_init(|| {
-        serde_json::from_str(include_str!("../../../content/upgrades.json"))
-            .expect("valid upgrade requirements")
+        let mut entries: Vec<UpgradeRequirement> =
+            serde_json::from_str(include_str!("../../../content/upgrades.json"))
+                .expect("valid upgrade requirements");
+        for entry in &mut entries {
+            for amount in entry.inputs.values_mut() {
+                *amount *= 64;
+            }
+        }
+        entries
     })
 }
 pub fn materials() -> Vec<Material> {
@@ -109,6 +125,7 @@ pub struct Record {
 pub struct Game {
     pub version: u32,
     pub campaign_id: String,
+    pub generator_version: u32,
     #[serde(skip)]
     pub legacy_pending: bool,
     #[serde(with = "decimal")]
@@ -263,6 +280,7 @@ impl Game {
         Self {
             version: VERSION,
             campaign_id: format!("{seed:016x}-{site}"),
+            generator_version: geometry::GENERATOR_VERSION,
             legacy_pending: false,
             seed,
             site,
@@ -280,7 +298,7 @@ impl Game {
             priorities: vec![],
             reserve: BTreeMap::new(),
             pinned: None,
-            heights: vec![0; 64],
+            heights: vec![0; WIDTH as usize],
             terrain: terrain::Terrain::default(),
             removed: vec![],
             ore: BTreeMap::new(),
@@ -294,7 +312,7 @@ impl Game {
             crew: logistics::Crew::assign(3, &BTreeMap::new()),
             crew_priority: String::new(),
             cargo_policy: String::new(),
-            support_rows: 150,
+            support_rows: 1200,
             support_work: 0,
             products: BTreeMap::new(),
             tailings: BTreeMap::new(),
@@ -311,17 +329,17 @@ impl Game {
             contracts: vec![
                 Contract {
                     product: "iron".into(),
-                    amount: 2000,
+                    amount: 2 * UNITS,
                     complete: false,
                 },
                 Contract {
                     product: "copper".into(),
-                    amount: 2000,
+                    amount: 2 * UNITS,
                     complete: false,
                 },
                 Contract {
                     product: "steel".into(),
-                    amount: 1000,
+                    amount: UNITS,
                     complete: false,
                 },
             ],
@@ -349,7 +367,7 @@ impl Game {
         *self.levels.get(k).unwrap_or(&0)
     }
     pub fn depth(&self) -> u32 {
-        self.heights.iter().max().copied().unwrap_or(0) * 2
+        geometry::depth(self.heights.iter().max().copied().unwrap_or(0))
     }
     pub fn cost(&self, k: &str) -> u64 {
         let (base, growth, n): (f64, f64, u32) = if k == "worker" {
@@ -393,7 +411,7 @@ impl Game {
             .iter()
             .find(|(p, n)| self.products.get(*p).copied().unwrap_or(0) < **n)
         {
-            return Some(format!("Needs {} {}", *n as f64 / 1000., p));
+            return Some(format!("Needs {} {}", *n as f64 / UNITS as f64, p));
         }
         if self.credits < self.cost(id) {
             return Some("More credits required".into());
@@ -420,7 +438,7 @@ impl Game {
                 + 3. * self.level("trace") as f64))
             .min(1.);
         [
-            self.dig_rate(true) as f64 / 1000.,
+            self.dig_rate(true) as f64 / UNITS as f64,
             haul,
             2. * self.throughput("sorter"),
             2. * self.throughput("furnace")
@@ -496,32 +514,7 @@ impl Game {
             + 5 * self.site_objectives.len() as u64
     }
     pub fn cell(&self, x: u32, y: u32, cat: &[Material]) -> usize {
-        if (30..=34).contains(&x) && y % 24 < 3 {
-            return [3, 5, 6][((y / 24) % 3) as usize];
-        }
-        let h = (self
-            .seed
-            .wrapping_add((x / 4) as u64 * 374761393)
-            .wrapping_add((y / 3) as u64 * 668265263))
-        .wrapping_mul(1274126177);
-        if h % 100 < 55 {
-            return if y < 4 { 0 } else { 1 };
-        }
-        let tier = match y * 2 {
-            0..=99 => 0,
-            100..=299 => 1,
-            300..=699 => 2,
-            700..=1499 => 3,
-            1500..=2999 => 4,
-            _ => 5,
-        };
-        let mut pool: Vec<_> = cat.iter().filter(|m| m.tier <= tier).collect();
-        let profile = &sites()[self.profile];
-        pool.extend(
-            cat.iter()
-                .filter(|m| m.tier <= tier && profile.focus.contains(&m.id)),
-        );
-        pool[((h >> 8) as usize) % pool.len()].id
+        geology::sample(self.seed, self.profile, x, y, cat)
     }
     pub fn rock_work(&self) -> f64 {
         let depth = self.depth();
@@ -556,11 +549,11 @@ impl Game {
             } else {
                 1.
             }))
-            * 1000.) as u64
+            * 64000.) as u64
     }
     fn next_frontier(&self, cat: &[Material]) -> Option<u32> {
         let depth_limit = if self.level("shaft") == 0 {
-            100
+            48
         } else {
             300 * (1 + self.level("shaft"))
         };
@@ -569,33 +562,54 @@ impl Game {
             .iter()
             .filter_map(|&key| {
                 let (x, y) = (key % WIDTH, key / WIDTH);
-                if y * 2 >= depth_limit {
+                if geometry::depth(y) >= depth_limit {
                     return None;
                 }
-                // Below the open pit, create a main shaft with branches every 12 rows.
-                if self.policy != "bulk" && y >= 24 && x.abs_diff(32) > 1 && y % 12 > 1 {
-                    return None;
-                }
-                if y >= 150 && (self.level("supports") == 0 || y >= self.support_rows) {
-                    return None;
-                }
-                if y >= 350 && self.level("pump") == 0 {
-                    return None;
-                }
-                if y >= 750 && self.level("ventilation") == 0 {
-                    return None;
-                }
-                let score = match self.policy.as_str() {
-                    "depth" => -(y as i64) * 8 + x.abs_diff(32) as i64,
-                    "vein" => {
-                        y as i64
-                            - if self.priorities.contains(&self.cell(x, y, cat)) {
-                                40
-                            } else {
-                                0
-                            }
+                let surface = y < 192;
+                if surface {
+                    let margin = 16 + (y / 24) * 24;
+                    if x < margin || x >= WIDTH - margin {
+                        return None;
                     }
-                    _ => y as i64,
+                } else {
+                    let shaft = x.abs_diff(WIDTH / 2) < 4;
+                    let drive = y % 96 < 8 && (32..WIDTH - 32).contains(&x);
+                    let stope = self.policy == "vein"
+                        && y % 96 < 24
+                        && x % 64 < 48
+                        && self.terrain.is_revealed(x, y)
+                        && self.priorities.contains(&self.cell(x, y, cat));
+                    if !shaft && !drive && !stope {
+                        return None;
+                    }
+                }
+                if y >= 1200 && (self.level("supports") == 0 || y >= self.support_rows) {
+                    return None;
+                }
+                if y >= 2800 && self.level("pump") == 0 {
+                    return None;
+                }
+                if y >= 6000 && self.level("ventilation") == 0 {
+                    return None;
+                }
+                // Bench completion outranks depth preference. Unknown rock never informs ore targeting.
+                let score = if surface {
+                    y as i64 * 1024 + x.abs_diff(WIDTH / 2) as i64
+                } else {
+                    match self.policy.as_str() {
+                        "depth" => -(y as i64) * 8 + x.abs_diff(WIDTH / 2) as i64,
+                        "vein" => {
+                            y as i64
+                                - if self.terrain.is_revealed(x, y)
+                                    && self.priorities.contains(&self.cell(x, y, cat))
+                                {
+                                    160
+                                } else {
+                                    0
+                                }
+                        }
+                        _ => y as i64,
+                    }
                 };
                 Some((score, key))
             })
@@ -655,13 +669,13 @@ impl Game {
         })
     }
     fn support_target(&self) -> u32 {
-        (self.heights.iter().copied().max().unwrap_or(0).max(150) + 1).min(terrain::MAX_ROWS)
+        (self.heights.iter().copied().max().unwrap_or(0).max(1200) + 1).min(terrain::MAX_ROWS)
     }
     fn construction(&mut self) {
         let target = self.support_target();
         if self.level("supports") > 0 && self.support_rows < target {
             self.support_work +=
-                (10. * self.crew.engineers.max(1) as f64 * self.throughput("supports")) as u64;
+                (80. * self.crew.engineers.max(1) as f64 * self.throughput("supports")) as u64;
             self.support_rows = (self.support_rows + (self.support_work / 1000) as u32).min(target);
             self.support_work %= 1000;
         }
@@ -688,21 +702,18 @@ impl Game {
         self.crew = logistics::Crew::prioritise(self.workers, &self.levels, &self.crew_priority);
         self.construction();
         if self.ticks % 1200 == 0 && self.level("survey") > 0 {
-            let candidates: Vec<_> = self
-                .terrain
-                .frontier
-                .iter()
-                .rev()
-                .take(self.crew.prospectors as usize)
-                .map(|key| self.cell(key % WIDTH, key / WIDTH, cat))
-                .collect();
-            for id in candidates {
+            let (x, y) = self
+                .removed
+                .last()
+                .map(|c| (c.x, c.y))
+                .unwrap_or((WIDTH / 2, 0));
+            for id in self.terrain.reveal(self.seed, self.profile, x, y, 16, &cat) {
                 if self.discoveries.insert(id) {
                     self.site_discoveries += 1;
                 }
             }
         }
-        let cap = 20000 + 5000 * self.level("capacity") as u64;
+        let cap = 20 * UNITS + 5 * UNITS * self.level("capacity") as u64;
         let ore_total: u64 = self.ore.values().sum();
         let mut mined = 0;
         let dig_rate = self.dig_rate(offline);
@@ -716,8 +727,8 @@ impl Game {
         } else {
             300 * (1 + self.level("shaft"))
         };
-        for _ in 0..digs.min(200) {
-            if ore_total + (mined + 1) * 1000 > cap {
+        for _ in 0..digs.min(12800) {
+            if ore_total + (mined + 1) * CELL_MASS > cap {
                 break;
             }
             let target = self.next_frontier(cat);
@@ -732,7 +743,8 @@ impl Game {
             if self.removed.len() > 512 {
                 self.removed.drain(..256);
             }
-            *self.ore.entry(id).or_default() += 1000;
+            *self.ore.entry(id).or_default() += CELL_MASS;
+            self.terrain.reveal(self.seed, self.profile, x, y, 1, cat);
             self.excavated += 1;
             mined += 1;
             if self.discoveries.insert(id) {
@@ -761,7 +773,7 @@ impl Game {
             1.
         } / sites()[self.profile].haul;
         let (legs, duration) = logistics::route(&self.haul_path, &self.levels, terrain_factor);
-        let haul_rate = (1000.
+        let haul_rate = (UNITS as f64
             * self.crew.haulers as f64
             * if !offline && self.boosts[0] > 0 && matches!(transport, "carrying" | "wheelbarrow") {
                 1.5
@@ -812,7 +824,7 @@ impl Game {
             }
             remaining -= n;
         }
-        let sort_rate = (2000. * self.throughput("sorter")) as u64 / 20;
+        let sort_rate = (2. * UNITS as f64 * self.throughput("sorter")) as u64 / 20;
         let mut sort_left = sort_rate.min(cap.saturating_sub(self.concentrate.values().sum()));
         let sort_budget = sort_left;
         let mut sort_ids: Vec<_> = self
@@ -851,7 +863,7 @@ impl Game {
             } else {
                 1.
             }
-            * 2000.
+            * (2. * UNITS as f64)
             * self.throughput("furnace")
             * (1. + 0.15 * self.crew.operators.saturating_sub(1) as f64)
             * (1. + 0.05 * self.ranks.get("metallurgy").copied().unwrap_or(0) as f64)
@@ -890,8 +902,8 @@ impl Game {
             left -= n;
             if !unlocked {
                 self.credit_fraction += n * m.price;
-                self.credits += self.credit_fraction / 2000;
-                self.credit_fraction %= 2000;
+                self.credits += self.credit_fraction / (2 * UNITS);
+                self.credit_fraction %= 2 * UNITS;
                 self.sold_mass += n;
                 continue;
             }
@@ -952,7 +964,7 @@ impl Game {
             if recipe.id.starts_with("separate_") {
                 let source = format!("{}_residue", recipe.output);
                 let available = self.trace_feed.entry(source).or_default();
-                let amount = (*available).min(recipe_budget);
+                let amount = (*available).min(recipe_budget * 64);
                 *available -= amount;
                 if amount > 0 {
                     self.collection.insert(recipe.output.clone());
@@ -1006,7 +1018,7 @@ impl Game {
                         + u64::from(self.ticks % 20 == 0)
                             * self.ranks.get("reclamation").copied().unwrap_or(0) as u64,
                 );
-                let n = (n * multiplier).min(*q).min(recovery_space);
+                let n = (n * multiplier * 64).min(*q).min(recovery_space);
                 recovery_space -= n;
                 *q -= n;
                 *self.hauled.entry(id).or_default() += n;
@@ -1025,7 +1037,7 @@ impl Game {
                 .get(p)
                 .copied()
                 .unwrap_or(0)
-                .max(if recipe_hold { 8000 } else { 0 })
+                .max(if recipe_hold { 8 * UNITS } else { 0 })
                 .max(
                     self.pinned
                         .as_ref()
@@ -1049,25 +1061,27 @@ impl Game {
                 .map(|m| m.price)
                 .unwrap_or(20);
             self.credit_fraction += sold * price * 2;
-            self.credits = self.credits.saturating_add(self.credit_fraction / 2000);
-            self.credit_fraction %= 2000;
+            self.credits = self
+                .credits
+                .saturating_add(self.credit_fraction / (2 * UNITS));
+            self.credit_fraction %= 2 * UNITS;
         }
-        let disposed = self.depleted.min(5);
+        let disposed = self.depleted.min(320);
         self.depleted -= disposed;
         self.disposed_mass += disposed;
         if self.level("slagcrusher") > 0 {
             let reclaimed =
                 self.slag
                     .min(if self.specialisation.as_deref() == Some("reclamation") {
-                        75
+                        4800
                     } else {
-                        25
+                        1600
                     });
             self.slag -= reclaimed;
             *self.products.entry("aggregate".into()).or_default() += reclaimed;
         }
         for (i, n) in [
-            mined * 1000,
+            mined * CELL_MASS,
             haul_budget - remaining,
             sorted,
             process_rate - left,
@@ -1120,7 +1134,7 @@ impl Game {
         self.stages = vec![
             Stage {
                 name: "Digging".into(),
-                rate: self.flow_window[0] as f64 / 1000. / seconds,
+                rate: self.flow_window[0] as f64 / UNITS as f64 / seconds,
                 buffer: self.ore.values().sum(),
                 capacity: cap,
                 blocker: if self.depth() >= depth_limit {
@@ -1136,7 +1150,7 @@ impl Game {
                     && self.depth() >= 300
                 {
                     "Building supports"
-                } else if ore_total + 1000 > cap {
+                } else if ore_total + CELL_MASS > cap {
                     "Hauling buffer full"
                 } else {
                     "Working"
@@ -1145,7 +1159,7 @@ impl Game {
             },
             Stage {
                 name: "Hauling".into(),
-                rate: self.flow_window[1] as f64 / 1000. / seconds,
+                rate: self.flow_window[1] as f64 / UNITS as f64 / seconds,
                 buffer: self.hauled.values().sum::<u64>()
                     + self.shipments.iter().map(|s| s.amount).sum::<u64>(),
                 capacity: cap,
@@ -1160,7 +1174,7 @@ impl Game {
             },
             Stage {
                 name: "Sorting".into(),
-                rate: self.flow_window[2] as f64 / 1000. / seconds,
+                rate: self.flow_window[2] as f64 / UNITS as f64 / seconds,
                 buffer: self.concentrate.values().sum(),
                 capacity: cap,
                 blocker: if sort_budget == 0 {
@@ -1174,7 +1188,7 @@ impl Game {
             },
             Stage {
                 name: "Refining".into(),
-                rate: self.flow_window[3] as f64 / 1000. / seconds,
+                rate: self.flow_window[3] as f64 / UNITS as f64 / seconds,
                 buffer: self.products.values().sum(),
                 capacity: cap,
                 blocker: if power_factor < 1. {
@@ -1188,7 +1202,7 @@ impl Game {
             },
             Stage {
                 name: "Dispatch".into(),
-                rate: self.flow_window[4] as f64 / 1000. / seconds,
+                rate: self.flow_window[4] as f64 / UNITS as f64 / seconds,
                 buffer: 0,
                 capacity: cap,
                 blocker: "Selling surplus".into(),
@@ -1411,10 +1425,10 @@ impl Game {
                     return Err("Project already complete".into());
                 }
                 let needs = [
-                    ("advanced_structure", 10000),
-                    ("precision_controls", 10000),
-                    ("magnets", 10000),
-                    ("batteries", 10000),
+                    ("advanced_structure", 10 * UNITS),
+                    ("precision_controls", 10 * UNITS),
+                    ("magnets", 10 * UNITS),
+                    ("batteries", 10 * UNITS),
                 ];
                 if needs
                     .iter()
@@ -1443,7 +1457,13 @@ impl Game {
                 } else {
                     self.policy = "vein".into();
                     let cat = materials();
-                    let id = self.cell(32, self.heights[32], &cat);
+                    let (x, y) = self
+                        .removed
+                        .last()
+                        .map(|c| (c.x, c.y))
+                        .unwrap_or((WIDTH / 2, 0));
+                    let found = self.terrain.reveal(self.seed, self.profile, x, y, 64, &cat);
+                    let id = found.into_iter().find(|id| *id > 1).unwrap_or(1);
                     if self.discoveries.insert(id) {
                         self.site_discoveries += 1;
                     }
@@ -1470,8 +1490,8 @@ impl Game {
                     .unwrap_or(20);
                 let reward = c.amount * price * 5 / 2;
                 self.credit_fraction += reward;
-                self.credits += self.credit_fraction / 2000;
-                self.credit_fraction %= 2000;
+                self.credits += self.credit_fraction / (2 * UNITS);
+                self.credit_fraction %= 2 * UNITS;
                 self.contracts[index].complete = true;
                 self.site_objectives.insert(format!("order-{index}"));
                 if self.milestones.insert(format!("delivery-{}", c.product)) {
@@ -1504,7 +1524,7 @@ impl Game {
                 };
                 self.contracts[index] = Contract {
                     product,
-                    amount: old.amount.saturating_add(1000).min(20000),
+                    amount: old.amount.saturating_add(UNITS).min(20 * UNITS),
                     complete: false,
                 };
             }
@@ -1556,7 +1576,7 @@ impl Game {
                 for y in 0..64 {
                     for x in 0..64 {
                         section[(y * 64 + x) as usize] =
-                            u8::from(self.terrain.contains(x, y * rows / 64));
+                            u8::from(self.terrain.contains(x * WIDTH / 64, y * rows / 64));
                     }
                 }
                 next.records.push(Record {
@@ -1629,7 +1649,7 @@ impl Game {
         {
             return Err("Invalid specialisation".into());
         }
-        if self.version != VERSION {
+        if self.version != VERSION || self.generator_version != geometry::GENERATOR_VERSION {
             return Err("Unsupported save version".into());
         }
         if ![
@@ -1646,8 +1666,8 @@ impl Game {
             || !["", "balanced", "preferred"].contains(&self.cargo_policy.as_str())
             || !["", "hard_rock", "long_haul"].contains(&self.challenge.as_str())
             || self.profile >= sites().len()
-            || self.heights.len() != 64
-            || self.heights.iter().any(|h| *h > 100000)
+            || self.heights.len() != WIDTH as usize
+            || self.heights.iter().any(|h| *h > terrain::MAX_ROWS)
             || self.support_rows > terrain::MAX_ROWS
             || self.support_work >= 1000
             || self.dig_remainder >= 20
@@ -1663,13 +1683,36 @@ impl Game {
         {
             return Err("Invalid save state".into());
         }
-        if self
-            .terrain
-            .chunks
-            .iter()
-            .any(|(id, bytes)| *id >= 1563 || bytes.len() != 512)
-        {
+        if self.terrain.chunks.iter().any(|(id, bytes)| {
+            *id >= (terrain::MAX_ROWS / 64) * geometry::CHUNKS_ACROSS || bytes.len() != 512
+        }) {
             return Err("Invalid terrain chunk".into());
+        }
+        let material_count = materials().len();
+        for (&id, mask) in &self.terrain.revealed {
+            if id >= terrain::MAX_ROWS / 64 * geometry::CHUNKS_ACROSS || mask.len() != 512 {
+                return Err("Invalid reveal mask".into());
+            }
+            let pixels = self
+                .terrain
+                .visible
+                .get(&id)
+                .ok_or("Missing revealed geology")?;
+            if pixels.len() != 4096
+                || pixels.iter().enumerate().any(|(index, material)| {
+                    let revealed = mask[index / 8] & (1 << (index % 8)) != 0;
+                    if revealed {
+                        *material as usize >= material_count
+                    } else {
+                        *material != 255
+                    }
+                })
+            {
+                return Err("Invalid visible geology".into());
+            }
+        }
+        if self.terrain.visible.len() != self.terrain.revealed.len() {
+            return Err("Unexpected geology chunks".into());
         }
         let n = materials().len();
         if self.shipments.len() > 20000
@@ -1680,15 +1723,15 @@ impl Game {
                         l.milliseconds == 0
                             || [l.from, l.to].iter().any(|p| {
                                 p[0] < 0
-                                    || p[0] > 72
-                                    || p[1] < -3
+                                    || p[0] > 576
+                                    || p[1] < -24
                                     || p[1] >= terrain::MAX_ROWS as i32
                             })
                     })
                     || s.path.len() > 100000
                     || s.path
                         .iter()
-                        .any(|p| p[0] >= 64 || p[1] >= terrain::MAX_ROWS)
+                        .any(|p| p[0] >= WIDTH || p[1] >= terrain::MAX_ROWS)
                     || s.material >= n
                     || s.amount > 1_000_000_000_000
                     || s.duration > 100000
@@ -1710,7 +1753,7 @@ impl Game {
         {
             return Err("Save inventory exceeds supported limits".into());
         }
-        if self.removed.iter().any(|c| c.x >= 64 || c.material >= n)
+        if self.removed.iter().any(|c| c.x >= WIDTH || c.material >= n)
             || self
                 .ore
                 .keys()
@@ -1827,15 +1870,15 @@ mod accounting_tests {
         let id = cat.iter().find(|m| m.name == "Bauxite").unwrap().id;
         let mut g = Game::default();
         g.levels.insert("chemical".into(), 1);
-        g.reserve.insert("alumina".into(), 10000);
-        g.hauled.insert(id, 1000);
+        g.reserve.insert("alumina".into(), 10000 * 64);
+        g.hauled.insert(id, 1000 * 64);
         for _ in 0..10 {
             g.second(&cat, false);
         }
         assert!(g.products.get("alumina").copied().unwrap_or(0) > 0);
         assert_eq!(g.products.get("aluminium").copied().unwrap_or(0), 0);
         g.levels.insert("electrolytic".into(), 1);
-        g.reserve.insert("aluminium".into(), 10000);
+        g.reserve.insert("aluminium".into(), 10000 * 64);
         g.second(&cat, false);
         assert!(g.products.get("aluminium").copied().unwrap_or(0) > 0);
     }
@@ -1871,12 +1914,12 @@ mod pipeline_tests {
     #[test]
     fn refinery_backpressure_stops_sorting() {
         let mut g = Game::default();
-        g.concentrate.insert(2, 20000);
-        g.hauled.insert(2, 1000);
+        g.concentrate.insert(2, 20000 * 64);
+        g.hauled.insert(2, 1000 * 64);
         g.tick(&materials(), false);
         assert_eq!(g.flow_window[2], 0);
-        assert_eq!(g.hauled[&2], 1000);
-        assert!(g.concentrate[&2] < 20000);
+        assert_eq!(g.hauled[&2], 1000 * 64);
+        assert!(g.concentrate[&2] < 20 * UNITS);
         g.tick(&materials(), false);
         assert!(g.flow_window[2] > 0);
     }
@@ -1891,9 +1934,9 @@ mod site_tests {
         for profile in 0..sites().len() {
             let mut g = Game::default();
             g.profile = profile;
-            assert_eq!(g.cell(32, 0, &cat), 3);
-            assert_eq!(g.cell(32, 24, &cat), 5);
-            assert_eq!(g.cell(32, 48, &cat), 6);
+            for (id, y) in [(3, 24), (5, 76), (6, 130)] {
+                assert!((200..310).any(|x| g.cell(x, y, &cat) == id));
+            }
         }
     }
     #[test]
@@ -1902,7 +1945,9 @@ mod site_tests {
         let a = Game::default();
         let mut b = a.clone();
         b.profile = 1;
-        assert!((0..64).any(|x| a.cell(x, 100, &cat) != b.cell(x, 100, &cat)));
+        assert!((0..512).step_by(3).any(|x| (200..2000)
+            .step_by(7)
+            .any(|y| a.cell(x, y, &cat) != b.cell(x, y, &cat))));
     }
 }
 
@@ -1914,8 +1959,8 @@ mod trace_tests {
         let mut g = Game::default();
         g.levels.insert("trace".into(), 1);
         g.enabled_recipes.insert("separate_gallium".into());
-        g.products.insert("alumina".into(), 10000);
-        g.reserve.insert("gallium".into(), 10000);
+        g.products.insert("alumina".into(), 10000 * 64);
+        g.reserve.insert("gallium".into(), 10000 * 64);
         g.tick(&materials(), false);
         assert_eq!(g.products.get("gallium").copied().unwrap_or(0), 0);
         g.trace_feed.insert("gallium_residue".into(), 100);
@@ -1948,8 +1993,8 @@ mod waste_tests {
         g.slag = 100;
         g.tailings.insert(2, 100);
         g.tick(&materials(), false);
-        assert_eq!(g.depleted, 95);
-        assert_eq!(g.disposed_mass, 5);
+        assert_eq!(g.depleted, 0);
+        assert_eq!(g.disposed_mass, 100);
         assert_eq!(g.slag, 100);
         assert_eq!(g.tailings[&2], 100);
     }
@@ -1971,19 +2016,19 @@ mod upgrade_tests {
         };
         assert!(g.action(a.clone()).is_err());
         assert_eq!(g.credits, 10000);
-        g.products.insert("iron".into(), 2000);
+        g.products.insert("iron".into(), 2000 * 64);
         g.action(a).unwrap();
         assert_eq!(g.products["iron"], 0);
-        assert_eq!(g.delivered_mass, 2000);
+        assert_eq!(g.delivered_mass, 2 * UNITS);
     }
     #[test]
     fn pin_holds_upgrade_material() {
         let mut g = Game::default();
         g.pinned = Some("shaft".into());
-        g.products.insert("iron".into(), 3000);
+        g.products.insert("iron".into(), 3000 * 64);
         g.contracts.clear();
         g.tick(&materials(), false);
-        assert_eq!(g.products["iron"], 2000);
+        assert_eq!(g.products["iron"], 2000 * 64);
     }
 }
 
@@ -2028,7 +2073,7 @@ mod hardness_tests {
     fn deeper_bands_need_more_work_and_drill_tiers_help() {
         let mut g = Game::default();
         let shallow = g.rock_work();
-        g.heights[0] = 150;
+        g.heights[0] = 1200;
         let deep = g.rock_work();
         assert!(deep > shallow);
         g.levels.insert("drill".into(), 10);
@@ -2047,7 +2092,7 @@ mod contract_tests {
             .find(|m| m.product == "iron")
             .unwrap()
             .price;
-        g.products.insert("iron".into(), 10000);
+        g.products.insert("iron".into(), 10000 * 64);
         let before = g.credits;
         g.action(Action {
             sequence: 1,
@@ -2065,7 +2110,7 @@ mod contract_tests {
             value: 0,
         })
         .unwrap();
-        assert_eq!(g.contracts[0].amount, 3000);
+        assert_eq!(g.contracts[0].amount, 3 * UNITS);
         g.action(Action {
             sequence: 3,
             kind: "contract".into(),
@@ -2075,7 +2120,7 @@ mod contract_tests {
         .unwrap();
         assert_eq!(g.research, 1);
         assert_eq!(g.site_objectives.len(), 1);
-        assert_eq!(g.delivered_mass, 5000);
+        assert_eq!(g.delivered_mass, 5 * UNITS);
     }
 }
 
@@ -2092,7 +2137,7 @@ mod specialisation_tests {
             value: 0,
         };
         assert!(g.action(choose(1)).is_err());
-        g.heights[32] = 50;
+        g.heights[256] = 400;
         g.action(choose(2)).unwrap();
         assert!(g.action(choose(3)).is_err());
         g.levels.insert("reclaimer".into(), 1);
@@ -2111,8 +2156,8 @@ mod throughput_tests {
     #[test]
     fn full_haul_buffer_reports_no_transfer() {
         let mut g = Game::default();
-        g.hauled.insert(0, 20000);
-        g.ore.insert(0, 1000);
+        g.hauled.insert(0, 20000 * 64);
+        g.ore.insert(0, 1000 * 64);
         g.tick(&materials(), false);
         assert_eq!(g.flow_window[1], 0);
         assert!(g.shipments.is_empty());
@@ -2126,7 +2171,7 @@ mod challenge_tests {
     #[test]
     fn retirement_matches_preview_and_resets_site_choices() {
         let mut g = Game::default();
-        g.heights[32] = 150;
+        g.heights[256] = 1200;
         g.steel_made = true;
         g.challenge = "hard_rock".into();
         g.specialisation = Some("bulk".into());
@@ -2156,7 +2201,7 @@ mod offline_idle_tests {
     fn blocked_interval_skip_matches_every_tick() {
         let cat = materials();
         let mut a = Game::default();
-        a.heights = vec![50; 64];
+        a.heights = vec![400; WIDTH as usize];
         a.terrain = terrain::Terrain::from_columns(&a.heights);
         a.dig_progress = 127;
         a.dig_remainder = 7;
@@ -2176,7 +2221,7 @@ mod offline_idle_tests {
     #[test]
     fn pending_arrival_prevents_idle_skip() {
         let mut g = Game::default();
-        g.heights = vec![50; 64];
+        g.heights = vec![400; WIDTH as usize];
         g.terrain = terrain::Terrain::from_columns(&g.heights);
         g.shipments.push(logistics::Shipment {
             material: 0,
@@ -2198,11 +2243,11 @@ mod fractional_work_tests {
     #[test]
     fn slow_deep_work_does_not_round_to_zero() {
         let mut g = Game::default();
-        g.heights = vec![3000; 64];
+        g.heights = vec![24000; WIDTH as usize];
         let rate = g.dig_rate(true);
-        assert!(rate > 0 && rate < 20);
+        assert!(rate > 0 && rate % 20 != 0);
         g.second(&materials(), true);
-        assert_eq!(g.dig_progress, rate);
+        assert_eq!(g.dig_progress, rate % 1000);
     }
 }
 
@@ -2236,15 +2281,15 @@ mod construction_tests {
         g.housing = 12;
         g.crew_priority = "engineering".into();
         g.policy = "depth".into();
-        for y in 0..150 {
-            g.terrain.excavate(32, y);
+        for y in 0..1200 {
+            g.terrain.excavate(256, y);
         }
-        g.heights[32] = 150;
-        assert_ne!(g.next_frontier(&cat), Some(150 * 64 + 32));
+        g.heights[256] = 1200;
+        assert_ne!(g.next_frontier(&cat), Some(1200 * WIDTH + 256));
         for _ in 0..30 {
             g.tick(&cat, true);
         }
-        assert!(g.support_rows > 150);
+        assert!(g.support_rows > 1200);
         assert!(g.crew.engineers > 1);
     }
 }
@@ -2255,7 +2300,7 @@ mod retirement_quote_tests {
     #[test]
     fn production_between_preview_and_confirmation_does_not_change_quote() {
         let mut g = Game::default();
-        g.heights[32] = 150;
+        g.heights[256] = 1200;
         g.steel_made = true;
         g.action(Action {
             sequence: 1,
@@ -2306,7 +2351,7 @@ mod collection_tests {
         g.tick(&materials(), true);
         assert!(g.collection.contains("neodymium"));
         assert_eq!(g.products.get("neodymium").copied().unwrap_or(0), 0);
-        g.heights[32] = 150;
+        g.heights[256] = 1200;
         g.steel_made = true;
         g.action(Action {
             sequence: 1,
@@ -2341,15 +2386,15 @@ mod recipe_power_tests {
             g.levels.insert("trace".into(), 5);
             g.levels.insert("power".into(), power);
             g.enabled_recipes.insert("bronze".into());
-            g.products.insert("copper".into(), 6000);
-            g.products.insert("tin".into(), 2000);
-            g.reserve.insert("bronze".into(), 8000);
+            g.products.insert("copper".into(), 6000 * 64);
+            g.products.insert("tin".into(), 2000 * 64);
+            g.reserve.insert("bronze".into(), 8000 * 64);
             let cat = materials();
             for _ in 0..20 {
                 g.tick(&cat, true);
             }
             let bronze = g.products.get("bronze").copied().unwrap_or(0);
-            assert_eq!(g.products["copper"] + g.products["tin"] + bronze, 8000);
+            assert_eq!(g.products["copper"] + g.products["tin"] + bronze, 8 * UNITS);
             bronze
         }
         let constrained = output(0, 1);
@@ -2368,13 +2413,13 @@ mod pinned_recipe_tests {
         let mut g = Game::default();
         g.levels.insert("furnace".into(), 1);
         g.levels.insert("steelworks".into(), 1);
-        g.products.insert("iron".into(), 2000);
-        g.products.insert("coke".into(), 8000);
-        g.products.insert("lime".into(), 8000);
+        g.products.insert("iron".into(), 2000 * 64);
+        g.products.insert("coke".into(), 8000 * 64);
+        g.products.insert("lime".into(), 8000 * 64);
         g.pinned = Some("shaft".into());
         g.credits = 1000;
         g.second(&materials(), true);
-        assert_eq!(g.products["iron"], 2000);
+        assert_eq!(g.products["iron"], 2000 * 64);
         assert!(!g.steel_made);
         g.action(Action {
             sequence: 1,
