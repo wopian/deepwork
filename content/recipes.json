@@ -97,8 +97,8 @@
     "id": "controls",
     "building": "manufacturing",
     "inputs": {
-      "silicon": 200,
-      "copper": 100,
+      "silicon": 275,
+      "copper": 25,
       "gallium": 1
     },
     "output": "precision_controls"
