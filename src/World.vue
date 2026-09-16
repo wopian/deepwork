@@ -2,6 +2,7 @@
 import { onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { Application, Graphics, Text, Container } from "pixi.js";
 import { state, materials } from "./game";
+import { WasteParticles } from "./waste";
 import profiles from "../content/sites.json";
 import { preferences } from "./preferences";
 const host = ref<HTMLDivElement>();
@@ -10,6 +11,9 @@ let world: Container;
 let terrain: Graphics;
 let actors: Graphics;
 let t = 0;
+const wasteParticles = new WasteParticles(600);
+let lastWaste = 0;
+let lastSite = 0;
 let zoom = 1;
 let offsetY = 0;
 let dragY: number | null = null;
@@ -125,7 +129,10 @@ function draw() {
     rect(terrain, x + 14, 154, 18, 19, 0xe5a34d);
     rect(terrain, x + 29, 111, 10, 25, 0x8c9ba5);
   }
-  const waste = Math.min(64, 12 + (g?.lifetime_waste ?? 0) / 3000);
+  const storedWaste = g
+    ? Object.values(g.tailings).reduce((a, b) => a + b, 0) + g.slag + g.depleted
+    : 0;
+  const waste = Math.min(64, 12 + storedWaste / 3000);
   for (let i = 0; i < 18; i++) {
     let h = Math.max(0, waste - Math.abs(i - 9) * 4);
     rect(terrain, 939 + i * 7, 190 - h, 7, h, 0x8c9ba5);
@@ -186,6 +193,22 @@ onMounted(async () => {
     world.x = offsetX;
     actors.clear();
     const g = state.value;
+    if (g) {
+      if (lastSite !== g.site) {
+        lastSite = g.site;
+        lastWaste = g.lifetime_waste;
+        wasteParticles.items.length = 0;
+      }
+      if (!preferences.reducedMotion)
+        wasteParticles.emit(
+          Math.ceil(Math.max(0, g.lifetime_waste - lastWaste) / 50),
+        );
+      lastWaste = g.lifetime_waste;
+    }
+    wasteParticles.step(ticker.deltaTime, 188);
+    for (const particle of wasteParticles.items) {
+      rect(actors, particle.x, particle.y, 3, 3, 0x8c9ba5);
+    }
     for (let i = 0; i < Math.min(g?.workers ?? 9, 100); i++) {
       let x = 240 + ((i * 43 + t * (i % 2 ? 0.5 : -0.35) + 44800) % 430);
       const col = Math.max(0, Math.min(63, Math.floor((x - 235) / 7)));

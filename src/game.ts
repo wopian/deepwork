@@ -81,6 +81,12 @@ export function format(n: number | string) {
   }).format(v);
 }
 export const upgrades = [
+  [
+    "slagcrusher",
+    "Slag crusher",
+    "Recover construction aggregate from slag.",
+    100,
+  ],
   ["wheelbarrow", "Wheelbarrow fleet", "Faster short-distance hauling.", 100],
   ["minecart", "Minecart railway", "Move cargo through deep shafts.", 100],
   ["train", "Powered trains", "Reduce deep cargo transit time.", 100],

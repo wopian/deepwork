@@ -117,6 +117,8 @@ pub struct Game {
     pub tailings: BTreeMap<usize, u64>,
     pub slag: u64,
     pub depleted: u64,
+    #[serde(default)]
+    pub disposed_mass: u64,
     pub lifetime_waste: u64,
     pub excavated: u64,
     pub discoveries: BTreeSet<usize>,
@@ -215,6 +217,7 @@ impl Game {
             tailings: BTreeMap::new(),
             slag: 0,
             depleted: 0,
+            disposed_mass: 0,
             lifetime_waste: 0,
             excavated: 0,
             discoveries: BTreeSet::new(),
@@ -560,7 +563,13 @@ impl Game {
                     m.product.clone()
                 })
                 .or_default() += primary;
-            *self.tailings.entry(id).or_default() += waste;
+            let residue = waste / 5;
+            if matches!(m.family.as_str(), "furnace" | "sulfide") {
+                self.slag += residue;
+            } else {
+                self.depleted += residue;
+            }
+            *self.tailings.entry(id).or_default() += waste - residue;
             self.lifetime_waste += waste;
         }
         let recipes = recipes();
@@ -643,7 +652,14 @@ impl Game {
             self.credits = self.credits.saturating_add(self.credit_fraction / 2000);
             self.credit_fraction %= 2000;
         }
-        self.depleted = self.depleted.saturating_sub(5);
+        let disposed = self.depleted.min(5);
+        self.depleted -= disposed;
+        self.disposed_mass += disposed;
+        if self.level("slagcrusher") > 0 {
+            let reclaimed = self.slag.min(25);
+            self.slag -= reclaimed;
+            *self.products.entry("aggregate".into()).or_default() += reclaimed;
+        }
         for (i, n) in [
             mined * 1000,
             haul_rate - remaining,
@@ -768,6 +784,7 @@ impl Game {
                     "minecart",
                     "train",
                     "survey",
+                    "slagcrusher",
                 ];
                 if !allowed.contains(&a.target.as_str()) {
                     return Err("Unknown upgrade".into());
@@ -1107,7 +1124,10 @@ mod accounting_tests {
             + g.tailings.values().sum::<u64>()
             + g.sold_mass
             + g.shipments.iter().map(|s| s.amount).sum::<u64>()
-            + g.delivered_mass;
+            + g.delivered_mass
+            + g.slag
+            + g.depleted
+            + g.disposed_mass;
         assert_eq!(mass, g.excavated * 1000);
         assert!(g.removed.len() <= 512);
     }
@@ -1225,5 +1245,22 @@ mod trace_tests {
                     <= 1000
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod waste_tests {
+    use super::*;
+    #[test]
+    fn disposal_reduces_only_depleted_stock() {
+        let mut g = Game::default();
+        g.depleted = 100;
+        g.slag = 100;
+        g.tailings.insert(2, 100);
+        g.tick(&materials(), false);
+        assert_eq!(g.depleted, 95);
+        assert_eq!(g.disposed_mass, 5);
+        assert_eq!(g.slag, 100);
+        assert_eq!(g.tailings[&2], 100);
     }
 }
