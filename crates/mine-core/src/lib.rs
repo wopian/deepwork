@@ -342,6 +342,15 @@ impl Game {
         );
         pool[((h >> 8) as usize) % pool.len()].id
     }
+    pub fn rock_work(&self) -> f64 {
+        let depth = self.depth();
+        let boundaries = [0, 100, 300, 700, 1500, 3000, 6000];
+        let band = (0..6).find(|i| depth < boundaries[i + 1]).unwrap_or(5);
+        let progress = ((depth - boundaries[band]) as f64
+            / (boundaries[band + 1] - boundaries[band]) as f64)
+            .min(1.);
+        2.5f64.powi(band as i32) * (1. + progress) / 3f64.powi((self.level("drill") / 10) as i32)
+    }
     fn throughput(&self, k: &str) -> f64 {
         let n = self.level(k);
         (1. + 0.12 * n as f64) * 1.5f64.powi((n / 10) as i32)
@@ -371,6 +380,7 @@ impl Game {
         let mut mined = 0;
         let dig_rate = (((self.crew.diggers as f64 * self.throughput("drill")
             / sites()[self.profile].hardness
+            / self.rock_work()
             * (1. + 0.05 * self.ranks.get("excavation").copied().unwrap_or(0) as f64))
             * (if !offline && self.boosts[0] > 0 {
                 1.5
@@ -1476,5 +1486,20 @@ mod progression_tests {
         let research = g.research;
         g.tick(&materials(), false);
         assert_eq!(g.research, research);
+    }
+}
+
+#[cfg(test)]
+mod hardness_tests {
+    use super::*;
+    #[test]
+    fn deeper_bands_need_more_work_and_drill_tiers_help() {
+        let mut g = Game::default();
+        let shallow = g.rock_work();
+        g.heights[0] = 150;
+        let deep = g.rock_work();
+        assert!(deep > shallow);
+        g.levels.insert("drill".into(), 10);
+        assert!((g.rock_work() * 3. - deep).abs() < 0.0001);
     }
 }
