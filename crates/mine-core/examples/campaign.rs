@@ -264,7 +264,11 @@ fn record(g: &Game, wall: u64, events: &mut BTreeMap<String, u64>) {
         ("conveyor", g.level("conveyor") > 0),
         ("furnace", g.collection.contains("iron")),
         ("shaft", g.level("shaft") > 0),
-        ("specialisation", g.specialisation.is_some()),
+        ("specialisation", g.milestones.contains("specialisation")),
+        (
+            "tactics",
+            g.site > 1 || g.depth() >= pacing::get().tactics_depth,
+        ),
         ("retirement", g.site > 1),
         ("power", g.level("power") > 0),
         ("chemical", g.level("chemical") > 0),
@@ -355,6 +359,7 @@ fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
     json!({"seed":seed,"strategy":style,"mode":mode,"stalls":stalls,"complete":g.megaproject,"events":events,"sites":g.site,"depth":g.depth(),"credits":g.credits,"next_upgrade":g.pinned,"purchase_blocker":g.pinned.as_ref().and_then(|id|g.purchase_blocker(id)),"products":g.products,"levels":g.levels,"blockers":g.stages.iter().map(|f|&f.blocker).collect::<Vec<_>>(),"save_bytes":serde_json::to_vec(&g).unwrap().len()})
 }
 fn main() {
+    let started = std::time::Instant::now();
     mine_core::content::validate().unwrap();
     assert!(BUILD_ORDER
         .iter()
@@ -425,7 +430,11 @@ fn main() {
     }
     println!(
         "{}",
-        serde_json::to_string_pretty(&json!({"save_version":mine_core::VERSION,"generator_version":mine_core::geometry::GENERATOR_VERSION,"days":days,"runs":runs,"milestones":medians}))
+        serde_json::to_string_pretty(&json!({"save_version":mine_core::VERSION,"generator_version":mine_core::geometry::GENERATOR_VERSION,"days":days,"compute_seconds":started.elapsed().as_secs(),"runs":runs,"milestones":medians}))
             .unwrap()
     );
+    if runs.iter().any(|run| run["complete"] != true) {
+        eprintln!("Campaign acceptance failed: not every seed completed headquarters");
+        std::process::exit(1);
+    }
 }

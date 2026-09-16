@@ -1580,8 +1580,14 @@ impl Game {
                     logistics::Crew::prioritise(self.workers, &self.levels, &self.crew_priority);
             }
             "specialise" => {
-                if self.depth() < 100 {
-                    return Err("Reach 100 metres to specialise".into());
+                if self.depth() < pacing::get().specialisation_depth {
+                    return Err(format!(
+                        "Reach {} metres to specialise",
+                        pacing::get().specialisation_depth
+                    ));
+                }
+                if !self.steel_made {
+                    return Err("Produce steel to specialise".into());
                 }
                 if self.specialisation.is_some() {
                     return Err("Specialisation lasts until site retirement".into());
@@ -1590,6 +1596,7 @@ impl Game {
                     return Err("Unknown specialisation".into());
                 }
                 self.specialisation = Some(a.target.clone());
+                self.milestones.insert("specialisation".into());
             }
             "buy" => {
                 if let Some(reason) = self.purchase_blocker(&a.target) {
@@ -1615,6 +1622,12 @@ impl Game {
                 }
             }
             "policy" => {
+                if self.site == 1 && self.depth() < pacing::get().tactics_depth {
+                    return Err(format!(
+                        "Reach {} metres to unlock tactics",
+                        pacing::get().tactics_depth
+                    ));
+                }
                 if !["bulk", "vein", "depth"].contains(&a.target.as_str()) {
                     return Err("Invalid policy".into());
                 }
@@ -1755,6 +1768,12 @@ impl Game {
                 self.research += 100;
             }
             "ability" => {
+                if self.site == 1 && self.depth() < pacing::get().tactics_depth {
+                    return Err(format!(
+                        "Reach {} metres to unlock tactics",
+                        pacing::get().tactics_depth
+                    ));
+                }
                 let i = a.value as usize;
                 if i > 3 {
                     return Err("Invalid ability".into());
@@ -2459,9 +2478,11 @@ mod specialisation_tests {
             value: 0,
         };
         assert!(g.action(choose(1)).is_err());
-        g.heights[256] = 400;
-        g.action(choose(2)).unwrap();
-        assert!(g.action(choose(3)).is_err());
+        g.heights[256] = pacing::get().specialisation_depth * geometry::CELLS_PER_METRE;
+        assert!(g.action(choose(2)).is_err());
+        g.steel_made = true;
+        g.action(choose(3)).unwrap();
+        assert!(g.action(choose(4)).is_err());
         g.levels.insert("reclaimer".into(), 1);
         g.tailings.insert(0, 2);
         g.second(&materials(), true);
@@ -3071,5 +3092,50 @@ mod retired_start_tests {
             })
             .unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod tactics_unlock_tests {
+    use super::*;
+    #[test]
+    fn tactics_follow_depth_and_remain_available_on_later_sites() {
+        let mut g = Game::default();
+        for (kind, target) in [("policy", "vein"), ("ability", "")] {
+            assert!(g
+                .action(Action {
+                    sequence: g.last_sequence + 1,
+                    kind: kind.into(),
+                    target: target.into(),
+                    value: 0
+                })
+                .is_err());
+        }
+        assert_eq!(g.policy, "bulk");
+        assert_eq!(g.boosts, [0; 3]);
+        g.heights[256] = pacing::get().tactics_depth * geometry::CELLS_PER_METRE;
+        g.action(Action {
+            sequence: g.last_sequence + 1,
+            kind: "policy".into(),
+            target: "vein".into(),
+            value: 0,
+        })
+        .unwrap();
+        g.action(Action {
+            sequence: g.last_sequence + 1,
+            kind: "ability".into(),
+            target: String::new(),
+            value: 0,
+        })
+        .unwrap();
+        assert_eq!(g.boosts[0], 30);
+        let mut next = Game::new(100, 2);
+        next.action(Action {
+            sequence: 1,
+            kind: "policy".into(),
+            target: "depth".into(),
+            value: 0,
+        })
+        .unwrap();
     }
 }

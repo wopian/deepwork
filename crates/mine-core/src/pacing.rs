@@ -13,6 +13,8 @@ pub struct Pacing {
     pub refining_rate: f64,
     pub research_base: u64,
     pub headquarters_research: u64,
+    pub tactics_depth: u32,
+    pub specialisation_depth: u32,
     pub furnace_demand: u32,
     pub chemical_demand: u32,
     pub electrolysis_demand: u32,
@@ -56,6 +58,9 @@ pub fn validate() -> Result<(), String> {
         ]
         .iter()
         .any(|&v| v == 0 || v > 100)
+        || p.tactics_depth == 0
+        || p.tactics_depth >= 48
+        || !(100..=300).contains(&p.specialisation_depth)
         || p.research_base == 0
         || p.headquarters_research == 0
         || p.headquarters_research > 5000

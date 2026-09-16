@@ -355,7 +355,7 @@ onMounted(start);
             {{ Math.floor(state.support_work / 10) }}%.
           </p>
           <div class="policy">
-            <span>EXCAVATION STRATEGY</span
+            <span>EXCAVATION STRATEGY <small v-if="state?.site === 1 && depth < pacing.tactics_depth">{{ pacing.tactics_depth }} M UNLOCK</small></span
             ><button
               v-for="[id, label] in [
                 ['bulk', 'Bulk excavation'],
@@ -363,7 +363,7 @@ onMounted(start);
                 ['depth', 'Go deeper'],
               ]"
               :class="{ selected: state?.policy === id }"
-              :disabled="!state"
+              :disabled="!state || (state.site === 1 && depth < pacing.tactics_depth)"
               @click="act('policy', id)"
             >
               {{ label }}
@@ -454,7 +454,7 @@ onMounted(start);
                 'Furnace overdrive',
                 'Directed survey',
               ]"
-              :disabled="!state || !!state.cooldowns[i]"
+              :disabled="!state || !!state.cooldowns[i] || (state.site === 1 && depth < pacing.tactics_depth)"
               @click="act('ability', '', i)"
             >
               <span>{{ ["⚑", "⇢", "♨", "⌖"][i] }}</span
@@ -462,7 +462,7 @@ onMounted(start);
               ><small>{{
                 state?.cooldowns[i]
                   ? `${state.cooldowns[i]}s cooldown`
-                  : "READY WHEN YOU ARE"
+                  : state?.site === 1 && depth < pacing.tactics_depth ? `${pacing.tactics_depth} M UNLOCK` : "READY WHEN YOU ARE"
               }}</small>
             </button>
           </div>
@@ -470,7 +470,7 @@ onMounted(start);
         <section class="card specialisations">
           <div class="panel-heading">
             <h2>SITE SPECIALISATION</h2>
-            <span>{{ state?.specialisation ?? "UNLOCKS AT 100 M" }}</span>
+            <span>{{ state?.specialisation ?? `STEEL + ${pacing.specialisation_depth} M` }}</span>
           </div>
           <p>Choose once per site. New sites offer a fresh choice.</p>
           <div class="abilities specialisation-options">
@@ -493,7 +493,7 @@ onMounted(start);
                 ],
               ]"
               :class="{ selected: state?.specialisation === id }"
-              :disabled="!state || depth < 100 || !!state.specialisation"
+              :disabled="!state || depth < pacing.specialisation_depth || !state.steel_made || !!state.specialisation"
               @click="act('specialise', id)"
             >
               <strong>{{ label }}</strong

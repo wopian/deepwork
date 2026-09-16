@@ -26,6 +26,17 @@ fn main() {
     ];
     let mut target = 0;
     let mut milestones = Vec::new();
+    g.action(Action {
+        sequence: 1,
+        kind: "buy".into(),
+        target: "worker".into(),
+        value: 0,
+    })
+    .unwrap();
+    milestones.push(serde_json::json!({"seconds":0,"upgrade":"worker","depth":0}));
+    let mut first_iron = false;
+    let mut tactics = false;
+    let mut specialised = false;
     g.policy = policy.into();
     for second in 0..14400 {
         if target < plan.len() {
@@ -45,6 +56,26 @@ fn main() {
             }
         }
         g.second(&cat, false);
+        if !tactics && g.depth() >= mine_core::pacing::get().tactics_depth {
+            tactics = true;
+            milestones.push(serde_json::json!({"seconds":second+1,"unlock":"tactics"}));
+        }
+        if !first_iron && g.collection.contains("iron") {
+            first_iron = true;
+            milestones.push(serde_json::json!({"seconds":second+1,"product":"iron"}));
+        }
+        if !specialised
+            && g.action(Action {
+                sequence: g.last_sequence + 1,
+                kind: "specialise".into(),
+                target: "bulk".into(),
+                value: 0,
+            })
+            .is_ok()
+        {
+            specialised = true;
+            milestones.push(serde_json::json!({"seconds":second+1,"specialisation":"bulk"}));
+        }
         if g.depth() >= 300 && g.steel_made {
             milestones.push(serde_json::json!({"seconds":second,"retirement_ready":true,"credits":g.credits,"cells":g.excavated}));
             break;

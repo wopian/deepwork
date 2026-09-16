@@ -3,9 +3,9 @@
     "worker": 25,
     "housing": 90,
     "drill": 100,
-    "conveyor": 245,
+    "conveyor": 215,
     "sorter": 100,
-    "furnace": 370,
+    "furnace": 350,
     "shaft": 140,
     "steelworks": 160,
     "power": 900,
@@ -87,6 +87,10 @@
     "headquarters": [
       2419200,
       3628800
+    ],
+    "tactics": [
+      900,
+      1200
     ]
   },
   "foundation_upgrades": [
@@ -104,5 +108,7 @@
   "electrolysis_demand": 2,
   "trace_demand": 3,
   "base_power": 1,
-  "power_per_level": 5
+  "power_per_level": 5,
+  "tactics_depth": 40,
+  "specialisation_depth": 300
 }
