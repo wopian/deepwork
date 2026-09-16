@@ -172,6 +172,8 @@ pub struct Game {
     #[serde(default)]
     pub dig_progress: u64,
     #[serde(default)]
+    pub dig_remainder: u64,
+    #[serde(default)]
     pub credit_fraction: u64,
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -295,6 +297,7 @@ impl Game {
             sold_mass: 0,
             delivered_mass: 0,
             dig_progress: 0,
+            dig_remainder: 0,
             credit_fraction: 0,
         }
     }
@@ -524,7 +527,9 @@ impl Game {
         let ore_total: u64 = self.ore.values().sum();
         let mut mined = 0;
         let dig_rate = self.dig_rate(offline);
-        self.dig_progress += dig_rate / 20;
+        let work = dig_rate + self.dig_remainder;
+        self.dig_progress += work / 20;
+        self.dig_remainder = work % 20;
         let digs = (self.dig_progress / 1000) as u32;
         self.dig_progress %= 1000;
         let depth_limit = if self.level("shaft") == 0 {
@@ -993,8 +998,9 @@ impl Game {
             if left > 0 && self.quiescent(cat) {
                 // Preserve fractional work and phase; the final tick refreshes feedback.
                 let skip = left * 20 - 1;
-                self.dig_progress =
-                    (self.dig_progress + self.dig_rate(true) / 20 * (skip % 1000)) % 1000;
+                let work = self.dig_rate(true) * skip + self.dig_remainder;
+                self.dig_progress = (self.dig_progress + work / 20) % 1000;
+                self.dig_remainder = work % 20;
                 self.ticks += skip;
                 self.flow_window = [0; 5];
                 self.tick(cat, true);
@@ -1352,6 +1358,8 @@ impl Game {
             || self.profile >= sites().len()
             || self.heights.len() != 64
             || self.heights.iter().any(|h| *h > 100000)
+            || self.dig_remainder >= 20
+            || self.dig_progress >= 1000
             || self.workers < 3
             || self.workers > 10000
             || self.housing < 8
@@ -1848,6 +1856,7 @@ mod offline_idle_tests {
         a.heights = vec![50; 64];
         a.terrain = terrain::Terrain::from_columns(&a.heights);
         a.dig_progress = 127;
+        a.dig_remainder = 7;
         a.last_saved = 100;
         let mut b = a.clone();
         a.advance_offline(2100, &cat);
@@ -1876,5 +1885,19 @@ mod offline_idle_tests {
             path: vec![],
         });
         assert!(!g.quiescent(&materials()));
+    }
+}
+
+#[cfg(test)]
+mod fractional_work_tests {
+    use super::*;
+    #[test]
+    fn slow_deep_work_does_not_round_to_zero() {
+        let mut g = Game::default();
+        g.heights = vec![3000; 64];
+        let rate = g.dig_rate(true);
+        assert!(rate > 0 && rate < 20);
+        g.second(&materials(), true);
+        assert_eq!(g.dig_progress, rate);
     }
 }
