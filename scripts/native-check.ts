@@ -1,4 +1,4 @@
-import { chromium, type Browser } from "playwright-core";
+import { chromium, type Browser, type Locator } from "playwright-core";
 import {
   mkdtemp,
   mkdir,
@@ -187,7 +187,10 @@ try {
     const cdp = await context.newCDPSession(page);
     await cdp.send("Performance.enable");
     await cdp.send("Emulation.setDeviceMetricsOverride", {
-      width: 1440, height: 940, deviceScaleFactor: 1, mobile: false,
+      width: 1440,
+      height: 940,
+      deviceScaleFactor: 1,
+      mobile: false,
     });
     const samples: unknown[] = [];
     const started = Date.now();
@@ -195,7 +198,9 @@ try {
       await page.waitForTimeout(10000);
       if (!(await page.locator(".world").count())) {
         console.log("Restoring Operations for renderer stress coverage");
-        await page.getByRole("button", { name: "Operations", exact: true }).click();
+        await page
+          .getByRole("button", { name: "Operations", exact: true })
+          .click();
         await page.locator(".world").waitFor();
         await page.waitForTimeout(1200);
       }
@@ -203,7 +208,9 @@ try {
       const telemetry: Record<string, string | undefined> = await page.evaluate(
         () => {
           const world = document.querySelector<HTMLElement>(".world");
-          return world ? { ...world.dataset, viewportWidth: String(innerWidth) } : { renderHidden: "true", viewportWidth: String(innerWidth) };
+          return world
+            ? { ...world.dataset, viewportWidth: String(innerWidth) }
+            : { renderHidden: "true", viewportWidth: String(innerWidth) };
         },
       );
       const status = JSON.parse(await invoke("export_save"));
@@ -269,11 +276,10 @@ try {
     mobile: true,
   });
   await portrait.send("Emulation.setTouchEmulationEnabled", { enabled: true });
-  const tap = async (name: string) => {
-    const button = page.getByRole("button", { name, exact: true });
+  const tapTarget = async (button: Locator) => {
     await button.scrollIntoViewIfNeeded();
     const box = await button.boundingBox();
-    if (!box) throw new Error(`Touch target missing: ${name}`);
+    if (!box) throw new Error("Touch target missing");
     const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
     await portrait.send("Input.dispatchTouchEvent", {
       type: "touchStart",
@@ -284,11 +290,16 @@ try {
       touchPoints: [],
     });
   };
+  const tap = (name: string) =>
+    tapTarget(page.getByRole("button", { name, exact: true }));
   await tap("Settings");
   await page.locator(".settings").waitFor();
   await page.getByLabel("Reduced motion", { exact: true }).check();
   await tap("Operations");
-  await page.waitForFunction(() => document.querySelector<HTMLElement>(".world")?.dataset.particles === "0");
+  await page.waitForFunction(
+    () =>
+      document.querySelector<HTMLElement>(".world")?.dataset.particles === "0",
+  );
   await tap("Surface ↑");
   await page.screenshot({
     path: join(output, "native-portrait.png"),
@@ -300,9 +311,79 @@ try {
     )
   )
     throw new Error("Portrait page overflows viewport");
+  const transportBefore = JSON.parse(await invoke("export_save"));
+  await tapTarget(page.locator(".transport-panel summary"));
+  const loadingBay = page.locator(".transport-station").first();
+  await tapTarget(
+    loadingBay.getByText("Prefer selected minerals", { exact: true }),
+  );
+  await page.waitForFunction(
+    (preferred) =>
+      (window as any).__TAURI_INTERNALS__
+        .invoke("export_save")
+        .then(
+          (raw: string) =>
+            JSON.parse(raw).transport.stations[0].preferred === preferred,
+        ),
+    !transportBefore.transport.stations[0].preferred,
+  );
+  await tapTarget(
+    page
+      .locator(".transport-station")
+      .nth(1)
+      .getByRole("button", { name: "Select express route", exact: true }),
+  );
+  await page.waitForFunction(() =>
+    (window as any).__TAURI_INTERNALS__
+      .invoke("export_save")
+      .then((raw: string) => JSON.parse(raw).transport.express === 1),
+  );
+  const canUpgradeBuffer =
+    BigInt(transportBefore.credits) >=
+    BigInt(transportBefore.transport.stations[0].quote);
+  if (canUpgradeBuffer) {
+    await tapTarget(loadingBay.getByRole("button", { name: /^Buffer \+/ }));
+  }
+  await page.waitForFunction(
+    ({ level, preferred }) => {
+      const world = (window as any).__TAURI_INTERNALS__;
+      return world.invoke("export_save").then((raw: string) => {
+        const transport = JSON.parse(raw).transport;
+        return (
+          transport.express === 1 &&
+          transport.stations[0].preferred === preferred &&
+          transport.stations[0].level === level
+        );
+      });
+    },
+    {
+      level:
+        transportBefore.transport.stations[0].level + Number(canUpgradeBuffer),
+      preferred: !transportBefore.transport.stations[0].preferred,
+    },
+  );
+  await page.screenshot({
+    path: join(output, "native-transport-touch.png"),
+    fullPage: true,
+  });
+  await page.reload();
+  await page.locator("canvas").waitFor();
+  const transportRestored = JSON.parse(await invoke("export_save")).transport;
+  if (
+    transportRestored.express !== 1 ||
+    transportRestored.stations[0].preferred ===
+      transportBefore.transport.stations[0].preferred ||
+    transportRestored.stations[0].level !==
+      transportBefore.transport.stations[0].level + Number(canUpgradeBuffer)
+  ) {
+    throw new Error("Reload lost touch-selected transport controls");
+  }
   await portrait.send("Emulation.clearDeviceMetricsOverride");
   await portrait.send("Emulation.setTouchEmulationEnabled", { enabled: false });
   await portrait.detach();
+  const preferencesBeforeReset = await page.evaluate(() =>
+    localStorage.getItem("deepwork-preferences"),
+  );
   const beforeReset = JSON.parse(await invoke("export_save"));
   await page.getByRole("button", { name: "Records", exact: true }).click();
   await page
@@ -331,6 +412,12 @@ try {
     Object.keys(fresh.ranks).length !== 0
   )
     throw new Error("Fresh campaign retained progress");
+  if (
+    (await page.evaluate(() =>
+      localStorage.getItem("deepwork-preferences"),
+    )) !== preferencesBeforeReset
+  )
+    throw new Error("Reset changed accessibility, audio or display settings");
   let staleRejected = false;
   try {
     await invoke("command", {
