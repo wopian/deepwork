@@ -156,7 +156,7 @@ export async function start() {
 }
 let pending = false;
 export async function act(kind: string, target = "", value = 0) {
-  if (!state.value || pending) return;
+  if (!state.value || pending) return false;
   pending = true;
   try {
     state.value = await invoke<Game>("command", {
@@ -164,8 +164,10 @@ export async function act(kind: string, target = "", value = 0) {
     });
     error.value = "";
     purchaseSound();
+    return true;
   } catch (e) {
     error.value = String(e);
+    return false;
   } finally {
     pending = false;
   }

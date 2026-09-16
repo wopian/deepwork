@@ -59,6 +59,15 @@ const orderedUpgrades = [...upgrades].sort(
 const tab = ref("Operations");
 const query = ref("");
 const showRetire = ref(false);
+async function retirementPreview() {
+  if (await act('retirement_preview')) showRetire.value = true;
+}
+async function retirementConfirm() {
+  if (await act('retire', selectedChallenge.value, selectedSite.value)) showRetire.value = false;
+}
+async function retirementCancel() {
+  if (await act('cancel_retirement')) showRetire.value = false;
+}
 const hideOffline = ref(false);
 const depth = computed(() => Math.max(...(state.value?.heights ?? [0])) * 2);
 const filtered = computed(() =>
@@ -549,7 +558,7 @@ onMounted(start);
         Retirement keeps research, discoveries and records. Local terrain,
         buildings, workers, credits and materials reset.
       </p>
-      <button class="primary" :disabled="!ready" @click="showRetire = true">
+      <button class="primary" :disabled="!ready" @click="retirementPreview">
         {{
           ready
             ? "Preview retirement →"
@@ -671,15 +680,10 @@ onMounted(start);
             <p>{{ profile.description }}</p></label
           >
         </div>
-        <button @click="showRetire = false">Keep mining</button
+        <button @click="retirementCancel">Keep mining</button
         ><button
           class="primary"
-          @click="
-            () => {
-              act('retire', selectedChallenge, selectedSite);
-              showRetire = false;
-            }
-          "
+          @click="retirementConfirm"
         >
           Retire & start next site
         </button>

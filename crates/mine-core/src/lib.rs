@@ -155,6 +155,8 @@ pub struct Game {
     pub contracts: Vec<Contract>,
     #[serde(default)]
     pub site_objectives: BTreeSet<String>,
+    #[serde(skip)]
+    pub retirement_quote: Option<u64>,
     pub records: Vec<Record>,
     pub cooldowns: [u32; 4],
     pub boosts: [u32; 3],
@@ -281,6 +283,7 @@ impl Game {
             discoveries: BTreeSet::new(),
             site_discoveries: 0,
             site_objectives: BTreeSet::new(),
+            retirement_quote: None,
             contracts: vec![
                 Contract {
                     product: "iron".into(),
@@ -1100,6 +1103,16 @@ impl Game {
             return Err("Command already processed".into());
         }
         match a.kind.as_str() {
+            "retirement_preview" => {
+                if !self.steel_made || self.depth() < 300 {
+                    return Err("Reach 300 m and produce steel first".into());
+                }
+                self.retirement_quote = Some(self.award());
+            }
+            "cancel_retirement" => {
+                self.retirement_quote = None;
+            }
+
             "crew_priority" => {
                 if ![
                     "balanced",
@@ -1346,7 +1359,7 @@ impl Game {
                 if !self.steel_made || self.depth() < 300 {
                     return Err("Reach 300 m and produce steel first".into());
                 }
-                let award = self.award();
+                let award = self.retirement_quote.unwrap_or_else(|| self.award());
                 if a.value > 2 {
                     return Err("Unknown site".into());
                 }
@@ -2045,5 +2058,36 @@ mod construction_tests {
         }
         assert!(g.support_rows > 150);
         assert!(g.crew.engineers > 1);
+    }
+}
+
+#[cfg(test)]
+mod retirement_quote_tests {
+    use super::*;
+    #[test]
+    fn production_between_preview_and_confirmation_does_not_change_quote() {
+        let mut g = Game::default();
+        g.heights[32] = 150;
+        g.steel_made = true;
+        g.action(Action {
+            sequence: 1,
+            kind: "retirement_preview".into(),
+            target: String::new(),
+            value: 0,
+        })
+        .unwrap();
+        let quoted = g.retirement_quote.unwrap();
+        g.site_discoveries += 1;
+        assert!(g.award() > quoted);
+        g.action(Action {
+            sequence: 2,
+            kind: "retire".into(),
+            target: String::new(),
+            value: 0,
+        })
+        .unwrap();
+        assert_eq!(g.records[0].research, quoted);
+        assert_eq!(g.research, quoted);
+        assert!(g.retirement_quote.is_none());
     }
 }

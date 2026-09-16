@@ -41,7 +41,7 @@ impl From<Game> for Snapshot {
                 .map(|id| (id.into(), game.cost(id).to_string())),
             )
             .collect();
-        let retirement_award = game.award();
+        let retirement_award = game.retirement_quote.unwrap_or_else(|| game.award());
         let purchase_blockers = mine_core::requirements()
             .iter()
             .filter_map(|u| {
