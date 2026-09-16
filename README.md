@@ -36,7 +36,7 @@ The unpackaged Windows executable is `target/debug/deepwork.exe`. Browser-only V
 
 ## Current limits against the full design
 
-This is a playable implementation, **not a release-validated full campaign**. Remaining work is tracked in `IMPLEMENTATION_STATUS.md`: active offline aggregation, multi-branch transport, full campaign pacing and mobile/platform/device verification.
+The 30-seed scheduled campaign passes authored milestone medians, with headquarters at a median 38.01 days. This remains **short of full-plan release acceptance**. `IMPLEMENTATION_STATUS.md` records pending independent branch transport, active offline aggregation, active-advantage tuning and device/platform verification.
 
 ## Verification and packaging
 
@@ -79,13 +79,14 @@ Open **Records → Reset campaign**. Type `RESET` to archive the current campaig
 cargo run -p mine-core --release --example campaign -- 30 56 scheduled 8
 ```
 
-This runs 30 seeds for up to 56 days with two 12-minute visits per day and real capped offline advancement. Replace `scheduled` with `attentive` or `continuous` for comparison. Milestone targets are acceptance goals, not claims that current tuning meets them.
+This runs 30 seeds for up to 56 days with two 12-minute visits per day and real capped offline advancement. Replace `scheduled` with `attentive` or `continuous` for comparison. The current corrected strategy passes the authored day/week milestone medians across 30 seeds; individual outliers remain visible in reports.
 
 The harness returns a failure status if any tested campaign misses headquarters completion. `cargo test -p mine-core --release --example campaign` checks that strategy contracts work before pumps, preserve endgame reserves, fund early processing and commission electrolysis before research retirement. Use `cargo run -p mine-core --release --example activity` for an isolated ability comparison; it is not a substitute for full campaign strategy comparison.
 
 After a scheduled campaign report finishes, validate all 30 seeds and authored day/week medians:
 
 ```powershell
+cmd.exe /d /c "cargo run -p mine-core --release --example campaign -- 30 56 scheduled 8 > campaign-report.json"
 bun.exe run check:campaign campaign-report.json
 ```
 
