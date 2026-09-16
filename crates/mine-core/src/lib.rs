@@ -74,6 +74,10 @@ pub struct Game {
     pub ore: BTreeMap<usize, u64>,
     pub hauled: BTreeMap<usize, u64>,
     #[serde(default)]
+    pub concentrate: BTreeMap<usize, u64>,
+    #[serde(default)]
+    pub flow_window: [u64; 5],
+    #[serde(default)]
     pub shipments: Vec<logistics::Shipment>,
     #[serde(default)]
     pub crew: logistics::Crew,
@@ -168,6 +172,8 @@ impl Game {
             removed: vec![],
             ore: BTreeMap::new(),
             hauled: BTreeMap::new(),
+            concentrate: BTreeMap::new(),
+            flow_window: [0; 5],
             shipments: vec![],
             crew: logistics::Crew::assign(3, &BTreeMap::new()),
             products: BTreeMap::new(),
@@ -277,6 +283,10 @@ impl Game {
     }
     pub fn tick(&mut self, cat: &[Material], offline: bool) {
         self.ticks += 1;
+        if self.ticks % 20 == 1 {
+            self.flow_window = [0; 5];
+        }
+        let sold_before = self.sold_mass;
         if !offline && self.ticks % 20 == 0 {
             for c in &mut self.cooldowns {
                 *c = c.saturating_sub(1)
@@ -307,7 +317,7 @@ impl Game {
             300 * (1 + self.level("shaft"))
         };
         for _ in 0..digs.min(200) {
-            if ore_total + mined * 1000 >= cap {
+            if ore_total + (mined + 1) * 1000 > cap {
                 break;
             }
             let target = self
@@ -387,7 +397,18 @@ impl Game {
             self.hauled.values().sum::<u64>()
                 + self.shipments.iter().map(|s| s.amount).sum::<u64>(),
         ));
-        for (&id, q) in &mut self.ore {
+        let mut ore_ids: Vec<_> = self
+            .ore
+            .iter()
+            .filter(|(_, q)| **q > 0)
+            .map(|(&id, _)| id)
+            .collect();
+        if !ore_ids.is_empty() {
+            let offset = self.ticks as usize % ore_ids.len();
+            ore_ids.rotate_left(offset);
+        }
+        for id in ore_ids {
+            let q = self.ore.get_mut(&id).expect("known ore");
             let n = (*q).min(remaining);
             *q -= n;
             if n > 0 {
@@ -402,13 +423,34 @@ impl Game {
             }
             remaining -= n;
         }
+        let sort_rate = (1000. * self.throughput("sorter")) as u64 / 20;
+        let mut sort_left = sort_rate.min(cap.saturating_sub(self.concentrate.values().sum()));
+        let sort_budget = sort_left;
+        let mut sort_ids: Vec<_> = self
+            .hauled
+            .iter()
+            .filter(|(_, q)| **q > 0)
+            .map(|(&id, _)| id)
+            .collect();
+        if !sort_ids.is_empty() {
+            let offset = self.ticks as usize % sort_ids.len();
+            sort_ids.rotate_left(offset);
+        }
+        for id in sort_ids {
+            let quantity = self.hauled.get_mut(&id).expect("known feed");
+            let n = (*quantity).min(sort_left);
+            *quantity -= n;
+            *self.concentrate.entry(id).or_default() += n;
+            sort_left -= n;
+        }
+        let sorted = sort_budget - sort_left;
         let power_demand =
             1 + self.level("chemical") + 2 * self.level("electrolytic") + 3 * self.level("trace");
         let power_supply = 1 + 5 * self.level("power");
         let power_factor = (power_supply as f64 / power_demand as f64).min(1.);
         let process_rate = (power_factor
             * 1000.
-            * self.throughput("sorter")
+            * self.throughput("furnace")
             * (1. + 0.05 * self.ranks.get("metallurgy").copied().unwrap_or(0) as f64)
             * (if !offline && self.boosts[2] > 0 {
                 1.5
@@ -418,7 +460,7 @@ impl Game {
         let process_rate = process_rate / 20;
         let mut left = process_rate;
         let mut feed_ids: Vec<_> = self
-            .hauled
+            .concentrate
             .iter()
             .filter(|(_, q)| **q > 0)
             .map(|(&id, _)| id)
@@ -428,7 +470,7 @@ impl Game {
             feed_ids.rotate_left(offset);
         }
         for id in feed_ids {
-            let q = self.hauled.get_mut(&id).expect("known feed");
+            let q = self.concentrate.get_mut(&id).expect("known feed");
             let m = &cat[id];
             let unlocked = match m.family.as_str() {
                 "physical" => true,
@@ -491,12 +533,15 @@ impl Game {
                 }
             }
         }
+        let mut recovery_space = cap.saturating_sub(self.hauled.values().sum());
         if self.level("reclaimer") > 0 {
             for (&id, q) in &mut self.tailings {
                 let n = (*q).min(
                     1 + u64::from(self.ticks % 20 == 0)
                         * self.ranks.get("reclamation").copied().unwrap_or(0) as u64,
                 );
+                let n = n.min(recovery_space);
+                recovery_space -= n;
                 *q -= n;
                 *self.hauled.entry(id).or_default() += n;
             }
@@ -535,15 +580,34 @@ impl Game {
             self.credit_fraction %= 2000;
         }
         self.depleted = self.depleted.saturating_sub(5);
+        for (i, n) in [
+            mined * 1000,
+            haul_rate - remaining,
+            sorted,
+            process_rate - left,
+            self.sold_mass - sold_before,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            self.flow_window[i] += n;
+        }
+        let seconds = ((self.ticks - 1) % 20 + 1) as f64 / 20.;
         self.stages = vec![
             Stage {
                 name: "Digging".into(),
-                rate: mined as f64 * 20.,
+                rate: self.flow_window[0] as f64 / 1000. / seconds,
                 buffer: self.ore.values().sum(),
                 capacity: cap,
                 blocker: if self.depth() >= depth_limit {
                     "Shaft upgrade required"
-                } else if mined == 0 {
+                } else if self.depth() >= 1500 && self.level("ventilation") == 0 {
+                    "Ventilation required"
+                } else if self.depth() >= 700 && self.level("pump") == 0 {
+                    "Drainage required"
+                } else if self.depth() >= 300 && self.level("supports") == 0 {
+                    "Supports required"
+                } else if ore_total + 1000 > cap {
                     "Hauling buffer full"
                 } else {
                     "Working"
@@ -552,7 +616,7 @@ impl Game {
             },
             Stage {
                 name: "Hauling".into(),
-                rate: (haul_rate - remaining) as f64 / 50.,
+                rate: self.flow_window[1] as f64 / 1000. / seconds,
                 buffer: self.hauled.values().sum(),
                 capacity: cap,
                 blocker: if remaining == haul_rate {
@@ -564,14 +628,14 @@ impl Game {
             },
             Stage {
                 name: "Sorting".into(),
-                rate: (process_rate - left) as f64 / 50.,
-                buffer: 0,
+                rate: self.flow_window[2] as f64 / 1000. / seconds,
+                buffer: self.concentrate.values().sum(),
                 capacity: cap,
                 blocker: "Automatic separation".into(),
             },
             Stage {
                 name: "Refining".into(),
-                rate: (process_rate - left) as f64 / 50.,
+                rate: self.flow_window[3] as f64 / 1000. / seconds,
                 buffer: self.products.values().sum(),
                 capacity: cap,
                 blocker: if self.level("furnace") == 0 {
@@ -583,7 +647,7 @@ impl Game {
             },
             Stage {
                 name: "Dispatch".into(),
-                rate: 0.,
+                rate: self.flow_window[4] as f64 / 1000. / seconds,
                 buffer: 0,
                 capacity: cap,
                 blocker: "Selling surplus".into(),
@@ -862,6 +926,7 @@ impl Game {
             .values()
             .chain(self.ore.values())
             .chain(self.hauled.values())
+            .chain(self.concentrate.values())
             .chain(self.tailings.values())
             .chain(self.reserve.values())
             .any(|v| *v > 1_000_000_000_000)
@@ -873,6 +938,7 @@ impl Game {
                 .ore
                 .keys()
                 .chain(self.hauled.keys())
+                .chain(self.concentrate.keys())
                 .chain(self.tailings.keys())
                 .any(|id| *id >= n)
         {
@@ -965,6 +1031,7 @@ mod accounting_tests {
         }
         let mass: u64 = g.ore.values().sum::<u64>()
             + g.hauled.values().sum::<u64>()
+            + g.concentrate.values().sum::<u64>()
             + g.products.values().sum::<u64>()
             + g.tailings.values().sum::<u64>()
             + g.sold_mass
@@ -1013,5 +1080,22 @@ mod accounting_tests {
                 assert!(available.contains(input), "missing {input}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod pipeline_tests {
+    use super::*;
+    #[test]
+    fn refinery_backpressure_stops_sorting() {
+        let mut g = Game::default();
+        g.concentrate.insert(2, 20000);
+        g.hauled.insert(2, 1000);
+        g.tick(&materials(), false);
+        assert_eq!(g.flow_window[2], 0);
+        assert_eq!(g.hauled[&2], 1000);
+        assert!(g.concentrate[&2] < 20000);
+        g.tick(&materials(), false);
+        assert!(g.flow_window[2] > 0);
     }
 }
