@@ -36,6 +36,7 @@ const app = Bun.spawn([executable, ...(release ? ["--portable"] : [])], {
   stdout: "pipe",
   stderr: "pipe",
 });
+void app.exited.then((code) => console.log("Native process exited", code));
 const stderrLog = new Response(app.stderr).text();
 const stdoutLog = new Response(app.stdout).text();
 let browser: Browser | undefined;
@@ -63,6 +64,9 @@ try {
       console.log(await page.locator("body").innerText());
       throw e;
     });
+  page.on("crash", () => console.log("Native renderer crashed"));
+  page.on("close", () => console.log("Native page closed"));
+  browser.on("disconnected", () => console.log("Native browser disconnected"));
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   const invoke = async (command: string, args: Record<string, unknown> = {}) =>
@@ -348,6 +352,7 @@ try {
         .catch(() => "Body unavailable")}`,
     ).catch(() => {});
   }
+  console.log("Failure process state", app.exitCode, "browser connected", browser?.isConnected());
   throw error;
 } finally {
   await browser?.close();

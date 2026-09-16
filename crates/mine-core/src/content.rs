@@ -55,6 +55,7 @@ fn progression(
     }
     for u in upgrades {
         if (!u.requires.is_empty() && !ids.contains(u.requires.as_str()))
+            || u.research_points > 5000
             || u.inputs.values().any(|n| *n == 0)
         {
             return Err(format!("Invalid upgrade {}", u.id));

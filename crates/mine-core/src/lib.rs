@@ -83,6 +83,8 @@ pub fn traces() -> &'static [TraceRule] {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct UpgradeRequirement {
     pub id: String,
+    #[serde(default)]
+    pub research_points: u64,
     pub requires: String,
     pub inputs: BTreeMap<String, u64>,
 }
@@ -399,10 +401,25 @@ impl Game {
         };
         (base * growth.powi(n as i32)).ceil() as u64
     }
+    pub fn research_invested(&self) -> u64 {
+        self.ranks
+            .values()
+            .map(|&r| {
+                let r = r as u64;
+                pacing::get().research_base * r * (r + 1) * (2 * r + 1) / 6
+            })
+            .sum()
+    }
     pub fn purchase_blocker(&self, id: &str) -> Option<String> {
         let Some(u) = requirements().iter().find(|u| u.id == id) else {
             return Some("Unknown upgrade".into());
         };
+        if self.research_invested() < u.research_points {
+            return Some(format!(
+                "Requires {} headquarters research invested",
+                u.research_points
+            ));
+        }
         if id == "worker" && self.workers >= self.housing {
             return Some("Build more housing".into());
         }
@@ -1707,6 +1724,12 @@ impl Game {
                 if self.megaproject {
                     return Err("Project already complete".into());
                 }
+                if self.research_invested() < pacing::get().headquarters_research {
+                    return Err(format!(
+                        "Invest {} research in headquarters first",
+                        pacing::get().headquarters_research
+                    ));
+                }
                 let needs = [
                     ("advanced_structure", 10 * UNITS),
                     ("precision_controls", 10 * UNITS),
@@ -2952,5 +2975,58 @@ mod recipe_fairness_tests {
         }
         assert!(g.products.get("steel").copied().unwrap_or(0) > 0);
         assert!(g.products.get("magnets").copied().unwrap_or(0) > 0);
+    }
+}
+
+#[cfg(test)]
+mod campaign_research_tests {
+    use super::*;
+    #[test]
+    fn industry_requires_retained_research_investment_without_spending_it_again() {
+        let mut g = Game::new(42, 1);
+        g.credits = 10000;
+        g.levels.insert("steelworks".into(), 1);
+        g.products.insert("steel".into(), 10 * UNITS);
+        let purchase = || Action {
+            sequence: 1,
+            kind: "buy".into(),
+            target: "power".into(),
+            value: 0,
+        };
+        assert!(g.action(purchase()).is_err());
+        assert_eq!(g.credits, 10000);
+        assert_eq!(g.products["steel"], 10 * UNITS);
+        g.ranks.insert("excavation".into(), 3);
+        assert_eq!(g.research_invested(), 70);
+        g.action(purchase()).unwrap();
+        assert_eq!(g.research_invested(), 70);
+        assert_eq!(g.level("power"), 1);
+        assert!(g.purchase_blocker("chemical").unwrap().contains("research"));
+    }
+    #[test]
+    fn headquarters_requires_research_and_components_atomically() {
+        let mut g = Game::new(42, 1);
+        for p in [
+            "advanced_structure",
+            "precision_controls",
+            "magnets",
+            "batteries",
+        ] {
+            g.products.insert(p.into(), 10 * UNITS);
+        }
+        let command = || Action {
+            sequence: 1,
+            kind: "megaproject".into(),
+            target: String::new(),
+            value: 0,
+        };
+        let products = g.products.clone();
+        assert!(g.action(command()).is_err());
+        assert_eq!(g.products, products);
+        g.ranks.insert("metallurgy".into(), 7);
+        assert_eq!(g.research_invested(), 700);
+        g.action(command()).unwrap();
+        assert!(g.megaproject);
+        assert_eq!(g.products.values().sum::<u64>(), 0);
     }
 }

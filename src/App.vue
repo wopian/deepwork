@@ -5,6 +5,7 @@ import { RESOURCE_UNIT, CELLS_PER_METRE } from "./geometry";
 import upgradeRequirements from "../content/upgrades.json";
 import profiles from "../content/sites.json";
 import recipes from "../content/recipes.json";
+import pacing from "../content/pacing.json";
 import { preferences } from "./preferences";
 import {
   state,
@@ -634,7 +635,11 @@ onMounted(start);
                 .map(([name, n]) => `${Number(n) / 1000} ${name}`)
                 .join(" + ")
             }}</small
-            ><small>Requires {{ upgrade.requires }}</small></strong
+            ><small>Requires {{ upgrade.requires }}</small
+            ><small v-if="upgrade.research_points"
+              >{{ upgrade.research_points }} headquarters research
+              invested</small
+            ></strong
           >
         </button>
       </div>
@@ -712,7 +717,9 @@ onMounted(start);
       <h2>Headquarters megaproject</h2>
       <p>
         Reserve ten units each of advanced structures, precision controls,
-        magnets and batteries.
+        magnets and batteries. Invest
+        {{ pacing.headquarters_research }} research across headquarters branches
+        ({{ state?.research_invested ?? 0 }} invested).
       </p>
       <button
         :disabled="!state || state.megaproject"

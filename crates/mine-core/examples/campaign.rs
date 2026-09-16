@@ -2,6 +2,24 @@
 use mine_core::{materials, pacing, recipes, requirements, Action, Game};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+const BUILD_ORDER: &[&str] = &[
+    "conveyor",
+    "furnace",
+    "steelworks",
+    "shaft",
+    "supports",
+    "minecart",
+    "power",
+    "manufacturing",
+    "chemical",
+    "pump",
+    "electrolytic",
+    "ventilation",
+    "trace",
+    "train",
+    "reclaimer",
+    "slagcrusher",
+];
 fn act(g: &mut Game, kind: &str, target: &str, value: u64) -> bool {
     g.action(Action {
         sequence: g.last_sequence + 1,
@@ -64,6 +82,32 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
     if g.specialisation.is_none() {
         act(g, "specialise", style, 0);
     }
+    let mut research_goal = BUILD_ORDER
+        .iter()
+        .find(|id| g.level(id) == 0)
+        .and_then(|id| requirements().iter().find(|u| u.id == **id))
+        .map(|u| u.research_points)
+        .unwrap_or(pacing::get().headquarters_research);
+    let endgame_known = [
+        "advanced_structure",
+        "precision_controls",
+        "magnets",
+        "batteries",
+    ]
+    .iter()
+    .all(|p| g.collection.contains(*p));
+    if endgame_known {
+        research_goal = pacing::get().headquarters_research;
+    }
+    if g.site > 1
+        && g.depth() >= 300
+        && g.steel_made
+        && g.research_invested() < research_goal
+        && (BUILD_ORDER.iter().any(|id| g.level(id) == 0) || endgame_known)
+    {
+        act(g, "retire", "", (g.site % 3) as u64);
+        return;
+    }
     // One early retirement tests retained research, site selection and fresh local economy.
     if g.site == 1 && g.steel_made && g.depth() >= 300 {
         act(
@@ -77,26 +121,7 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
             },
         );
     }
-    let order = [
-        "conveyor",
-        "furnace",
-        "steelworks",
-        "shaft",
-        "supports",
-        "minecart",
-        "power",
-        "manufacturing",
-        "chemical",
-        "pump",
-        "electrolytic",
-        "ventilation",
-        "trace",
-        "train",
-        "reclaimer",
-        "slagcrusher",
-        "water_recovery",
-        "heat_recovery",
-    ];
+    let order = BUILD_ORDER;
     let next = order
         .iter()
         .find(|id| g.level(id) == 0 && requirements().iter().any(|u| u.id == **id));
@@ -310,7 +335,7 @@ fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
         } else {
             0
         };
-        std::fs::write(format!("target/campaign-{seed}.json"), serde_json::to_vec_pretty(&json!({"seed":seed,"visit":visit+1,"site":g.site,"depth":g.depth(),"next":g.pinned,"products":g.products,"trace":g.trace_feed,"levels":g.levels,"recipes":g.enabled_recipes,"credits":g.credits,"shaft_blocker":g.purchase_blocker("shaft")})).unwrap()).unwrap();
+        std::fs::write(format!("target/campaign-{seed}.json"), serde_json::to_vec_pretty(&json!({"seed":seed,"visit":visit+1,"site":g.site,"depth":g.depth(),"next":g.pinned,"products":g.products,"trace":g.trace_feed,"levels":g.levels,"recipes":g.enabled_recipes,"paused_recipes":g.paused_recipes,"credits":g.credits,"ranks":g.ranks,"research":g.research,"invested":g.research_invested(),"shaft_blocker":g.purchase_blocker("shaft")})).unwrap()).unwrap();
         eprintln!(
             "seed={seed} strategy={style} mode={mode} visit={} depth={} next={:?} credits={}",
             visit + 1,
@@ -323,6 +348,9 @@ fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
 }
 fn main() {
     mine_core::content::validate().unwrap();
+    assert!(BUILD_ORDER
+        .iter()
+        .all(|id| requirements().iter().any(|u| u.id == *id)));
     let args: Vec<_> = std::env::args().collect();
     let seeds = args
         .get(1)
@@ -334,6 +362,10 @@ fn main() {
         .unwrap_or(42);
     let mode = args.get(3).map(String::as_str).unwrap_or("scheduled");
     assert!(["scheduled", "attentive", "continuous"].contains(&mode));
+    let seed_start = args
+        .get(5)
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(42);
     let workers = args
         .get(4)
         .and_then(|v| v.parse::<usize>().ok())
@@ -352,8 +384,10 @@ fn main() {
                 if index >= seeds {
                     break;
                 }
-                let style = ["bulk", "precision", "reclamation"][index as usize % 3];
-                sender.send(run(42 + index, style, days, mode)).unwrap();
+                let style = ["bulk", "precision", "reclamation"][(seed_start + index) as usize % 3];
+                sender
+                    .send(run(seed_start + index, style, days, mode))
+                    .unwrap();
             });
         }
         drop(sender);

@@ -35,6 +35,7 @@ struct Snapshot {
     shipments: Vec<mine_core::transport::VisualCargo>,
     work_route: Vec<[u32; 2]>,
     raw_stock_capacity: u64,
+    research_invested: u64,
     upgrade_previews: std::collections::BTreeMap<String, mine_core::UpgradePreview>,
     purchase_blockers: std::collections::BTreeMap<String, String>,
 }
@@ -65,6 +66,7 @@ impl From<Game> for Snapshot {
             shipments: game.transport.visual(),
             work_route: game.work_route().to_vec(),
             raw_stock_capacity: game.raw_stock_capacity(),
+            research_invested: game.research_invested(),
             game,
             quotes,
             retirement_award,

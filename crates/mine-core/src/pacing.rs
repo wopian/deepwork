@@ -12,6 +12,7 @@ pub struct Pacing {
     pub sorting_rate: f64,
     pub refining_rate: f64,
     pub research_base: u64,
+    pub headquarters_research: u64,
     pub starter_hold_units: u64,
     pub starter_iron_multiplier: u64,
     pub foundation_upgrades: Vec<String>,
@@ -40,6 +41,8 @@ pub fn validate() -> Result<(), String> {
             .iter()
             .any(|v| !v.is_finite() || !(0.01..=100.).contains(v))
         || p.research_base == 0
+        || p.headquarters_research == 0
+        || p.headquarters_research > 5000
         || p.starter_hold_units > 8
         || !(1..=4).contains(&p.starter_iron_multiplier)
         || p.foundation_upgrades

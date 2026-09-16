@@ -48,28 +48,32 @@
     "requires": "steelworks",
     "inputs": {
       "steel": 1000
-    }
+    },
+    "research_points": 70
   },
   {
     "id": "chemical",
     "requires": "steelworks",
     "inputs": {
       "steel": 2000
-    }
+    },
+    "research_points": 150
   },
   {
     "id": "electrolytic",
     "requires": "chemical",
     "inputs": {
       "wiring": 1000
-    }
+    },
+    "research_points": 275
   },
   {
     "id": "trace",
     "requires": "electrolytic",
     "inputs": {
       "aluminium": 2000
-    }
+    },
+    "research_points": 455
   },
   {
     "id": "recovery",
