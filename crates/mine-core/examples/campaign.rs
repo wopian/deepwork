@@ -34,9 +34,6 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
         act(g, "buy", "worker", 0);
     }
     for i in 0..3 {
-        if g.level("pump") == 0 {
-            continue;
-        }
         let c = &g.contracts[i];
         let committed = g
             .pinned
@@ -383,7 +380,10 @@ fn main() {
         .get(4)
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(4)
-        .clamp(1, 8);
+        .clamp(
+            1,
+            std::thread::available_parallelism().map_or(4, usize::from),
+        );
     std::fs::write("target/campaign-progress.json", "[]").unwrap();
     let next = std::sync::atomic::AtomicU64::new(0);
     let (sender, receiver) = std::sync::mpsc::channel();
@@ -436,5 +436,30 @@ fn main() {
     if runs.iter().any(|run| run["complete"] != true) {
         eprintln!("Campaign acceptance failed: not every seed completed headquarters");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod strategy_tests {
+    use super::*;
+    #[test]
+    fn early_contracts_reward_research_without_spending_endgame_reserves() {
+        let mut g = Game::default();
+        for c in &g.contracts {
+            g.products.insert(c.product.clone(), c.amount);
+        }
+        strategy(&mut g, "bulk", false);
+        assert!(g.site_objectives.len() >= 2);
+        assert_eq!(g.level("pump"), 0);
+        let mut held = Game::default();
+        held.contracts[0].product = "magnets".into();
+        held.contracts[0].amount = mine_core::geometry::UNITS;
+        held.products
+            .insert("magnets".into(), 10 * mine_core::geometry::UNITS);
+        held.reserve
+            .insert("magnets".into(), 10 * mine_core::geometry::UNITS);
+        strategy(&mut held, "bulk", false);
+        assert!(!held.contracts[0].complete);
+        assert_eq!(held.products["magnets"], 10 * mine_core::geometry::UNITS);
     }
 }
