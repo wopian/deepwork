@@ -65,6 +65,12 @@ export interface Game {
   slag: number;
   depleted: number;
   lifetime_waste: number;
+  waste_profile: {
+    heights: number[];
+    pitch: number;
+    origin: number;
+    discharge: number;
+  };
   excavated: number;
   discoveries: number[];
   collection: string[];

@@ -3,6 +3,7 @@ pub mod geology;
 pub mod geometry;
 pub mod logistics;
 pub mod terrain;
+pub mod waste;
 pub use geometry::WIDTH;
 use geometry::{CELL_MASS, UNITS};
 use serde::{Deserialize, Serialize};
@@ -184,6 +185,8 @@ pub struct Game {
     #[serde(default)]
     pub disposed_mass: u64,
     pub lifetime_waste: u64,
+    #[serde(default)]
+    pub waste_profile: waste::WasteProfile,
     pub excavated: u64,
     pub discoveries: BTreeSet<usize>,
     #[serde(default)]
@@ -320,6 +323,7 @@ impl Game {
             depleted: 0,
             disposed_mass: 0,
             lifetime_waste: 0,
+            waste_profile: waste::WasteProfile::default(),
             excavated: 0,
             discoveries: BTreeSet::new(),
             collection: BTreeSet::new(),
@@ -723,7 +727,7 @@ impl Game {
         let digs = (self.dig_progress / 1000) as u32;
         self.dig_progress %= 1000;
         let depth_limit = if self.level("shaft") == 0 {
-            100
+            48
         } else {
             300 * (1 + self.level("shaft"))
         };
@@ -1080,6 +1084,10 @@ impl Game {
             self.slag -= reclaimed;
             *self.products.entry("aggregate".into()).or_default() += reclaimed;
         }
+        if self.ticks % 20 == 0 {
+            self.waste_profile
+                .reconcile(self.slag + self.depleted + self.tailings.values().sum::<u64>());
+        }
         for (i, n) in [
             mined * CELL_MASS,
             haul_budget - remaining,
@@ -1252,6 +1260,10 @@ impl Game {
                     self.flow_window = [0; 5];
                 }
                 let transport_seconds = ((self.ticks + skip) / 20 - self.ticks / 20) as u32;
+                if transport_seconds > 0 {
+                    self.waste_profile
+                        .reconcile(self.slag + self.depleted + self.tailings.values().sum::<u64>());
+                }
                 for shipment in &mut self.shipments {
                     shipment.remaining = shipment.remaining.saturating_sub(transport_seconds);
                 }
@@ -1648,6 +1660,9 @@ impl Game {
             .is_some_and(|s| !["bulk", "precision", "reclamation"].contains(&s))
         {
             return Err("Invalid specialisation".into());
+        }
+        if !self.waste_profile.valid() {
+            return Err("Invalid waste profile".into());
         }
         if self.version != VERSION || self.generator_version != geometry::GENERATOR_VERSION {
             return Err("Unsupported save version".into());

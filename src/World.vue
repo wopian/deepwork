@@ -46,7 +46,9 @@ function rect(
 function draw() {
   if (!app) return;
   const g = state.value;
-  const W = 1100;
+  const scale = (app.screen.width / 1100) * zoom;
+  const groundLeft = Math.floor(-offsetX / scale) - 1100;
+  const W = Math.ceil(app.screen.width / scale) + 2200;
   const first = Math.max(
     0,
     Math.floor(-offsetY / ((app.screen.width / 1100) * zoom) / CELL_PIXEL) - 30,
@@ -70,16 +72,18 @@ function draw() {
     g?.housing,
     first,
     last,
-    Math.floor(stored / 3000),
+    groundLeft,
+    W,
+    JSON.stringify(g?.waste_profile),
     Math.floor((g?.lifetime_waste ?? 0) / RESOURCE_UNIT),
     JSON.stringify(g?.levels),
   ].join(":");
   if (key === drawnKey) return;
   drawnKey = key;
   terrain.clear();
-  rect(terrain, 0, 190, W, (last + 5) * CELL_PIXEL, 0x806044);
-  rect(terrain, 0, 188, W, 8, 0x6b8f47);
-  rect(terrain, 0, 196, W, 12, 0xd8bc7d);
+  rect(terrain, groundLeft, 190, W, (last + 5) * CELL_PIXEL, 0x806044);
+  rect(terrain, groundLeft, 188, W, 8, 0x6b8f47);
+  rect(terrain, groundLeft, 196, W, 12, 0xd8bc7d);
   fineTerrain.update(g?.terrain, first, last);
   // Fixed district slots grow upward, keeping routes and touch camera targets stable.
   const levels = g?.levels ?? {
@@ -191,18 +195,15 @@ function draw() {
     ? Object.values(g.tailings).reduce((a, b) => a + b, 0) + g.slag + g.depleted
     : 0;
   wasteLabel.text = `LIFETIME ${format((g?.lifetime_waste ?? 0) / RESOURCE_UNIT)} units`;
-  // Older spoil uses a bounded stack of coarse bands, independent of resource ledgers.
-  const strata = Math.min(
-    12,
-    Math.floor(Math.log2(1 + storedWaste / RESOURCE_UNIT)),
-  );
-  for (let band = 0; band < strata; band++)
-    rect(terrain, 925, 208 + band * 7, 150, 6, band % 2 ? 0x806044 : 0x8c9ba5);
-  const waste = Math.min(64, 12 + storedWaste / (3 * RESOURCE_UNIT));
-  for (let i = 0; i < 18; i++) {
-    let h = Math.max(0, waste - Math.abs(i - 9) * 4);
-    rect(terrain, 939 + i * 7, 190 - h, 7, h, 0x8c9ba5);
-  }
+  const pile = g?.waste_profile;
+  if (pile)
+    for (let i = 0; i < pile.heights.length; i++) {
+      const height = pile.heights[i]! / 1024;
+      if (height <= 0) continue;
+      const x = 1000 + pile.origin + i * pile.pitch;
+      rect(terrain, x, 190 - height, pile.pitch, Math.ceil(height), 0x8c9ba5);
+      if (height > 5) rect(terrain, x, 193 - height, pile.pitch, 1, 0x806044);
+    }
 }
 onMounted(async () => {
   app = new Application();
@@ -301,11 +302,23 @@ onMounted(async () => {
       }
       if (!preferences.reducedMotion)
         wasteParticles.emit(
-          Math.ceil(Math.max(0, g.lifetime_waste - lastWaste) / 50),
+          Math.ceil(
+            Math.max(0, g.lifetime_waste - lastWaste) / (RESOURCE_UNIT / 20),
+          ),
+          1000 +
+            g.waste_profile.origin +
+            g.waste_profile.discharge * g.waste_profile.pitch,
+          170 -
+            (g.waste_profile.heights[g.waste_profile.discharge] ?? 0) / 1024,
         );
       lastWaste = g.lifetime_waste;
     }
-    wasteParticles.step(ticker.deltaTime, 188);
+    wasteParticles.step(ticker.deltaTime, (x) => {
+      const pile = state.value?.waste_profile;
+      if (!pile) return 188;
+      const index = Math.floor((x - 1000 - pile.origin) / pile.pitch);
+      return 188 - (pile.heights[index] ?? 0) / 1024;
+    });
     for (const particle of wasteParticles.items) {
       rect(actors, particle.x, particle.y, 3, 3, 0x8c9ba5);
     }
