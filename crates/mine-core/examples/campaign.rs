@@ -436,7 +436,13 @@ fn main() {
             .collect();
         times.sort_unstable();
         let median = times.get(times.len() / 2).copied();
-        medians.insert(name,json!({"median_seconds":median,"reached":times.len(),"target_seconds":window,"in_window":median.is_some_and(|v|v>=window[0]&&v<=window[1])}));
+        let early = window[1] <= 3600;
+        let comparable = if early {
+            mode == "continuous"
+        } else {
+            mode != "continuous"
+        };
+        medians.insert(name,json!({"median_seconds":median,"reached":times.len(),"target_seconds":window,"comparison_basis":if early { "continuous first-site play" } else { "two daily 12-minute visits" },"in_window":comparable.then(||median.is_some_and(|v|v>=window[0]&&v<=window[1]))}));
     }
     println!(
         "{}",
@@ -444,7 +450,7 @@ fn main() {
             .unwrap()
     );
     if runs.iter().any(|run| run["complete"] != true) {
-        eprintln!("Campaign acceptance failed: not every seed completed headquarters");
+        eprintln!("Campaign acceptance incomplete: not every seed reached headquarters within {days} days; inspect blockers and still-progressing runs");
         std::process::exit(1);
     }
 }

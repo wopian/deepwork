@@ -3134,3 +3134,24 @@ mod tactics_unlock_tests {
         .unwrap();
     }
 }
+
+#[cfg(test)]
+mod precision_budget_tests {
+    use super::*;
+    #[test]
+    fn headquarters_controls_fit_finite_copper_reserve() {
+        let mut g = Game::default();
+        g.levels.insert("manufacturing".into(), 1);
+        g.enabled_recipes.insert("controls".into());
+        g.products.insert("silicon".into(), 10 * UNITS);
+        g.products.insert("copper".into(), UNITS);
+        g.products.insert("gallium".into(), UNITS / 20);
+        g.reserve.insert("silicon".into(), 10 * UNITS);
+        g.reserve.insert("precision_controls".into(), 10 * UNITS);
+        for _ in 0..60 {
+            g.second(&materials(), false);
+        }
+        assert_eq!(g.products["precision_controls"], 10 * UNITS);
+        assert!(g.products["copper"] > 0);
+    }
+}
