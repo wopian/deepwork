@@ -53,6 +53,19 @@ pub fn traces() -> &'static [TraceRule] {
         serde_json::from_str(include_str!("../../../content/traces.json")).expect("valid traces")
     })
 }
+#[derive(Clone, Serialize, Deserialize)]
+pub struct UpgradeRequirement {
+    pub id: String,
+    pub requires: String,
+    pub inputs: BTreeMap<String, u64>,
+}
+pub fn requirements() -> &'static [UpgradeRequirement] {
+    static DATA: std::sync::OnceLock<Vec<UpgradeRequirement>> = std::sync::OnceLock::new();
+    DATA.get_or_init(|| {
+        serde_json::from_str(include_str!("../../../content/upgrades.json"))
+            .expect("valid upgrade requirements")
+    })
+}
 pub fn materials() -> Vec<Material> {
     serde_json::from_str(include_str!("../../../content/materials.json"))
         .expect("valid material catalogue")
@@ -632,7 +645,15 @@ impl Game {
                 .get(p)
                 .copied()
                 .unwrap_or(0)
-                .max(if recipe_hold { 8000 } else { 0 });
+                .max(if recipe_hold { 8000 } else { 0 })
+                .max(
+                    self.pinned
+                        .as_ref()
+                        .and_then(|id| requirements().iter().find(|u| u.id == *id))
+                        .and_then(|u| u.inputs.get(p))
+                        .copied()
+                        .unwrap_or(0),
+                );
             let contract_hold = self
                 .contracts
                 .iter()
@@ -795,11 +816,29 @@ impl Game {
                 if self.level(&a.target) >= 50 {
                     return Err("Maximum level".into());
                 }
+                let requirement = requirements()
+                    .iter()
+                    .find(|u| u.id == a.target)
+                    .ok_or("Unknown upgrade")?;
+                if !requirement.requires.is_empty() && self.level(&requirement.requires) == 0 {
+                    return Err(format!("Requires {}", requirement.requires));
+                }
+                if let Some((product, _)) = requirement
+                    .inputs
+                    .iter()
+                    .find(|(p, n)| self.products.get(*p).copied().unwrap_or(0) < **n)
+                {
+                    return Err(format!("Reserve more {product} for this upgrade"));
+                }
                 let cost = self.cost(&a.target);
                 if self.credits < cost {
                     return Err("Insufficient credits".into());
                 }
                 self.credits -= cost;
+                for (p, n) in &requirement.inputs {
+                    *self.products.entry(p.clone()).or_default() -= n;
+                    self.delivered_mass += n;
+                }
                 match a.target.as_str() {
                     "worker" => self.workers += 1,
                     "housing" => self.housing += 4,
@@ -824,6 +863,16 @@ impl Game {
                 } else {
                     return Err("Three priorities maximum".into());
                 }
+            }
+            "pin" => {
+                if !requirements().iter().any(|u| u.id == a.target) {
+                    return Err("Unknown upgrade".into());
+                }
+                self.pinned = if self.pinned.as_ref() == Some(&a.target) {
+                    None
+                } else {
+                    Some(a.target)
+                };
             }
             "reserve" => {
                 if a.value > 1_000_000_000 {
@@ -1262,5 +1311,37 @@ mod waste_tests {
         assert_eq!(g.disposed_mass, 5);
         assert_eq!(g.slag, 100);
         assert_eq!(g.tailings[&2], 100);
+    }
+}
+
+#[cfg(test)]
+mod upgrade_tests {
+    use super::*;
+    #[test]
+    fn unavailable_materials_do_not_spend_credits() {
+        let mut g = Game::default();
+        g.credits = 10000;
+        g.levels.insert("furnace".into(), 1);
+        let a = Action {
+            sequence: 1,
+            kind: "buy".into(),
+            target: "shaft".into(),
+            value: 0,
+        };
+        assert!(g.action(a.clone()).is_err());
+        assert_eq!(g.credits, 10000);
+        g.products.insert("iron".into(), 2000);
+        g.action(a).unwrap();
+        assert_eq!(g.products["iron"], 0);
+        assert_eq!(g.delivered_mass, 2000);
+    }
+    #[test]
+    fn pin_holds_upgrade_material() {
+        let mut g = Game::default();
+        g.pinned = Some("shaft".into());
+        g.products.insert("iron".into(), 3000);
+        g.contracts.clear();
+        g.tick(&materials(), false);
+        assert_eq!(g.products["iron"], 2000);
     }
 }

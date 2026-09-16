@@ -22,6 +22,7 @@ export interface Game {
   policy: string;
   priorities: number[];
   reserve: Record<string, number>;
+  pinned: string | null;
   shipments: {
     material: number;
     amount: number;

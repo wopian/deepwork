@@ -1,0 +1,146 @@
+[
+  {
+    "id": "worker",
+    "requires": "",
+    "inputs": {}
+  },
+  {
+    "id": "housing",
+    "requires": "",
+    "inputs": {}
+  },
+  {
+    "id": "drill",
+    "requires": "",
+    "inputs": {}
+  },
+  {
+    "id": "conveyor",
+    "requires": "",
+    "inputs": {}
+  },
+  {
+    "id": "sorter",
+    "requires": "",
+    "inputs": {}
+  },
+  {
+    "id": "furnace",
+    "requires": "",
+    "inputs": {}
+  },
+  {
+    "id": "shaft",
+    "requires": "furnace",
+    "inputs": {
+      "iron": 2000
+    }
+  },
+  {
+    "id": "steelworks",
+    "requires": "furnace",
+    "inputs": {
+      "iron": 2000
+    }
+  },
+  {
+    "id": "power",
+    "requires": "steelworks",
+    "inputs": {
+      "steel": 1000
+    }
+  },
+  {
+    "id": "chemical",
+    "requires": "steelworks",
+    "inputs": {
+      "steel": 2000
+    }
+  },
+  {
+    "id": "electrolytic",
+    "requires": "chemical",
+    "inputs": {
+      "wiring": 1000
+    }
+  },
+  {
+    "id": "trace",
+    "requires": "electrolytic",
+    "inputs": {
+      "aluminium": 2000
+    }
+  },
+  {
+    "id": "recovery",
+    "requires": "",
+    "inputs": {}
+  },
+  {
+    "id": "capacity",
+    "requires": "",
+    "inputs": {}
+  },
+  {
+    "id": "reclaimer",
+    "requires": "",
+    "inputs": {}
+  },
+  {
+    "id": "manufacturing",
+    "requires": "steelworks",
+    "inputs": {
+      "steel": 1000
+    }
+  },
+  {
+    "id": "supports",
+    "requires": "steelworks",
+    "inputs": {
+      "steel": 1000
+    }
+  },
+  {
+    "id": "pump",
+    "requires": "chemical",
+    "inputs": {
+      "steel": 1000
+    }
+  },
+  {
+    "id": "ventilation",
+    "requires": "power",
+    "inputs": {
+      "wiring": 1000
+    }
+  },
+  {
+    "id": "wheelbarrow",
+    "requires": "",
+    "inputs": {}
+  },
+  {
+    "id": "minecart",
+    "requires": "shaft",
+    "inputs": {
+      "steel": 1000
+    }
+  },
+  {
+    "id": "train",
+    "requires": "minecart",
+    "inputs": {
+      "steel": 2000
+    }
+  },
+  {
+    "id": "survey",
+    "requires": "",
+    "inputs": {}
+  },
+  {
+    "id": "slagcrusher",
+    "requires": "",
+    "inputs": {}
+  }
+]

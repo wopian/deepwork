@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import World from "./World.vue";
+import upgradeRequirements from "../content/upgrades.json";
 import profiles from "../content/sites.json";
 import recipes from "../content/recipes.json";
 import { preferences } from "./preferences";
@@ -16,6 +17,9 @@ import {
   exportSave,
   importSave,
 } from "./game";
+const materialUpgrades = upgradeRequirements.filter(
+  (u) => Object.keys(u.inputs).length,
+);
 const selectedSite = ref(0);
 const tab = ref("Operations");
 const query = ref("");
@@ -324,6 +328,28 @@ onMounted(start);
         <div v-for="(qty, name) in state?.trace_feed" class="inventory">
           {{ name }} · {{ format(qty / 1000) }} units
         </div>
+      </div>
+      <h2>Next equipment purchase</h2>
+      <p>
+        Pin an upgrade to reserve its material cost automatically. Pin again to
+        release it.
+      </p>
+      <div class="mineral-grid">
+        <button
+          v-for="upgrade in materialUpgrades"
+          :class="{ selected: state?.pinned === upgrade.id }"
+          @click="act('pin', upgrade.id)"
+        >
+          <strong
+            >{{ upgrade.id
+            }}<small>{{
+              Object.entries(upgrade.inputs)
+                .map(([name, n]) => `${Number(n) / 1000} ${name}`)
+                .join(" + ")
+            }}</small
+            ><small>Requires {{ upgrade.requires }}</small></strong
+          >
+        </button>
       </div>
       <h2>Stockpile reserves</h2>
       <div class="mineral-grid">
