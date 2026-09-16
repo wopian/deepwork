@@ -700,3 +700,5 @@ nav {
 @media (max-width: 600px) { .specialisation-options { grid-template-columns: 1fr; } }
 
 .crew-roster { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 16px; margin: 0; color: var(--muted); font: 11px monospace; }
+
+.upgrade-blocker { grid-column: 2 / -1; white-space: normal; font-size: 11px; }

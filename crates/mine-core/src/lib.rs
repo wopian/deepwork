@@ -1,3 +1,4 @@
+pub mod content;
 pub mod logistics;
 pub mod terrain;
 use serde::{Deserialize, Serialize};
@@ -323,6 +324,31 @@ impl Game {
             )
         };
         (base * growth.powi(n as i32)).ceil() as u64
+    }
+    pub fn purchase_blocker(&self, id: &str) -> Option<String> {
+        let Some(u) = requirements().iter().find(|u| u.id == id) else {
+            return Some("Unknown upgrade".into());
+        };
+        if id == "worker" && self.workers >= self.housing {
+            return Some("Build more housing".into());
+        }
+        if self.level(id) >= 50 {
+            return Some("Maximum level".into());
+        }
+        if !u.requires.is_empty() && self.level(&u.requires) == 0 {
+            return Some(format!("Requires {}", u.requires));
+        }
+        if let Some((p, n)) = u
+            .inputs
+            .iter()
+            .find(|(p, n)| self.products.get(*p).copied().unwrap_or(0) < **n)
+        {
+            return Some(format!("Needs {} {}", *n as f64 / 1000., p));
+        }
+        if self.credits < self.cost(id) {
+            return Some("More credits required".into());
+        }
+        None
     }
     pub fn award(&self) -> u64 {
         (10. * (self.depth() as f64 / 300.).sqrt()).floor() as u64
@@ -928,55 +954,13 @@ impl Game {
                 self.specialisation = Some(a.target.clone());
             }
             "buy" => {
-                let allowed = [
-                    "worker",
-                    "housing",
-                    "drill",
-                    "conveyor",
-                    "sorter",
-                    "furnace",
-                    "shaft",
-                    "steelworks",
-                    "power",
-                    "chemical",
-                    "electrolytic",
-                    "trace",
-                    "recovery",
-                    "capacity",
-                    "reclaimer",
-                    "manufacturing",
-                    "supports",
-                    "pump",
-                    "ventilation",
-                    "wheelbarrow",
-                    "minecart",
-                    "train",
-                    "survey",
-                    "slagcrusher",
-                ];
-                if !allowed.contains(&a.target.as_str()) {
-                    return Err("Unknown upgrade".into());
-                }
-                if a.target == "worker" && self.workers >= self.housing {
-                    return Err("Build more housing".into());
-                }
-                if self.level(&a.target) >= 50 {
-                    return Err("Maximum level".into());
+                if let Some(reason) = self.purchase_blocker(&a.target) {
+                    return Err(reason);
                 }
                 let requirement = requirements()
                     .iter()
                     .find(|u| u.id == a.target)
-                    .ok_or("Unknown upgrade")?;
-                if !requirement.requires.is_empty() && self.level(&requirement.requires) == 0 {
-                    return Err(format!("Requires {}", requirement.requires));
-                }
-                if let Some((product, _)) = requirement
-                    .inputs
-                    .iter()
-                    .find(|(p, n)| self.products.get(*p).copied().unwrap_or(0) < **n)
-                {
-                    return Err(format!("Reserve more {product} for this upgrade"));
-                }
+                    .expect("validated upgrade");
                 let cost = self.cost(&a.target);
                 if self.credits < cost {
                     return Err("Insufficient credits".into());

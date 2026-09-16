@@ -26,6 +26,7 @@ struct Snapshot {
     game: Game,
     quotes: std::collections::BTreeMap<String, u64>,
     retirement_award: u64,
+    purchase_blockers: std::collections::BTreeMap<String, String>,
 }
 impl From<Game> for Snapshot {
     fn from(game: Game) -> Self {
@@ -41,10 +42,18 @@ impl From<Game> for Snapshot {
             )
             .collect();
         let retirement_award = game.award();
+        let purchase_blockers = mine_core::requirements()
+            .iter()
+            .filter_map(|u| {
+                game.purchase_blocker(&u.id)
+                    .map(|reason| (u.id.clone(), reason))
+            })
+            .collect();
         Self {
             game,
             quotes,
             retirement_award,
+            purchase_blockers,
         }
     }
 }
@@ -110,6 +119,7 @@ fn import_save(data: String, state: State<Runtime>) -> Result<Snapshot, String> 
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            mine_core::content::validate().map_err(std::io::Error::other)?;
             let dir = app.path().app_data_dir()?;
             // Integration tests use isolated saves; release builds ignore this override.
             #[cfg(debug_assertions)]

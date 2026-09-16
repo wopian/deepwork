@@ -241,7 +241,7 @@ onMounted(start);
               class="upgrade"
               v-for="u in orderedUpgrades"
               :key="u[0]"
-              :disabled="!state || Number(state.credits) < cost(u[0])"
+              :disabled="!state || !!state.purchase_blockers[u[0]]"
               @click="act('buy', u[0])"
             >
               <div class="upgrade-icon">
@@ -253,6 +253,7 @@ onMounted(start);
                 <small>LEVEL {{ state?.levels[u[0]] ?? 0 }}</small>
               </div>
               <b>◈ {{ format(cost(u[0])) }}</b>
+              <small class="upgrade-blocker" v-if="state?.purchase_blockers[u[0]]">{{ state.purchase_blockers[u[0]] }}</small>
             </button>
           </div>
         </aside>
