@@ -19,7 +19,9 @@ import {
   importSave,
   resetCampaign,
 } from "./game";
-const discoveredMaterials = computed(() => materials.filter((m) => state.value?.discoveries.includes(m.id)));
+const discoveredMaterials = computed(() =>
+  materials.filter((m) => state.value?.discoveries.includes(m.id)),
+);
 const showReset = ref(false);
 const resetText = ref("");
 async function confirmReset() {
@@ -581,18 +583,19 @@ onMounted(start);
         <span>AUTOMATIC INPUT RESERVES</span>
       </div>
       <p>
-        Enable optional recipes. Active modules retain eight units of each input
-        before selling surplus. Steel and aluminium run automatically when their
-        buildings exist.
+        Toggle production recipes. Active modules retain eight units of each
+        input before selling surplus. Steel and aluminium start enabled; pause
+        them to route shared feed into other products.
       </p>
       <div class="mineral-grid">
         <button
           v-for="r in recipes"
-          :disabled="!state || ['steel', 'aluminium'].includes(r.id)"
+          :disabled="!state"
           :class="{
             selected:
-              state?.enabled_recipes.includes(r.id) ||
-              ['steel', 'aluminium'].includes(r.id),
+              !state?.paused_recipes.includes(r.id) &&
+              (state?.enabled_recipes.includes(r.id) ||
+                ['steel', 'aluminium'].includes(r.id)),
           }"
           @click="act('recipe', r.id)"
         >
@@ -642,16 +645,10 @@ onMounted(start);
         feed waits for its processing module. Loading depot upgrades add space.
       </p>
       <div class="mineral-grid">
-        <div
-          v-for="m in discoveredMaterials"
-          :key="m.id"
-          class="inventory"
-        >
+        <div v-for="m in discoveredMaterials" :key="m.id" class="inventory">
           <strong
             >{{ m.name }} ·
-            {{
-              format((state?.raw_stock[m.id] ?? 0) / RESOURCE_UNIT)
-            }}
+            {{ format((state?.raw_stock[m.id] ?? 0) / RESOURCE_UNIT) }}
             stored</strong
           >
           <button @click="act('reserve', m.product, 4 * RESOURCE_UNIT)">

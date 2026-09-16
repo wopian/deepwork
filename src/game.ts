@@ -8,6 +8,7 @@ export interface Game {
   campaign_id: string;
   requires_reset: boolean;
   enabled_recipes: string[];
+  paused_recipes: string[];
   megaproject: boolean;
   site_discoveries: number;
   version: number;

@@ -224,6 +224,8 @@ pub struct Game {
     #[serde(default)]
     pub enabled_recipes: BTreeSet<String>,
     #[serde(default)]
+    pub paused_recipes: BTreeSet<String>,
+    #[serde(default)]
     pub sold_mass: u64,
     #[serde(default)]
     pub delivered_mass: u64,
@@ -372,6 +374,7 @@ impl Game {
             blueprint: vec![],
             build_queue: vec![],
             enabled_recipes: BTreeSet::new(),
+            paused_recipes: BTreeSet::new(),
             sold_mass: 0,
             delivered_mass: 0,
             dig_progress: 0,
@@ -794,6 +797,7 @@ impl Game {
     fn recipes_idle(&self) -> bool {
         !recipes().iter().any(|r| {
             if self.level(&r.building) == 0
+                || self.paused_recipes.contains(&r.id)
                 || !(r.id == "steel" || r.id == "aluminium" || self.enabled_recipes.contains(&r.id))
             {
                 return false;
@@ -1134,6 +1138,7 @@ impl Game {
             let recipe = &recipes[(offset + (self.ticks / 20) as usize) % recipes.len()];
             let automatic = recipe.id == "steel" || recipe.id == "aluminium";
             if self.level(&recipe.building) == 0
+                || self.paused_recipes.contains(&recipe.id)
                 || (!automatic && !self.enabled_recipes.contains(&recipe.id))
             {
                 continue;
@@ -1221,6 +1226,7 @@ impl Game {
         for (p, q) in &mut self.products {
             let recipe_hold = recipes.iter().any(|r| {
                 self.levels.get(&r.building).copied().unwrap_or(0) > 0
+                    && !self.paused_recipes.contains(&r.id)
                     && (r.id == "steel"
                         || r.id == "aluminium"
                         || self.enabled_recipes.contains(&r.id))
@@ -1689,7 +1695,11 @@ impl Game {
                 if !recipes().iter().any(|r| r.id == a.target) {
                     return Err("Unknown recipe".into());
                 }
-                if !self.enabled_recipes.remove(&a.target) {
+                if matches!(a.target.as_str(), "steel" | "aluminium") {
+                    if !self.paused_recipes.remove(&a.target) {
+                        self.paused_recipes.insert(a.target);
+                    }
+                } else if !self.enabled_recipes.remove(&a.target) {
                     self.enabled_recipes.insert(a.target);
                 }
             }
@@ -1862,6 +1872,7 @@ impl Game {
                 next.last_saved = self.last_saved;
                 next.megaproject = self.megaproject;
                 next.enabled_recipes = self.enabled_recipes.clone();
+                next.paused_recipes = self.paused_recipes.clone();
                 next.policy = self.policy.clone();
                 next.crew_priority = self.crew_priority.clone();
                 next.cargo_policy = self.cargo_policy.clone();
@@ -1936,6 +1947,13 @@ impl Game {
         }
         if !self.waste_profile.valid() {
             return Err("Invalid waste profile".into());
+        }
+        if self
+            .paused_recipes
+            .iter()
+            .any(|id| !matches!(id.as_str(), "steel" | "aluminium"))
+        {
+            return Err("Invalid paused automatic recipe".into());
         }
         if self.version != VERSION || self.generator_version != geometry::GENERATOR_VERSION {
             return Err("Unsupported save version".into());
@@ -2881,6 +2899,38 @@ mod survey_offline_tests {
 #[cfg(test)]
 mod recipe_fairness_tests {
     use super::*;
+    #[test]
+    fn automatic_recipe_pause_preserves_feed_and_round_trips() {
+        let mut g = Game::new(42, 1);
+        g.terrain.frontier.clear();
+        g.levels.insert("steelworks".into(), 1);
+        for p in ["iron", "coke", "lime"] {
+            g.products.insert(p.into(), 4 * UNITS);
+            g.reserve.insert(p.into(), 4 * UNITS);
+        }
+        g.reserve.insert("steel".into(), 20 * UNITS);
+        g.action(Action {
+            sequence: 1,
+            kind: "recipe".into(),
+            target: "steel".into(),
+            value: 0,
+        })
+        .unwrap();
+        g.second(&materials(), true);
+        assert_eq!(g.products["iron"], 4 * UNITS);
+        assert_eq!(g.products.get("steel").copied().unwrap_or(0), 0);
+        let restored: Game = serde_json::from_str(&serde_json::to_string(&g).unwrap()).unwrap();
+        assert!(restored.paused_recipes.contains("steel"));
+        g.action(Action {
+            sequence: 2,
+            kind: "recipe".into(),
+            target: "steel".into(),
+            value: 0,
+        })
+        .unwrap();
+        g.second(&materials(), true);
+        assert!(g.products["steel"] > 0);
+    }
     #[test]
     fn steel_cannot_starve_enabled_magnet_production() {
         let mut g = Game::new(42, 1);

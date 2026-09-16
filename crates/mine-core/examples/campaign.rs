@@ -140,6 +140,13 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
     }
     for recipe in recipes() {
         if ["steel", "aluminium"].contains(&recipe.id.as_str()) {
+            let wanted = recipe.id == "aluminium"
+                || order.iter().any(|id| g.level(id) == 0)
+                || g.products.get("advanced_structure").copied().unwrap_or(0)
+                    < 10 * mine_core::geometry::UNITS;
+            if g.paused_recipes.contains(&recipe.id) == wanted {
+                act(g, "recipe", &recipe.id, 0);
+            }
             continue;
         }
         let wanted = needed.contains(&recipe.id) && g.level(&recipe.building) > 0;
