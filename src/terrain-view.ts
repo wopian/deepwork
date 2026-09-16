@@ -1,8 +1,7 @@
 import { Container, Sprite, Texture } from "pixi.js";
 import { CELL_PIXEL, CHUNK, CHUNKS_ACROSS } from "./geometry";
 import type { Game } from "./game";
-import catalogue from "../content/materials.json";
-const colours = catalogue.map((m) => Number.parseInt(m.color.slice(1), 16));
+import { terrainPixels } from "./terrain-pixels";
 /** Only visible chunks get GPU textures. Hidden minerals never enter this class. */
 export class TerrainView {
   readonly layer = new Container();
@@ -29,22 +28,7 @@ export class TerrainView {
         canvas.height = CHUNK;
         const context = canvas.getContext("2d")!;
         const pixels = context.createImageData(CHUNK, CHUNK);
-        for (let i = 0; i < CHUNK * CHUNK; i++) {
-          const open = !!(mask && mask[i >> 3]! & (1 << i % 8));
-          const material = visible?.[i] ?? 255;
-          const y = cy * CHUNK + Math.floor(i / CHUNK);
-          const colour = open
-            ? 0x101820
-            : material !== 255 && material > 1
-              ? colours[material]!
-              : y < 32
-                ? 0xd8bc7d
-                : 0x806044;
-          pixels.data[i * 4] = colour >> 16;
-          pixels.data[i * 4 + 1] = colour >> 8;
-          pixels.data[i * 4 + 2] = colour;
-          pixels.data[i * 4 + 3] = 255;
-        }
+        pixels.data.set(terrainPixels(mask, visible, cy));
         context.putImageData(pixels, 0, 0);
         if (old) {
           old.sprite.destroy({ texture: true, textureSource: true });

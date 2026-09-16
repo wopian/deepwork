@@ -51,7 +51,9 @@ function draw() {
   const W = Math.ceil(app.screen.width / scale) + 2200;
   const first = Math.max(
     0,
-    Math.floor(-offsetY / ((app.screen.width / 1100) * zoom) / CELL_PIXEL) - 30,
+    Math.floor(
+      (-offsetY / ((app.screen.width / 1100) * zoom) - 208) / CELL_PIXEL,
+    ) - 30,
   );
   const last =
     first +
@@ -339,11 +341,17 @@ onMounted(async () => {
             ];
           if (cell) {
             x = 235 + cell.x * CELL_PIXEL;
-            y = 208 + cell.y * CELL_PIXEL + 7;
+            y = 208 + (cell.y + 1) * CELL_PIXEL;
           }
         } else if (role === "haulers") {
           const cargo = g?.shipments[i % Math.max(1, g.shipments.length)];
-          if (cargo?.path.length) {
+          const leg =
+            cargo &&
+            cargoPosition(cargo.legs ?? [], cargo.duration - cargo.remaining);
+          if (leg) {
+            x = 235 + leg.point[0] * CELL_PIXEL;
+            y = 208 + leg.point[1] * CELL_PIXEL;
+          } else if (cargo?.path.length) {
             const points: [number, number][] = cargo.path.map(([px, py]) => [
               235 + px * CELL_PIXEL,
               208 + py * CELL_PIXEL + 7,
