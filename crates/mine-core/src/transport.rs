@@ -446,6 +446,35 @@ mod tests {
         );
     }
     #[test]
+    fn preferred_cargo_cannot_starve_other_materials() {
+        let mut network = Network::default();
+        network.configure(&[], UNITS, 0);
+        let mut ore = BTreeMap::from([(3, 1000 * UNITS), (4, 1000 * UNITS)]);
+        let mut output = BTreeMap::new();
+        for tick in 1..=1200 {
+            network.tick(
+                tick,
+                &mut ore,
+                &mut output,
+                2000 * UNITS,
+                &[3],
+                true,
+                false,
+                1000,
+            );
+        }
+        assert!(ore[&3] > 0, "preferred demand stays continuous");
+        assert!(output.get(&3).copied().unwrap_or(0) > 0);
+        assert!(
+            output.get(&4).copied().unwrap_or(0) >= UNITS,
+            "fair service reaches final intake"
+        );
+        assert_eq!(
+            ore.values().sum::<u64>() + output.values().sum::<u64>() + network.mass(),
+            2000 * UNITS
+        );
+    }
+    #[test]
     fn express_only_accelerates_selected_segment() {
         let mut n = Network::default();
         n.express = 2;

@@ -66,6 +66,12 @@
     "width": 20
   },
   {
+    "feed": 3,
+    "depth_metres": 816,
+    "length": 170,
+    "width": 20
+  },
+  {
     "feed": 25,
     "depth_metres": 840,
     "length": 170,
@@ -102,6 +108,12 @@
     "width": 20
   },
   {
+    "feed": 3,
+    "depth_metres": 1080,
+    "length": 170,
+    "width": 20
+  },
+  {
     "feed": 24,
     "depth_metres": 1200,
     "length": 170,
@@ -122,6 +134,12 @@
   {
     "feed": 6,
     "depth_metres": 1296,
+    "length": 170,
+    "width": 20
+  },
+  {
+    "feed": 3,
+    "depth_metres": 1392,
     "length": 170,
     "width": 20
   },
@@ -152,6 +170,48 @@
   {
     "feed": 24,
     "depth_metres": 1728,
+    "length": 170,
+    "width": 20
+  },
+  {
+    "feed": 3,
+    "depth_metres": 1752,
+    "length": 170,
+    "width": 20
+  },
+  {
+    "feed": 3,
+    "depth_metres": 2184,
+    "length": 170,
+    "width": 20
+  },
+  {
+    "feed": 5,
+    "depth_metres": 2208,
+    "length": 170,
+    "width": 20
+  },
+  {
+    "feed": 6,
+    "depth_metres": 2232,
+    "length": 170,
+    "width": 20
+  },
+  {
+    "feed": 3,
+    "depth_metres": 2856,
+    "length": 170,
+    "width": 20
+  },
+  {
+    "feed": 5,
+    "depth_metres": 2880,
+    "length": 170,
+    "width": 20
+  },
+  {
+    "feed": 6,
+    "depth_metres": 2904,
     "length": 170,
     "width": 20
   },

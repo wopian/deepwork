@@ -747,22 +747,26 @@ impl Game {
         {
             return false;
         }
-        if self.level("survey") > 0
-            && self
-                .terrain
-                .frontier
-                .iter()
-                .rev()
-                .take(self.crew.prospectors as usize)
-                .any(|key| {
-                    !self
-                        .discoveries
-                        .contains(&self.cell(key % WIDTH, key / WIDTH, cat))
-                })
-        {
+        if self.survey_pending() {
             return false;
         }
         self.recipes_idle()
+    }
+    fn survey_pending(&self) -> bool {
+        if self.level("survey") == 0 {
+            return false;
+        }
+        let (x, y) = self
+            .removed
+            .last()
+            .map(|c| (c.x, c.y))
+            .unwrap_or((WIDTH / 2, 0));
+        (x.saturating_sub(16)..=x.saturating_add(16).min(WIDTH - 1)).any(|px| {
+            (y.saturating_sub(16)..=y.saturating_add(16).min(terrain::MAX_ROWS - 1)).any(|py| {
+                px.abs_diff(x).pow(2) + py.abs_diff(y).pow(2) <= 16 * 16
+                    && !self.terrain.is_revealed(px, py)
+            })
+        })
     }
     fn stationary_pipeline(&self, cat: &[Material]) -> bool {
         self.ticks % 20 == 0
@@ -780,7 +784,7 @@ impl Game {
             && (self.ore.values().sum::<u64>() + CELL_MASS
                 > 20 * UNITS + 5 * UNITS * self.level("capacity") as u64
                 || self.next_frontier(cat).is_none())
-            && self.level("survey") == 0
+            && !self.survey_pending()
             && !(self.level("supports") > 0 && self.support_rows < self.support_target())
             && self.depleted == 0
             && !(self.level("slagcrusher") > 0 && self.slag > 0)
@@ -816,7 +820,7 @@ impl Game {
                         && self.level("shaft") > 0
                         && self.level("shaft") < 50
                     {
-                        2 * UNITS
+                        8 * UNITS
                     } else {
                         0
                     },
@@ -1166,7 +1170,7 @@ impl Game {
                                 && self.level("shaft") > 0
                                 && self.level("shaft") < 50
                             {
-                                2 * UNITS
+                                8 * UNITS
                             } else {
                                 0
                             },
@@ -2842,5 +2846,30 @@ mod stationary_network_tests {
             serde_json::to_value(a).unwrap(),
             serde_json::to_value(b).unwrap()
         );
+    }
+}
+
+#[cfg(test)]
+mod survey_offline_tests {
+    use super::*;
+    #[test]
+    fn known_commodities_do_not_skip_local_prospecting() {
+        let cat = materials();
+        let mut offline = Game::new(42, 1);
+        offline.last_saved = 1;
+        offline.second(&cat, true);
+        offline.levels.insert("survey".into(), 1);
+        offline.discoveries = (0..cat.len()).collect();
+        offline.terrain.frontier.clear();
+        assert!(offline.survey_pending());
+        let mut stepped = offline.clone();
+        offline.advance_offline(241, &cat);
+        for _ in 0..2400 {
+            stepped.tick(&cat, true);
+        }
+        assert!(!offline.survey_pending());
+        assert_eq!(offline.terrain.revealed, stepped.terrain.revealed);
+        assert_eq!(offline.terrain.visible, stepped.terrain.visible);
+        assert_eq!(offline.ticks, stepped.ticks);
     }
 }
