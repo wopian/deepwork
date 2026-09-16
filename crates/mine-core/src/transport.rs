@@ -39,6 +39,8 @@ pub struct Segment {
     pub legs: Vec<Leg>,
     pub rate: u64,
     pub blocked: bool,
+    #[serde(default)]
+    pub blocker: String,
     pub demand: u32,
     pub utilisation: f64,
     pub time_fraction: u64,
@@ -98,6 +100,7 @@ impl Default for Network {
             legs: vec![],
             rate: UNITS,
             blocked: false,
+            blocker: String::new(),
             demand: 0,
             utilisation: 0.,
             time_fraction: 0,
@@ -264,6 +267,7 @@ impl Network {
             let elapsed = (segment.time_fraction / 1000) as u32;
             segment.time_fraction %= 1000;
             segment.blocked = false;
+            segment.blocker.clear();
             for batch in &mut segment.batches {
                 batch.remaining_ms = batch.remaining_ms.saturating_sub(elapsed);
                 if batch.remaining_ms == 0 {
@@ -273,6 +277,9 @@ impl Network {
                     *station.cargo.entry(batch.material).or_default() += n;
                     station.incoming += n;
                     segment.blocked |= batch.amount > 0;
+                    if batch.amount > 0 {
+                        segment.blocker = format!("{} full", station.name);
+                    }
                 }
             }
             segment.batches.retain(|b| b.amount > 0);
@@ -352,6 +359,9 @@ impl Network {
                 0.
             };
             segment.blocked |= used >= segment.capacity || segment.batches.len() >= 512;
+            if segment.blocked && segment.blocker.is_empty() {
+                segment.blocker = "Vehicle capacity full".into();
+            }
         }
         initial - space
     }

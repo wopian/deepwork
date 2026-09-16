@@ -65,6 +65,7 @@ export interface Game {
       name: string;
       capacity: number;
       blocked: boolean;
+      blocker: string;
       utilisation: number;
       demand: number;
       batches: { amount: number }[];

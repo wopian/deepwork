@@ -329,7 +329,7 @@ onMounted(start);
                   }}% loading ·
                   {{
                     state.transport.segments[index]!.blocked
-                      ? "Destination or vehicle capacity full"
+                      ? state.transport.segments[index]!.blocker
                       : "Flowing"
                   }}</span
                 >

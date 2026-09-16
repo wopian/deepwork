@@ -1129,7 +1129,9 @@ impl Game {
             self.lifetime_waste += waste;
         }
         let recipes = recipes();
-        for recipe in recipes {
+        // Rotate the first recipe each second so shared feeds reach all enabled modules.
+        for offset in 0..recipes.len() {
+            let recipe = &recipes[(offset + (self.ticks / 20) as usize) % recipes.len()];
             let automatic = recipe.id == "steel" || recipe.id == "aluminium";
             if self.level(&recipe.building) == 0
                 || (!automatic && !self.enabled_recipes.contains(&recipe.id))
@@ -1397,10 +1399,12 @@ impl Game {
                         .sum::<u64>(),
                 blocker: if self.haul_path.is_empty() && self.ore.values().any(|&q| q > 0) {
                     "No walkable loading access".into()
-                } else if self.transport.segments.iter().any(|s| s.blocked)
-                    || (haul_budget == 0 && ore_total > 0)
+                } else if let Some(segment) =
+                    self.transport.segments.iter().rev().find(|s| s.blocked)
                 {
-                    "Cargo buffers full".into()
+                    format!("{}: {}", segment.name, segment.blocker)
+                } else if haul_budget == 0 && ore_total > 0 {
+                    "Loading bay full".into()
                 } else if haul_budget == 0 && self.transport.mass() == 0 {
                     "Waiting for ore".into()
                 } else {
@@ -2437,7 +2441,7 @@ mod throughput_tests {
         g.tick(&materials(), false);
         assert_eq!(g.flow_window[1], 0);
         assert!(g.transport.mass() > 0);
-        assert_eq!(g.stages[1].blocker, "Cargo buffers full");
+        assert_eq!(g.stages[1].blocker, "Short haul: Vehicle capacity full");
     }
 }
 
@@ -2871,5 +2875,32 @@ mod survey_offline_tests {
         assert_eq!(offline.terrain.revealed, stepped.terrain.revealed);
         assert_eq!(offline.terrain.visible, stepped.terrain.visible);
         assert_eq!(offline.ticks, stepped.ticks);
+    }
+}
+
+#[cfg(test)]
+mod recipe_fairness_tests {
+    use super::*;
+    #[test]
+    fn steel_cannot_starve_enabled_magnet_production() {
+        let mut g = Game::new(42, 1);
+        g.terrain.frontier.clear();
+        g.levels.insert("steelworks".into(), 1);
+        g.levels.insert("manufacturing".into(), 1);
+        g.enabled_recipes.insert("magnets".into());
+        for p in ["coke", "lime", "neodymium", "praseodymium", "borate"] {
+            g.products.insert(p.into(), 20 * UNITS);
+            g.reserve.insert(p.into(), 20 * UNITS);
+        }
+        for p in ["steel", "magnets"] {
+            g.reserve.insert(p.into(), 20 * UNITS);
+        }
+        let cat = materials();
+        for _ in 0..100 {
+            *g.products.entry("iron".into()).or_default() += 640;
+            g.tick(&cat, true);
+        }
+        assert!(g.products.get("steel").copied().unwrap_or(0) > 0);
+        assert!(g.products.get("magnets").copied().unwrap_or(0) > 0);
     }
 }
