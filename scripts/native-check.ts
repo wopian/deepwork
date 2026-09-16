@@ -191,7 +191,7 @@ try {
     while (Date.now() - started < stressSeconds * 1000) {
       await page.waitForTimeout(10000);
       const { metrics } = await cdp.send("Performance.getMetrics");
-      const telemetry = await page.evaluate(() => {
+      const telemetry: Record<string, string | undefined> = await page.evaluate(() => {
         const world = document.querySelector<HTMLElement>(".world");
         return world ? { ...world.dataset } : { renderHidden: "true" };
       });
