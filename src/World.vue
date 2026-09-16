@@ -62,6 +62,7 @@ function draw() {
     g?.profile,
     g?.terrain.revision,
     g?.support_rows,
+    g?.housing,
     first,
     last,
     Math.floor(stored / 3000),
@@ -156,30 +157,111 @@ function draw() {
       }
     }
   }
-  // Timber frames, conveyor and processing districts.
-  for (let x = 35; x < 180; x += 55) {
-    rect(terrain, x, 148, 46, 40, 0xa67548);
-    rect(terrain, x - 4, 142, 54, 8, 0xe8dfc8);
-    rect(terrain, x + 14, 165, 13, 23, 0x101820);
+  // Fixed district slots grow upward, keeping routes and touch camera targets stable.
+  const levels = g?.levels ?? {
+    conveyor: 10,
+    furnace: 1,
+    chemical: 1,
+    electrolytic: 1,
+  };
+  const housing = g?.housing ?? 8;
+  for (let i = 0; i < 3; i++) {
+    const x = 35 + i * 55;
+    const floors = Math.min(4, 1 + Math.floor(Math.max(0, housing - 8) / 12));
+    for (let floor = 0; floor < floors; floor++) {
+      const y = 158 - floor * 15;
+      rect(terrain, x, y, 46, 30, 0xa67548);
+      rect(terrain, x - 3, y - 4, 52, 4, 0xe8dfc8);
+      for (let window = 0; window < 3; window++)
+        rect(terrain, x + 5 + window * 14, y + 5, 6, 6, 0x101820);
+    }
+    rect(terrain, x + 17, 172, 12, 16, 0x101820);
   }
-  if (!g || g.levels.conveyor) rect(terrain, 213, 170, 478, 8, 0x8c9ba5);
-  for (let x = 216; x < 690; x += 28) {
-    rect(terrain, x, 178, 4, 22, 0xa67548);
+  if (levels.conveyor) {
+    rect(terrain, 213, 170, 478, 8, 0x8c9ba5);
+    for (let x = 216; x < 690; x += 28) {
+      rect(terrain, x, 178, 4, 22, 0xa67548);
+      rect(terrain, x + 4, 173, 4, 3, 0x101820);
+    }
+    const lanes = Math.min(5, Math.floor(levels.conveyor / 10));
+    for (let lane = 0; lane < lanes; lane++)
+      rect(terrain, 213, 167 - lane * 3, 478, 1, 0xe5a34d);
   }
-  for (
-    let i = 0;
-    i <
-    (g
-      ? ["furnace", "chemical", "electrolytic"].filter((k) => g.levels[k])
-          .length
-      : 3);
-    i++
-  ) {
-    let x = 715 + i * 68;
-    rect(terrain, x, 136, 48, 51, 0x8c9ba5);
-    rect(terrain, x + 8, 143, 30, 34, 0x101820);
-    rect(terrain, x + 14, 154, 18, 19, 0xe5a34d);
-    rect(terrain, x + 29, 111, 10, 25, 0x8c9ba5);
+  if (levels.shaft) {
+    rect(terrain, 444, 130, 5, 70, 0x8c9ba5);
+    rect(terrain, 477, 130, 5, 70, 0x8c9ba5);
+    rect(terrain, 440, 126, 46, 6, 0x8c9ba5);
+    for (let y = 137; y < 164; y += 9) rect(terrain, 449, y, 28, 2, 0xa67548);
+    rect(terrain, 458, 120, 11, 11, 0xe5a34d);
+    rect(terrain, 462, 130, 2, 61, 0xe8dfc8);
+    for (let tier = 0; tier < Math.floor(levels.shaft / 10); tier++)
+      rect(terrain, 487 + tier * 4, 149, 2, 40, 0x8c9ba5);
+  }
+  if (levels.minecart || levels.train) {
+    rect(terrain, 685, 185, 33, 2, 0x8c9ba5);
+    rect(terrain, 688, 175, 24, 9, 0xa67548);
+    rect(terrain, 691, 184, 4, 4, 0xe8dfc8);
+    rect(terrain, 706, 184, 4, 4, 0xe8dfc8);
+    if (levels.train) {
+      rect(terrain, 688, 165, 8, 10, 0x8c9ba5);
+      rect(terrain, 702, 169, 10, 6, 0x8c9ba5);
+    }
+  }
+  // Shared halls expose installed modules; badges mark each ten-level tier.
+  const halls = [
+    {
+      x: 724,
+      ids: ["sorter", "furnace", "steelworks", "recovery"],
+      kind: "heat",
+    },
+    {
+      x: 791,
+      ids: ["chemical", "electrolytic", "power", "pump"],
+      kind: "chemical",
+    },
+    {
+      x: 858,
+      ids: ["trace", "manufacturing", "survey", "ventilation"],
+      kind: "precision",
+    },
+  ];
+  for (const hall of halls) {
+    const modules = hall.ids.filter((id) => levels[id]);
+    if (!modules.length && hall.kind !== "heat") continue;
+    const tier = Math.min(
+      5,
+      Math.floor(Math.max(0, ...modules.map((id) => levels[id]!)) / 10),
+    );
+    const height = 34 + modules.length * 6 + tier * 3;
+    const x = hall.x,
+      y = 188 - height;
+    rect(terrain, x, y, 51, height, 0x8c9ba5);
+    rect(terrain, x + 4, y + 4, 43, height - 8, 0x101820);
+    if (hall.kind === "heat") {
+      rect(terrain, x + 9, 168, 15, 15, levels.furnace ? 0xe5a34d : 0xa67548);
+      rect(terrain, x + 30, y - 20, 8, 24, 0x8c9ba5);
+      if (levels.steelworks) rect(terrain, x + 29, 159, 14, 23, 0xe5a34d);
+    } else if (hall.kind === "chemical") {
+      for (let tank = 0; tank < 3; tank++) {
+        rect(terrain, x + 8 + tank * 13, y + 14, 9, height - 21, 0xe8dfc8);
+        rect(terrain, x + 11 + tank * 13, y + 7, 3, 10, 0x8c9ba5);
+      }
+      rect(terrain, x + 11, y + 8, 29, 2, 0xe5a34d);
+    } else {
+      for (let column = 0; column < 3; column++)
+        for (let row = 0; row < 3; row++)
+          rect(terrain, x + 9 + column * 12, y + 12 + row * 10, 6, 6, 0xe5a34d);
+    }
+    for (let module = 0; module < modules.length; module++)
+      rect(terrain, x + 7 + module * 10, y + 3, 6, 3, 0xe8dfc8);
+    for (let badge = 0; badge < tier; badge++)
+      rect(terrain, x + 4 + badge * 9, 190, 5, 3, 0xe5a34d);
+  }
+  if (levels.reclaimer || levels.slagcrusher) {
+    rect(terrain, 1009, 149, 42, 39, 0x8c9ba5);
+    rect(terrain, 1015, 155, 30, 25, 0x101820);
+    rect(terrain, 1022, 163, 16, 8, 0xe5a34d);
+    rect(terrain, 992, 179, 22, 4, 0xa67548);
   }
   const storedWaste = g
     ? Object.values(g.tailings).reduce((a, b) => a + b, 0) + g.slag + g.depleted
