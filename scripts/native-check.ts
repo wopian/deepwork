@@ -165,7 +165,17 @@ try {
     fixture.housing = 1004;
     fixture.credits = "1000000000";
     fixture.policy = "depth";
-    await invoke("import_save", { data: JSON.stringify(fixture) });
+    const fixturePath = join(data, "stress-save.json");
+    await writeFile(fixturePath, JSON.stringify(fixture));
+    await page.getByRole("button", { name: "Records", exact: true }).click();
+    await page.locator('input[type="file"]').setInputFiles(fixturePath);
+    await page.waitForFunction(
+      async () =>
+        JSON.parse(
+          await (window as any).__TAURI_INTERNALS__.invoke("export_save"),
+        ).workers === 1000,
+    );
+    await page.getByRole("button", { name: "Operations", exact: true }).click();
     await page
       .getByRole("button", { name: "Follow depth", exact: true })
       .click();
@@ -216,6 +226,44 @@ try {
     path: join(output, "native-game.png"),
     fullPage: true,
   });
+  const beforeReset = JSON.parse(await invoke("export_save"));
+  await page.getByRole("button", { name: "Records", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Reset campaign", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  if (
+    JSON.parse(await invoke("export_save")).campaign_id !==
+    beforeReset.campaign_id
+  )
+    throw new Error("Cancelled reset changed campaign");
+  await page
+    .getByRole("button", { name: "Reset campaign", exact: true })
+    .click();
+  await page.getByLabel("Type RESET to confirm").fill("RESET");
+  await page
+    .getByRole("button", { name: "Start fresh campaign", exact: true })
+    .click();
+  await page.getByRole("dialog").waitFor({ state: "hidden" });
+  const fresh = JSON.parse(await invoke("export_save"));
+  if (
+    fresh.campaign_id === beforeReset.campaign_id ||
+    fresh.workers !== 3 ||
+    fresh.research > 2 ||
+    fresh.records.length !== 0 ||
+    Object.keys(fresh.ranks).length !== 0
+  )
+    throw new Error("Fresh campaign retained progress");
+  let staleRejected = false;
+  try {
+    await invoke("command", {
+      campaignId: beforeReset.campaign_id,
+      action: { sequence: 999999, kind: "buy", target: "worker", value: 0 },
+    });
+  } catch {
+    staleRejected = true;
+  }
+  if (!staleRejected) throw new Error("Stale campaign command accepted");
   if (errors.length) throw new Error(errors.join("\n"));
   console.log(
     JSON.stringify(
