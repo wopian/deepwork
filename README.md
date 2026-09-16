@@ -25,18 +25,18 @@ The unpackaged Windows executable is `target/debug/deepwork.exe`. Browser-only V
 
 ## Implemented
 
-- Seeded, persistent chunked excavation; three excavation priorities and policies.
-- Worker recruitment, housing, conveyor/processing capacity, resource buffers and raw sales.
+- Fine 0.25-metre terrain, natural cross-chunk deposits, local prospecting, benched pits and supported underground drives.
+- Worker recruitment, housing, independently upgraded transport buffers, fair cargo priorities, reserved feed and raw sales.
 - 56 mineral feeds, colour-coded field guide, refined products, optional manufacturing and separation recipes.
 - Explicit alumina/electrolysis path, abstract mass-conserving recipe units, steel and component production.
 - Contracts, resource reserves, power throttling, recovery, research, retirement and megaproject delivery.
-- Tactical boosts, offline simulation at half rate up to eight real hours, local saves, background checkpoints and backup recovery.
+- Tactical boosts, capped half-rate offline simulation, compact atomic saves, archived campaign reset and stale-command protection.
 - Pixi world with extended terrain palette, camera pan/zoom/follow, responsive interface and reduced-motion preference.
 - Bun-only toolchain, Rust accounting tests and Windows CI.
 
 ## Current limits against the full design
 
-This is a playable implementation, **not a release-validated full campaign**. Remaining work is tracked in `IMPLEMENTATION_STATUS.md`: active offline aggregation, deeper campaign balance, richer district/equipment presentation, and mobile/platform/device verification.
+This is a playable implementation, **not a release-validated full campaign**. Remaining work is tracked in `IMPLEMENTATION_STATUS.md`: active offline aggregation, multi-branch transport, full campaign pacing and mobile/platform/device verification.
 
 ## Verification and packaging
 
@@ -68,3 +68,15 @@ Recipes use abstract game units, not real chemical ratios. Material identities r
 - https://www.usgs.gov/programs/mineral-resources-program/science/about-2025-list-critical-minerals
 - https://www.usgs.gov/programs/mineral-resources-program/minerals-and-uses-activity
 - https://v2.tauri.app/start/frontend/vite/
+
+## Save reset and old campaigns
+
+Open **Records → Reset campaign**. Type `RESET` to archive the current campaign and start a new seed. Accessibility, audio and display settings remain. Archive/checkpoint failure aborts the reset. Earlier terrain formats stay exportable; they are not silently migrated or overwritten.
+
+## Campaign benchmark
+
+```powershell
+cargo run -p mine-core --release --example campaign -- 30 42 scheduled 8
+```
+
+This runs 30 seeds for up to 42 days with two 12-minute visits per day and real capped offline advancement. Replace `scheduled` with `attentive` or `continuous` for comparison. Milestone targets are acceptance goals, not claims that current tuning meets them.
