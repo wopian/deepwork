@@ -24,7 +24,7 @@ struct Update {
 struct Snapshot {
     #[serde(flatten)]
     game: Game,
-    quotes: std::collections::BTreeMap<String, u64>,
+    quotes: std::collections::BTreeMap<String, String>,
     retirement_award: u64,
     purchase_blockers: std::collections::BTreeMap<String, String>,
 }
@@ -32,13 +32,13 @@ impl From<Game> for Snapshot {
     fn from(game: Game) -> Self {
         let quotes = mine_core::requirements()
             .iter()
-            .map(|u| (u.id.clone(), game.cost(&u.id)))
+            .map(|u| (u.id.clone(), game.cost(&u.id).to_string()))
             .chain(
                 [
                     "worker", "housing", "capacity", "recovery", "drill", "sorter",
                 ]
                 .into_iter()
-                .map(|id| (id.into(), game.cost(id))),
+                .map(|id| (id.into(), game.cost(id).to_string())),
             )
             .collect();
         let retirement_award = game.award();

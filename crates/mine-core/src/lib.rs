@@ -95,6 +95,7 @@ pub struct Record {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Game {
     pub version: u32,
+    #[serde(with = "decimal")]
     pub seed: u64,
     pub site: u32,
     #[serde(default)]
@@ -212,9 +213,16 @@ mod decimal {
         s.serialize_str(&v.to_string())
     }
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
-        String::deserialize(d)?
-            .parse()
-            .map_err(serde::de::Error::custom)
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Wire {
+            Decimal(String),
+            Legacy(u64),
+        }
+        match Wire::deserialize(d)? {
+            Wire::Decimal(text) => text.parse().map_err(serde::de::Error::custom),
+            Wire::Legacy(value) => Ok(value),
+        }
     }
 }
 impl Default for Game {
@@ -1899,5 +1907,22 @@ mod fractional_work_tests {
         assert!(rate > 0 && rate < 20);
         g.second(&materials(), true);
         assert_eq!(g.dig_progress, rate);
+    }
+}
+
+#[cfg(test)]
+mod wire_tests {
+    use super::*;
+    #[test]
+    fn seeds_keep_all_bits_and_legacy_numbers_load() {
+        let g = Game::new(u64::MAX, 1);
+        let mut value = serde_json::to_value(&g).unwrap();
+        assert_eq!(value["seed"], u64::MAX.to_string());
+        assert_eq!(
+            serde_json::from_value::<Game>(value.clone()).unwrap().seed,
+            u64::MAX
+        );
+        value["seed"] = serde_json::json!(73429);
+        assert_eq!(serde_json::from_value::<Game>(value).unwrap().seed, 73429);
     }
 }

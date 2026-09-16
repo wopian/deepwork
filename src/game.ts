@@ -9,7 +9,7 @@ export interface Game {
   megaproject: boolean;
   site_discoveries: number;
   version: number;
-  seed: number;
+  seed: string;
   site: number;
   profile: number;
   challenge: string;
@@ -50,7 +50,7 @@ export interface Game {
   lifetime_waste: number;
   excavated: number;
   discoveries: number[];
-  quotes: Record<string, number>;
+  quotes: Record<string, string>;
   purchase_blockers: Record<string, string>;
   retirement_award: number;
   site_objectives: string[];
@@ -126,7 +126,7 @@ export const upgrades = [
   ["reclaimer", "Tailings recovery", "Recover retained mineral content.", 100],
 ] as const;
 export function cost(id: string) {
-  return state.value?.quotes[id] ?? 0;
+  return state.value?.quotes[id] ?? "0";
 }
 export async function start() {
   if (!native) {
