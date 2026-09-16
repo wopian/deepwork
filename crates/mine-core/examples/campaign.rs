@@ -109,13 +109,18 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
                 .map(|s| s.to_string());
         }
     } else {
-        g.pinned = None;
+        g.pinned = if g.depth() < 3900 {
+            Some("shaft".into())
+        } else {
+            None
+        };
     }
     // Select only recipes needed for the next module, then headquarters components.
     let mut needed = std::collections::BTreeSet::new();
     let mut pending: Vec<String> = g
         .pinned
         .as_ref()
+        .filter(|_| order.iter().any(|id| g.level(id) == 0))
         .and_then(|id| requirements().iter().find(|u| u.id == *id))
         .map(|u| u.inputs.keys().cloned().collect())
         .unwrap_or_else(|| {
@@ -143,11 +148,22 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
         }
     }
     for (product, units) in [
-        ("copper", 4),
-        ("insulation", 2),
-        ("alumina", 4),
-        ("aluminium", 3),
+        ("iron", 16),
+        ("coke", 16),
+        ("lime", 16),
+        ("steel", 16),
+        ("silica", 8),
+        ("copper", 8),
+        ("insulation", 4),
+        ("alumina", 8),
+        ("aluminium", 4),
         ("wiring", 2),
+        ("graphite", 8),
+        ("lithium_carbonate", 4),
+        ("nickel", 4),
+        ("cobalt", 4),
+        ("borate", 4),
+        ("ferrovanadium", 4),
     ] {
         act(g, "reserve", product, units * mine_core::geometry::UNITS);
     }
@@ -287,6 +303,7 @@ fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
         } else {
             0
         };
+        std::fs::write(format!("target/campaign-{seed}.json"), serde_json::to_vec_pretty(&json!({"seed":seed,"visit":visit+1,"site":g.site,"depth":g.depth(),"next":g.pinned,"products":g.products,"trace":g.trace_feed,"levels":g.levels,"recipes":g.enabled_recipes,"credits":g.credits,"shaft_blocker":g.purchase_blocker("shaft")})).unwrap()).unwrap();
         eprintln!(
             "seed={seed} strategy={style} mode={mode} visit={} depth={} next={:?} credits={}",
             visit + 1,
