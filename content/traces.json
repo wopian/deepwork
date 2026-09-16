@@ -1,0 +1,192 @@
+[
+  {
+    "feed": 24,
+    "output": "gallium",
+    "permille": 2
+  },
+  {
+    "feed": 22,
+    "output": "indium",
+    "permille": 2
+  },
+  {
+    "feed": 22,
+    "output": "germanium",
+    "permille": 2
+  },
+  {
+    "feed": 4,
+    "output": "selenium",
+    "permille": 3
+  },
+  {
+    "feed": 4,
+    "output": "tellurium",
+    "permille": 2
+  },
+  {
+    "feed": 8,
+    "output": "selenium",
+    "permille": 3
+  },
+  {
+    "feed": 8,
+    "output": "tellurium",
+    "permille": 2
+  },
+  {
+    "feed": 29,
+    "output": "rhenium",
+    "permille": 2
+  },
+  {
+    "feed": 38,
+    "output": "hafnium",
+    "permille": 5
+  },
+  {
+    "feed": 25,
+    "output": "scandium",
+    "permille": 2
+  },
+  {
+    "feed": 26,
+    "output": "scandium",
+    "permille": 2
+  },
+  {
+    "feed": 52,
+    "output": "rubidium",
+    "permille": 20
+  },
+  {
+    "feed": 41,
+    "output": "palladium",
+    "permille": 100
+  },
+  {
+    "feed": 41,
+    "output": "rhodium",
+    "permille": 20
+  },
+  {
+    "feed": 41,
+    "output": "ruthenium",
+    "permille": 20
+  },
+  {
+    "feed": 41,
+    "output": "iridium",
+    "permille": 10
+  },
+  {
+    "feed": 41,
+    "output": "osmium",
+    "permille": 10
+  },
+  {
+    "feed": 53,
+    "output": "lanthanum",
+    "permille": 100
+  },
+  {
+    "feed": 53,
+    "output": "cerium",
+    "permille": 100
+  },
+  {
+    "feed": 53,
+    "output": "praseodymium",
+    "permille": 100
+  },
+  {
+    "feed": 53,
+    "output": "neodymium",
+    "permille": 100
+  },
+  {
+    "feed": 53,
+    "output": "samarium",
+    "permille": 100
+  },
+  {
+    "feed": 53,
+    "output": "europium",
+    "permille": 100
+  },
+  {
+    "feed": 54,
+    "output": "lanthanum",
+    "permille": 100
+  },
+  {
+    "feed": 54,
+    "output": "cerium",
+    "permille": 100
+  },
+  {
+    "feed": 54,
+    "output": "praseodymium",
+    "permille": 100
+  },
+  {
+    "feed": 54,
+    "output": "neodymium",
+    "permille": 100
+  },
+  {
+    "feed": 54,
+    "output": "samarium",
+    "permille": 100
+  },
+  {
+    "feed": 54,
+    "output": "europium",
+    "permille": 100
+  },
+  {
+    "feed": 55,
+    "output": "gadolinium",
+    "permille": 80
+  },
+  {
+    "feed": 55,
+    "output": "terbium",
+    "permille": 80
+  },
+  {
+    "feed": 55,
+    "output": "dysprosium",
+    "permille": 80
+  },
+  {
+    "feed": 55,
+    "output": "holmium",
+    "permille": 80
+  },
+  {
+    "feed": 55,
+    "output": "erbium",
+    "permille": 80
+  },
+  {
+    "feed": 55,
+    "output": "thulium",
+    "permille": 80
+  },
+  {
+    "feed": 55,
+    "output": "ytterbium",
+    "permille": 80
+  },
+  {
+    "feed": 55,
+    "output": "lutetium",
+    "permille": 80
+  },
+  {
+    "feed": 55,
+    "output": "yttrium",
+    "permille": 80
+  }
+]

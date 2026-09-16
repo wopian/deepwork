@@ -11,6 +11,7 @@ export interface Game {
   seed: number;
   site: number;
   profile: number;
+  trace_feed: Record<string, number>;
   ticks: number;
   credits: string;
   workers: number;
@@ -46,6 +47,7 @@ export interface Game {
   records: {
     site: number;
     profile: number;
+    trace_feed: Record<string, number>;
     depth: number;
     research: number;
     excavated: number;

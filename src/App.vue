@@ -319,6 +319,12 @@ onMounted(start);
           >
         </button>
       </div>
+      <h2>Recoverable process residues</h2>
+      <div class="mineral-grid">
+        <div v-for="(qty, name) in state?.trace_feed" class="inventory">
+          {{ name }} · {{ format(qty / 1000) }} units
+        </div>
+      </div>
       <h2>Stockpile reserves</h2>
       <div class="mineral-grid">
         <div v-for="(qty, product) in state?.products" class="inventory">

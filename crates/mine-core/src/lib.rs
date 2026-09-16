@@ -41,6 +41,18 @@ pub fn sites() -> &'static [SiteProfile] {
         serde_json::from_str(include_str!("../../../content/sites.json")).expect("valid sites")
     })
 }
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TraceRule {
+    pub feed: usize,
+    pub output: String,
+    pub permille: u64,
+}
+pub fn traces() -> &'static [TraceRule] {
+    static RULES: std::sync::OnceLock<Vec<TraceRule>> = std::sync::OnceLock::new();
+    RULES.get_or_init(|| {
+        serde_json::from_str(include_str!("../../../content/traces.json")).expect("valid traces")
+    })
+}
 pub fn materials() -> Vec<Material> {
     serde_json::from_str(include_str!("../../../content/materials.json"))
         .expect("valid material catalogue")
@@ -93,6 +105,10 @@ pub struct Game {
     pub concentrate: BTreeMap<usize, u64>,
     #[serde(default)]
     pub flow_window: [u64; 5],
+    #[serde(default)]
+    pub trace_feed: BTreeMap<String, u64>,
+    #[serde(default)]
+    pub trace_fraction: BTreeMap<String, u64>,
     #[serde(default)]
     pub shipments: Vec<logistics::Shipment>,
     #[serde(default)]
@@ -191,6 +207,8 @@ impl Game {
             hauled: BTreeMap::new(),
             concentrate: BTreeMap::new(),
             flow_window: [0; 5],
+            trace_feed: BTreeMap::new(),
+            trace_fraction: BTreeMap::new(),
             shipments: vec![],
             crew: logistics::Crew::assign(3, &BTreeMap::new()),
             products: BTreeMap::new(),
@@ -522,6 +540,18 @@ impl Game {
                 (65 + 3 * self.levels.get("recovery").copied().unwrap_or(0)).min(95) as u64;
             let good = n * recovery / 100;
             let waste = n - good;
+            let mut primary = good;
+            for rule in traces().iter().filter(|rule| rule.feed == id) {
+                let fraction = self.trace_fraction.entry(rule.output.clone()).or_default();
+                *fraction += good * rule.permille;
+                let recovered = (*fraction / 1000).min(primary);
+                *fraction -= recovered * 1000;
+                primary -= recovered;
+                *self
+                    .trace_feed
+                    .entry(format!("{}_residue", rule.output))
+                    .or_default() += recovered;
+            }
             *self
                 .products
                 .entry(if m.name == "Bauxite" {
@@ -529,7 +559,7 @@ impl Game {
                 } else {
                     m.product.clone()
                 })
-                .or_default() += good;
+                .or_default() += primary;
             *self.tailings.entry(id).or_default() += waste;
             self.lifetime_waste += waste;
         }
@@ -539,6 +569,14 @@ impl Game {
             if self.level(&recipe.building) == 0
                 || (!automatic && !self.enabled_recipes.contains(&recipe.id))
             {
+                continue;
+            }
+            if recipe.id.starts_with("separate_") {
+                let source = format!("{}_residue", recipe.output);
+                let available = self.trace_feed.entry(source).or_default();
+                let amount = (*available).min(12);
+                *available -= amount;
+                *self.products.entry(recipe.output.clone()).or_default() += amount;
                 continue;
             }
             let amount = recipe
@@ -958,6 +996,7 @@ impl Game {
             .chain(self.ore.values())
             .chain(self.hauled.values())
             .chain(self.concentrate.values())
+            .chain(self.trace_feed.values())
             .chain(self.tailings.values())
             .chain(self.reserve.values())
             .any(|v| *v > 1_000_000_000_000)
@@ -1063,6 +1102,7 @@ mod accounting_tests {
         let mass: u64 = g.ore.values().sum::<u64>()
             + g.hauled.values().sum::<u64>()
             + g.concentrate.values().sum::<u64>()
+            + g.trace_feed.values().sum::<u64>()
             + g.products.values().sum::<u64>()
             + g.tailings.values().sum::<u64>()
             + g.sold_mass
@@ -1103,6 +1143,7 @@ mod accounting_tests {
     fn recipe_references_are_available() {
         let mut available: BTreeSet<_> = materials().iter().map(|m| m.product.clone()).collect();
         available.insert("alumina".into());
+        available.extend(traces().iter().map(|r| format!("{}_residue", r.output)));
         let recipes = recipes();
         available.extend(recipes.iter().map(|r| r.output.clone()));
         for recipe in recipes {
@@ -1152,5 +1193,37 @@ mod site_tests {
         let mut b = a.clone();
         b.profile = 1;
         assert!((0..64).any(|x| a.cell(x, 100, &cat) != b.cell(x, 100, &cat)));
+    }
+}
+
+#[cfg(test)]
+mod trace_tests {
+    use super::*;
+    #[test]
+    fn trace_recovery_cannot_transmute_bulk_metal() {
+        let mut g = Game::default();
+        g.levels.insert("trace".into(), 1);
+        g.enabled_recipes.insert("separate_gallium".into());
+        g.products.insert("alumina".into(), 10000);
+        g.reserve.insert("gallium".into(), 10000);
+        g.tick(&materials(), false);
+        assert_eq!(g.products.get("gallium").copied().unwrap_or(0), 0);
+        g.trace_feed.insert("gallium_residue".into(), 100);
+        g.tick(&materials(), false);
+        assert_eq!(g.products["gallium"], 12);
+        assert_eq!(g.trace_feed["gallium_residue"], 88);
+    }
+    #[test]
+    fn trace_fractions_never_exceed_feed() {
+        for id in 0..materials().len() {
+            assert!(
+                traces()
+                    .iter()
+                    .filter(|r| r.feed == id)
+                    .map(|r| r.permille)
+                    .sum::<u64>()
+                    <= 1000
+            );
+        }
     }
 }

@@ -116,7 +116,7 @@
     "id": "separate_gallium",
     "building": "trace",
     "inputs": {
-      "alumina": 1
+      "gallium_residue": 1
     },
     "output": "gallium"
   },
@@ -124,7 +124,7 @@
     "id": "separate_indium",
     "building": "trace",
     "inputs": {
-      "zinc": 1
+      "indium_residue": 1
     },
     "output": "indium"
   },
@@ -132,7 +132,7 @@
     "id": "separate_germanium",
     "building": "trace",
     "inputs": {
-      "zinc": 1
+      "germanium_residue": 1
     },
     "output": "germanium"
   },
@@ -140,7 +140,7 @@
     "id": "separate_selenium",
     "building": "trace",
     "inputs": {
-      "copper": 1
+      "selenium_residue": 1
     },
     "output": "selenium"
   },
@@ -148,7 +148,7 @@
     "id": "separate_tellurium",
     "building": "trace",
     "inputs": {
-      "copper": 1
+      "tellurium_residue": 1
     },
     "output": "tellurium"
   },
@@ -156,7 +156,7 @@
     "id": "separate_rhenium",
     "building": "trace",
     "inputs": {
-      "molybdenum": 1
+      "rhenium_residue": 1
     },
     "output": "rhenium"
   },
@@ -164,7 +164,7 @@
     "id": "separate_hafnium",
     "building": "trace",
     "inputs": {
-      "zirconium": 1
+      "hafnium_residue": 1
     },
     "output": "hafnium"
   },
@@ -172,7 +172,7 @@
     "id": "separate_scandium",
     "building": "trace",
     "inputs": {
-      "nickel": 1
+      "scandium_residue": 1
     },
     "output": "scandium"
   },
@@ -180,7 +180,7 @@
     "id": "separate_rubidium",
     "building": "trace",
     "inputs": {
-      "cesium": 1
+      "rubidium_residue": 1
     },
     "output": "rubidium"
   },
@@ -188,7 +188,7 @@
     "id": "separate_palladium",
     "building": "trace",
     "inputs": {
-      "platinum": 1
+      "palladium_residue": 1
     },
     "output": "palladium"
   },
@@ -196,7 +196,7 @@
     "id": "separate_rhodium",
     "building": "trace",
     "inputs": {
-      "platinum": 1
+      "rhodium_residue": 1
     },
     "output": "rhodium"
   },
@@ -204,7 +204,7 @@
     "id": "separate_ruthenium",
     "building": "trace",
     "inputs": {
-      "platinum": 1
+      "ruthenium_residue": 1
     },
     "output": "ruthenium"
   },
@@ -212,7 +212,7 @@
     "id": "separate_iridium",
     "building": "trace",
     "inputs": {
-      "platinum": 1
+      "iridium_residue": 1
     },
     "output": "iridium"
   },
@@ -220,7 +220,7 @@
     "id": "separate_osmium",
     "building": "trace",
     "inputs": {
-      "platinum": 1
+      "osmium_residue": 1
     },
     "output": "osmium"
   },
@@ -228,7 +228,7 @@
     "id": "separate_lanthanum",
     "building": "trace",
     "inputs": {
-      "light_rare_earths": 1
+      "lanthanum_residue": 1
     },
     "output": "lanthanum"
   },
@@ -236,7 +236,7 @@
     "id": "separate_cerium",
     "building": "trace",
     "inputs": {
-      "light_rare_earths": 1
+      "cerium_residue": 1
     },
     "output": "cerium"
   },
@@ -244,7 +244,7 @@
     "id": "separate_praseodymium",
     "building": "trace",
     "inputs": {
-      "light_rare_earths": 1
+      "praseodymium_residue": 1
     },
     "output": "praseodymium"
   },
@@ -252,7 +252,7 @@
     "id": "separate_neodymium",
     "building": "trace",
     "inputs": {
-      "light_rare_earths": 1
+      "neodymium_residue": 1
     },
     "output": "neodymium"
   },
@@ -260,7 +260,7 @@
     "id": "separate_samarium",
     "building": "trace",
     "inputs": {
-      "light_rare_earths": 1
+      "samarium_residue": 1
     },
     "output": "samarium"
   },
@@ -268,7 +268,7 @@
     "id": "separate_europium",
     "building": "trace",
     "inputs": {
-      "light_rare_earths": 1
+      "europium_residue": 1
     },
     "output": "europium"
   },
@@ -276,7 +276,7 @@
     "id": "separate_gadolinium",
     "building": "trace",
     "inputs": {
-      "heavy_rare_earths": 1
+      "gadolinium_residue": 1
     },
     "output": "gadolinium"
   },
@@ -284,7 +284,7 @@
     "id": "separate_terbium",
     "building": "trace",
     "inputs": {
-      "heavy_rare_earths": 1
+      "terbium_residue": 1
     },
     "output": "terbium"
   },
@@ -292,7 +292,7 @@
     "id": "separate_dysprosium",
     "building": "trace",
     "inputs": {
-      "heavy_rare_earths": 1
+      "dysprosium_residue": 1
     },
     "output": "dysprosium"
   },
@@ -300,7 +300,7 @@
     "id": "separate_holmium",
     "building": "trace",
     "inputs": {
-      "heavy_rare_earths": 1
+      "holmium_residue": 1
     },
     "output": "holmium"
   },
@@ -308,7 +308,7 @@
     "id": "separate_erbium",
     "building": "trace",
     "inputs": {
-      "heavy_rare_earths": 1
+      "erbium_residue": 1
     },
     "output": "erbium"
   },
@@ -316,7 +316,7 @@
     "id": "separate_thulium",
     "building": "trace",
     "inputs": {
-      "heavy_rare_earths": 1
+      "thulium_residue": 1
     },
     "output": "thulium"
   },
@@ -324,7 +324,7 @@
     "id": "separate_ytterbium",
     "building": "trace",
     "inputs": {
-      "heavy_rare_earths": 1
+      "ytterbium_residue": 1
     },
     "output": "ytterbium"
   },
@@ -332,7 +332,7 @@
     "id": "separate_lutetium",
     "building": "trace",
     "inputs": {
-      "heavy_rare_earths": 1
+      "lutetium_residue": 1
     },
     "output": "lutetium"
   },
@@ -340,7 +340,7 @@
     "id": "separate_yttrium",
     "building": "trace",
     "inputs": {
-      "heavy_rare_earths": 1
+      "yttrium_residue": 1
     },
     "output": "yttrium"
   }
