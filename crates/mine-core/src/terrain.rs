@@ -3,7 +3,6 @@ use crate::geometry::{bit_index, chunk_id, chunk_origin, CHUNKS_ACROSS};
 pub use crate::geometry::{MAX_ROWS, WIDTH};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::Arc;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Terrain {
     /// One bit per excavated cell, encoded as bytes to stay exact across JSON/JS.
@@ -16,9 +15,6 @@ pub struct Terrain {
     pub visible: BTreeMap<u32, Vec<u8>>,
     #[serde(skip)]
     pub frontier: BTreeSet<u32>,
-    /// (distance, parent); snapshots share this immutable cache without copying it.
-    #[serde(skip)]
-    routes: Arc<BTreeMap<u32, (u32, u32)>>,
 }
 impl Default for Terrain {
     fn default() -> Self {
@@ -28,7 +24,6 @@ impl Default for Terrain {
             revealed: BTreeMap::new(),
             visible: BTreeMap::new(),
             frontier: (0..WIDTH).collect(),
-            routes: Arc::default(),
         }
     }
 }
@@ -110,20 +105,6 @@ impl Terrain {
                 self.frontier.insert(ny * WIDTH + nx);
             }
         }
-        let routes = Arc::make_mut(&mut self.routes);
-        let (distance, parent) = if y == 0 {
-            (0, key)
-        } else {
-            Self::neighbors(x, y)
-                .filter_map(|(nx, ny)| {
-                    let next = ny * WIDTH + nx;
-                    routes.get(&next).map(|(distance, _)| (distance + 1, next))
-                })
-                .min()
-                .expect("reachable cell has a route")
-        };
-        routes.insert(key, (distance, parent));
-        Self::relax_routes(routes, VecDeque::from([key]));
         self.revision += 1;
         true
     }
@@ -169,7 +150,6 @@ impl Terrain {
         if routes.values().any(|(distance, _)| *distance == u32::MAX) {
             return Err("Excavation disconnected from surface".into());
         }
-        self.routes = Arc::new(routes);
         for (x, y) in opened {
             for (nx, ny) in Self::neighbors(x, y) {
                 if !self.contains(nx, ny) {
@@ -204,30 +184,52 @@ impl Terrain {
             }
         }
     }
-    /// Shortest open-cell route to daylight, compressed at changes of direction.
+    /// Connectivity diagnostic; gameplay uses the coarse floor/lift portal route.
+    /// No per-cell route table is retained during foreground excavation.
     pub fn surface_route(&self, start: [u32; 2]) -> Vec<[u32; 2]> {
-        let mut key = start[1].saturating_mul(WIDTH).saturating_add(start[0]);
-        if start[0] >= WIDTH || !self.routes.contains_key(&key) {
+        if !self.contains(start[0], start[1]) {
             return vec![];
         }
+        let origin = start[1] * WIDTH + start[0];
+        let mut parents = BTreeMap::from([(origin, origin)]);
+        let mut queue = VecDeque::from([origin]);
+        let mut exit = None;
+        while let Some(key) = queue.pop_front() {
+            if key < WIDTH {
+                exit = Some(key);
+                break;
+            }
+            for (x, y) in Self::neighbors(key % WIDTH, key / WIDTH) {
+                let next = y * WIDTH + x;
+                if self.contains(x, y) && !parents.contains_key(&next) {
+                    parents.insert(next, key);
+                    queue.push_back(next);
+                }
+            }
+        }
+        let Some(mut key) = exit else {
+            return vec![];
+        };
+        let mut path = vec![[key % WIDTH, key / WIDTH]];
+        while key != origin {
+            key = parents[&key];
+            path.push([key % WIDTH, key / WIDTH]);
+        }
+        path.reverse();
         let mut turns = vec![start];
-        let mut previous = start;
         let mut direction = None;
-        while key >= WIDTH {
-            key = self.routes[&key].1;
-            let next = [key % WIDTH, key / WIDTH];
+        for pair in path.windows(2) {
             let d = (
-                next[0] as i64 - previous[0] as i64,
-                next[1] as i64 - previous[1] as i64,
+                pair[1][0] as i64 - pair[0][0] as i64,
+                pair[1][1] as i64 - pair[0][1] as i64,
             );
             if direction.is_some_and(|old| old != d) {
-                turns.push(previous);
+                turns.push(pair[0]);
             }
             direction = Some(d);
-            previous = next;
         }
-        if previous != start {
-            turns.push(previous);
+        if path.last() != Some(&start) {
+            turns.push(*path.last().unwrap());
         }
         turns
     }

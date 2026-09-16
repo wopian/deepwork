@@ -69,7 +69,11 @@ pub fn decode(raw: &str) -> Result<Game, String> {
 }
 /// Disk/export compression does not alter the full versioned IPC snapshot.
 pub fn encode(game: &Game) -> Result<String, String> {
-    let mut value = serde_json::to_value(game).map_err(|e| e.to_string())?;
+    // Avoid expanding full pixel arrays into allocation-heavy serde_json Values.
+    let mut metadata = game.clone();
+    metadata.terrain = mine_core::terrain::Terrain::default();
+    let mut value = serde_json::to_value(&metadata).map_err(|e| e.to_string())?;
+    value["terrain"]["revision"] = serde_json::json!(game.terrain.revision);
     value["terrain_encoding"] = serde_json::json!("rle-v1");
     for (name, chunks) in [
         ("chunks", &game.terrain.chunks),
