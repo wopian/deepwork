@@ -89,8 +89,8 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
         "chemical",
         "pump",
         "electrolytic",
-        "trace",
         "ventilation",
+        "trace",
         "train",
         "reclaimer",
         "slagcrusher",
@@ -111,11 +111,45 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
     } else {
         g.pinned = None;
     }
-    // Select production by available modules. Reservations use the same public controls as UI.
+    // Select only recipes needed for the next module, then headquarters components.
+    let mut needed = std::collections::BTreeSet::new();
+    let mut pending: Vec<String> = g
+        .pinned
+        .as_ref()
+        .and_then(|id| requirements().iter().find(|u| u.id == *id))
+        .map(|u| u.inputs.keys().cloned().collect())
+        .unwrap_or_else(|| {
+            vec![
+                "advanced_structure".into(),
+                "precision_controls".into(),
+                "magnets".into(),
+                "batteries".into(),
+            ]
+        });
+    while let Some(product) = pending.pop() {
+        if let Some(recipe) = recipes().iter().find(|r| r.output == product) {
+            if needed.insert(recipe.id.clone()) {
+                pending.extend(recipe.inputs.keys().cloned());
+            }
+        }
+    }
     for recipe in recipes() {
-        if g.level(&recipe.building) > 0 && !g.enabled_recipes.contains(&recipe.id) {
+        if ["steel", "aluminium"].contains(&recipe.id.as_str()) {
+            continue;
+        }
+        let wanted = needed.contains(&recipe.id) && g.level(&recipe.building) > 0;
+        if g.enabled_recipes.contains(&recipe.id) != wanted {
             act(g, "recipe", &recipe.id, 0);
         }
+    }
+    for (product, units) in [
+        ("copper", 4),
+        ("insulation", 2),
+        ("alumina", 4),
+        ("aluminium", 3),
+        ("wiring", 2),
+    ] {
+        act(g, "reserve", product, units * mine_core::geometry::UNITS);
     }
     for product in [
         "advanced_structure",
@@ -126,6 +160,14 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
         act(g, "reserve", product, 10 * mine_core::geometry::UNITS);
     }
     act(g, "megaproject", "", 0);
+    // Recover finite tailings when an exhausted site cannot fund its next module.
+    if g.level("reclaimer") == 0
+        && g.level("furnace") > 0
+        && g.level("shaft") > 0
+        && g.tailings.values().sum::<u64>() >= 100 * mine_core::geometry::UNITS
+    {
+        act(g, "buy", "reclaimer", 0);
+    }
     // Keep mandatory purchases ahead of optional rate spending.
     let spendable = |g: &Game| {
         g.credits
@@ -143,7 +185,7 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
                 act(g, "buy", "worker", 0);
             }
         }
-        if g.depth() + 20 >= 300 * (1 + g.level("shaft")) && spendable(g) >= g.cost("shaft") {
+        if g.depth() + 20 >= 300 * (1 + g.level("shaft")) && g.credits >= g.cost("shaft") {
             act(g, "buy", "shaft", 0);
         }
         for id in [
@@ -253,7 +295,7 @@ fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
             g.credits
         );
     }
-    json!({"seed":seed,"strategy":style,"mode":mode,"complete":g.megaproject,"events":events,"sites":g.site,"depth":g.depth(),"credits":g.credits,"next_upgrade":g.pinned,"blockers":g.stages.iter().map(|f|&f.blocker).collect::<Vec<_>>(),"save_bytes":serde_json::to_vec(&g).unwrap().len()})
+    json!({"seed":seed,"strategy":style,"mode":mode,"complete":g.megaproject,"events":events,"sites":g.site,"depth":g.depth(),"credits":g.credits,"next_upgrade":g.pinned,"purchase_blocker":g.pinned.as_ref().and_then(|id|g.purchase_blocker(id)),"products":g.products,"levels":g.levels,"blockers":g.stages.iter().map(|f|&f.blocker).collect::<Vec<_>>(),"save_bytes":serde_json::to_vec(&g).unwrap().len()})
 }
 fn main() {
     mine_core::content::validate().unwrap();
@@ -268,11 +310,42 @@ fn main() {
         .unwrap_or(42);
     let mode = args.get(3).map(String::as_str).unwrap_or("scheduled");
     assert!(["scheduled", "attentive", "continuous"].contains(&mode));
+    let workers = args
+        .get(4)
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(4)
+        .clamp(1, 8);
+    let next = std::sync::atomic::AtomicU64::new(0);
+    let (sender, receiver) = std::sync::mpsc::channel();
     let mut runs = Vec::new();
-    for index in 0..seeds {
-        let style = ["bulk", "precision", "reclamation"][index as usize % 3];
-        runs.push(run(42 + index, style, days, mode));
-    }
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            let sender = sender.clone();
+            let next = &next;
+            scope.spawn(move || loop {
+                let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if index >= seeds {
+                    break;
+                }
+                let style = ["bulk", "precision", "reclamation"][index as usize % 3];
+                sender.send(run(42 + index, style, days, mode)).unwrap();
+            });
+        }
+        drop(sender);
+        for report in receiver {
+            eprintln!(
+                "Completed seed {}: headquarters={}",
+                report["seed"], report["complete"]
+            );
+            runs.push(report);
+            std::fs::write(
+                "target/campaign-progress.json",
+                serde_json::to_vec_pretty(&runs).unwrap(),
+            )
+            .unwrap();
+        }
+    });
+    runs.sort_by_key(|r| r["seed"].as_u64());
     let mut medians = BTreeMap::new();
     for (name, window) in &pacing::get().windows {
         let mut times: Vec<_> = runs
