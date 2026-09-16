@@ -10,7 +10,7 @@ pub const PIT_LAST_X: u32 = WIDTH - (PIT_MARGIN + (PIT_ROWS - 1) / BENCH_ROWS * 
 pub const UNITS: u64 = 64_000;
 pub const CELL_MASS: u64 = 1_000;
 pub const MAX_ROWS: u32 = 800_000;
-pub const GENERATOR_VERSION: u32 = 1;
+pub const GENERATOR_VERSION: u32 = 2;
 pub fn depth(row: u32) -> u32 {
     row / CELLS_PER_METRE
 }

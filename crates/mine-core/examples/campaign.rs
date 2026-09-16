@@ -315,6 +315,7 @@ fn main() {
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(4)
         .clamp(1, 8);
+    std::fs::write("target/campaign-progress.json", "[]").unwrap();
     let next = std::sync::atomic::AtomicU64::new(0);
     let (sender, receiver) = std::sync::mpsc::channel();
     let mut runs = Vec::new();
@@ -358,7 +359,7 @@ fn main() {
     }
     println!(
         "{}",
-        serde_json::to_string_pretty(&json!({"days":days,"runs":runs,"milestones":medians}))
+        serde_json::to_string_pretty(&json!({"save_version":mine_core::VERSION,"generator_version":mine_core::geometry::GENERATOR_VERSION,"days":days,"runs":runs,"milestones":medians}))
             .unwrap()
     );
 }

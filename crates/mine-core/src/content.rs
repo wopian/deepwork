@@ -5,6 +5,7 @@ use crate::{
 use std::collections::BTreeSet;
 pub fn validate() -> Result<(), String> {
     crate::pacing::validate()?;
+    crate::geology::validate()?;
     let cat = materials();
     if cat
         .iter()

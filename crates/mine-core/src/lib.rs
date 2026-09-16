@@ -11,7 +11,7 @@ pub use geometry::WIDTH;
 use geometry::{CELL_MASS, UNITS};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-pub const VERSION: u32 = 5;
+pub const VERSION: u32 = 6;
 /// Deterministic fractional throughput without storing idle production credit.
 /// `rate` is thousandths of one work unit per tick; no multiplication by full age.
 fn work_budget(rate: u64, tick: u64) -> u64 {
@@ -173,6 +173,8 @@ pub struct Game {
     pub transport: transport::Network,
     #[serde(skip)]
     haul_path: Vec<[u32; 2]>,
+    #[serde(skip)]
+    haul_route_key: Option<([u32; 2], bool)>,
     #[serde(default)]
     pub crew: logistics::Crew,
     #[serde(default)]
@@ -320,6 +322,7 @@ impl Game {
             trace_fraction: BTreeMap::new(),
             transport: transport::Network::default(),
             haul_path: vec![],
+            haul_route_key: None,
             crew: logistics::Crew::assign(3, &BTreeMap::new()),
             crew_priority: String::new(),
             cargo_policy: String::new(),
@@ -914,7 +917,9 @@ impl Game {
 
         if let Some(cell) = self.removed.last() {
             let origin = [cell.x, cell.y];
-            if self.haul_path.first() != Some(&origin) {
+            let key = (origin, self.level("shaft") > 0);
+            if self.haul_route_key != Some(key) {
+                self.haul_route_key = Some(key);
                 self.haul_path = navigation::route(
                     &self.terrain,
                     &self.heights,

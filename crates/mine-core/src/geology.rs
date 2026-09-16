@@ -60,6 +60,50 @@ impl Deposit {
         grain > 0.08 && (grain > 0.25 || (v - centre).abs() < thickness * 0.7)
     }
 }
+#[derive(serde::Deserialize)]
+struct Reserve {
+    feed: usize,
+    depth_metres: u32,
+    length: f64,
+    width: f64,
+}
+fn reserves() -> &'static [Reserve] {
+    static CONTENT: std::sync::OnceLock<Vec<Reserve>> = std::sync::OnceLock::new();
+    CONTENT.get_or_init(|| {
+        serde_json::from_str(include_str!("../../../content/deposits.json"))
+            .expect("valid reserve deposits")
+    })
+}
+pub fn validate() -> Result<(), String> {
+    let cat = crate::materials();
+    for r in reserves() {
+        if r.feed >= cat.len()
+            || r.depth_metres < 48
+            || r.depth_metres > 10000
+            || r.depth_metres % 24 != 0
+            || cat[r.feed].tier > tier(r.depth_metres as i64)
+            || !r.length.is_finite()
+            || !(64.0..=200.0).contains(&r.length)
+            || !r.width.is_finite()
+            || !(8.0..=24.0).contains(&r.width)
+        {
+            return Err("Invalid accessible reserve deposit".into());
+        }
+    }
+    Ok(())
+}
+fn reserve_descriptor(seed: u64, index: usize, reserve: &Reserve) -> Deposit {
+    let key = hash(seed ^ (index as u64 + 1).wrapping_mul(0xa0761d6478bd642f));
+    Deposit {
+        x: 192. + (key % 129) as f64,
+        y: (reserve.depth_metres * crate::geometry::CELLS_PER_METRE + 4) as f64,
+        length: reserve.length,
+        width: reserve.width,
+        slope: ((key >> 16) % 5) as f64 / 32. - 0.0625,
+        shape: 1,
+        seed: key,
+    }
+}
 pub fn sample(seed: u64, profile: usize, x: u32, y: u32, catalogue: &[Material]) -> usize {
     // Irregular, reachable starter reserves; no repeating vertical stripes.
     for (index, (id, cy, radius)) in [(3, 24., 35.), (5, 76., 43.), (6, 130., 48.)]
@@ -77,6 +121,16 @@ pub fn sample(seed: u64, profile: usize, x: u32, y: u32, catalogue: &[Material])
         };
         if starter.contains(x as f64, y as f64) {
             return id;
+        }
+    }
+    // Finite, irregular lenses intersect commissioned drives before later gates.
+    // Their world-space descriptors cross chunks; no recurring mineral stripes.
+    for (index, reserve) in reserves().iter().enumerate() {
+        if y.abs_diff(reserve.depth_metres * crate::geometry::CELLS_PER_METRE + 4) > 48 {
+            continue;
+        }
+        if reserve_descriptor(seed, index, reserve).contains(x as f64, y as f64) {
+            return reserve.feed;
         }
     }
     let tx = x as i64 / 256;
@@ -154,6 +208,26 @@ pub fn sample(seed: u64, profile: usize, x: u32, y: u32, catalogue: &[Material])
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn mandatory_lenses_have_accessible_reserves_across_thirty_seeds() {
+        validate().unwrap();
+        let cat = crate::materials();
+        for seed in 42..72 {
+            for reserve in reserves() {
+                let top = reserve.depth_metres * crate::geometry::CELLS_PER_METRE;
+                let mined = (32..crate::geometry::WIDTH - 32)
+                    .flat_map(|x| (top..top + 8).map(move |y| (x, y)))
+                    .filter(|&(x, y)| sample(seed, (seed % 3) as usize, x, y, &cat) == reserve.feed)
+                    .count();
+                assert!(
+                    mined >= 1500,
+                    "seed {seed}, feed {}, depth {}: {mined}",
+                    reserve.feed,
+                    reserve.depth_metres
+                );
+            }
+        }
+    }
     #[test]
     fn deposits_cross_chunks_without_rectangular_fill() {
         let deposit = Deposit {
