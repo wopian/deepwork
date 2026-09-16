@@ -45,6 +45,28 @@ export interface Game {
       milliseconds: number;
     }[];
   }[];
+  transport: {
+    express: number;
+    stations: {
+      id: string;
+      name: string;
+      level: number;
+      capacity: number;
+      cargo: Record<string, number>;
+      preferred: boolean;
+      incoming: number;
+      outgoing: number;
+      quote: string;
+    }[];
+    segments: {
+      name: string;
+      capacity: number;
+      blocked: boolean;
+      utilisation: number;
+      demand: number;
+      batches: { amount: number }[];
+    }[];
+  };
   crew: Record<string, number>;
   crew_priority: string;
   cargo_policy: string;

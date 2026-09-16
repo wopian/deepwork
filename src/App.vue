@@ -27,6 +27,8 @@ async function confirmReset() {
     resetText.value = "";
   }
 }
+const cargoTotal = (cargo: Record<string, number>) =>
+  Object.values(cargo).reduce((sum, quantity) => sum + quantity, 0);
 const materialUpgrades = upgradeRequirements.filter(
   (u) => Object.keys(u.inputs).length,
 );
@@ -280,6 +282,69 @@ onMounted(start);
               fifth slot serves other cargo.</span
             >
           </label>
+          <details v-if="state" class="transport-panel">
+            <summary>Transport buffers and express service</summary>
+            <div
+              v-for="(station, index) in state.transport.stations"
+              :key="station.id"
+              class="transport-station"
+            >
+              <strong>{{ station.name }}</strong>
+              <span
+                >{{ format(cargoTotal(station.cargo) / RESOURCE_UNIT) }} /
+                {{ format(station.capacity / RESOURCE_UNIT) }} units</span
+              >
+              <span
+                >In {{ format(station.incoming / RESOURCE_UNIT) }} · out
+                {{ format(station.outgoing / RESOURCE_UNIT) }} this second</span
+              >
+              <button
+                :disabled="station.level >= 50"
+                @click="act('buffer', station.id)"
+              >
+                Buffer + · {{ format(station.quote) }} credits
+              </button>
+              <label
+                ><input
+                  type="checkbox"
+                  :checked="station.preferred"
+                  @change="
+                    act(
+                      'station_priority',
+                      station.id,
+                      ($event.target as HTMLInputElement).checked ? 1 : 0,
+                    )
+                  "
+                />
+                Prefer selected minerals</label
+              >
+              <template v-if="index < state.transport.segments.length">
+                <span
+                  >{{ state.transport.segments[index]!.name }} ·
+                  {{
+                    Math.round(
+                      state.transport.segments[index]!.utilisation * 100,
+                    )
+                  }}% loading ·
+                  {{
+                    state.transport.segments[index]!.blocked
+                      ? "Destination or vehicle capacity full"
+                      : "Flowing"
+                  }}</span
+                >
+                <button
+                  :class="{ selected: state.transport.express === index }"
+                  @click="act('express', '', index)"
+                >
+                  {{
+                    state.transport.express === index
+                      ? "Express selected"
+                      : "Select express route"
+                  }}
+                </button>
+              </template>
+            </div>
+          </details>
           <p class="crew-roster" v-if="state?.levels.supports">
             Automatic supports ready to
             {{ state.support_rows / CELLS_PER_METRE }} m. Construction progress

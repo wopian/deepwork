@@ -32,6 +32,7 @@ struct Snapshot {
     quotes: std::collections::BTreeMap<String, String>,
     retirement_award: u64,
     requires_reset: bool,
+    shipments: Vec<mine_core::transport::VisualCargo>,
     upgrade_previews: std::collections::BTreeMap<String, mine_core::UpgradePreview>,
     purchase_blockers: std::collections::BTreeMap<String, String>,
 }
@@ -59,6 +60,7 @@ impl From<Game> for Snapshot {
             .collect();
         Self {
             requires_reset: game.legacy_pending,
+            shipments: game.transport.visual(),
             game,
             quotes,
             retirement_award,

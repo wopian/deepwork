@@ -3,12 +3,13 @@ pub mod geology;
 pub mod geometry;
 pub mod logistics;
 pub mod terrain;
+pub mod transport;
 pub mod waste;
 pub use geometry::WIDTH;
 use geometry::{CELL_MASS, UNITS};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-pub const VERSION: u32 = 4;
+pub const VERSION: u32 = 5;
 /// Deterministic fractional throughput without storing idle production credit.
 /// `rate` is thousandths of one work unit per tick; no multiplication by full age.
 fn work_budget(rate: u64, tick: u64) -> u64 {
@@ -165,7 +166,7 @@ pub struct Game {
     #[serde(default)]
     pub trace_fraction: BTreeMap<String, u64>,
     #[serde(default)]
-    pub shipments: Vec<logistics::Shipment>,
+    pub transport: transport::Network,
     #[serde(skip)]
     haul_path: Vec<[u32; 2]>,
     #[serde(default)]
@@ -310,7 +311,7 @@ impl Game {
             flow_window: [0; 5],
             trace_feed: BTreeMap::new(),
             trace_fraction: BTreeMap::new(),
-            shipments: vec![],
+            transport: transport::Network::default(),
             haul_path: vec![],
             crew: logistics::Crew::assign(3, &BTreeMap::new()),
             crew_priority: String::new(),
@@ -422,6 +423,18 @@ impl Game {
         }
         None
     }
+    fn power_factor(&self, offline: bool) -> f64 {
+        let industry =
+            (1 + self.level("chemical") + 2 * self.level("electrolytic") + 3 * self.level("trace"))
+                as f64
+                * if !offline && self.boosts[2] > 0 {
+                    1.5
+                } else {
+                    1.
+                };
+        let logistics: u32 = self.transport.segments.iter().map(|s| s.demand).sum();
+        ((1 + 5 * self.level("power")) as f64 / (industry + logistics as f64)).min(1.)
+    }
     fn capacity_rates(&mut self) -> [f64; 4] {
         self.crew = logistics::Crew::prioritise(self.workers, &self.levels, &self.crew_priority);
         let factor = if self.challenge == "long_haul" {
@@ -429,18 +442,26 @@ impl Game {
         } else {
             1.
         } / sites()[self.profile].haul;
-        let (_, duration) = logistics::route(&self.haul_path, &self.levels, factor);
-        let haul = (self.crew.haulers as f64
+        let (legs, _) = logistics::route(&self.haul_path, &self.levels, factor);
+        let rate = self.crew.haulers as f64
             * self.throughput("conveyor")
             * if self.level("conveyor") > 0 { 3. } else { 1. }
-            * (1. + 0.05 * self.ranks.get("logistics").copied().unwrap_or(0) as f64))
-            .min((20. + 5. * self.level("capacity") as f64) / duration as f64);
-        let power = ((1. + 5. * self.level("power") as f64)
-            / (1.
-                + self.level("chemical") as f64
-                + 2. * self.level("electrolytic") as f64
-                + 3. * self.level("trace") as f64))
-            .min(1.);
+            * (1. + 0.05 * self.ranks.get("logistics").copied().unwrap_or(0) as f64);
+        self.transport
+            .configure(&legs, (rate * UNITS as f64) as u64, self.level("capacity"));
+        let power = self.power_factor(true);
+        let haul = self
+            .transport
+            .segments
+            .iter()
+            .map(|segment| {
+                let speed = if segment.demand > 0 { power } else { 1. };
+                rate.min(
+                    segment.capacity as f64 / UNITS as f64 * 1000. * speed
+                        / segment.duration_ms as f64,
+                )
+            })
+            .fold(rate, f64::min);
         [
             self.dig_rate(true) as f64 / UNITS as f64,
             haul,
@@ -622,10 +643,11 @@ impl Game {
     }
     /// No input, pending arrival, eligible recipe or reachable excavation event can fire.
     fn quiescent(&self, cat: &[Material]) -> bool {
-        self.quiet_pipeline(cat) && self.next_frontier(cat).is_none() && self.shipments.is_empty()
+        self.quiet_pipeline(cat) && self.next_frontier(cat).is_none() && self.transport.mass() == 0
     }
     fn quiet_pipeline(&self, cat: &[Material]) -> bool {
-        if (self.level("supports") > 0 && self.support_rows < self.support_target())
+        if self.transport.mass() > 0
+            || (self.level("supports") > 0 && self.support_rows < self.support_target())
             || self
                 .ore
                 .values()
@@ -755,16 +777,8 @@ impl Game {
                 self.site_discoveries += 1;
             }
         }
-        if self.ticks % 20 == 0 {
-            logistics::arrive_at_speed(
-                &mut self.shipments,
-                &mut self.hauled,
-                cap,
-                if !offline && self.boosts[1] > 0 { 2 } else { 1 },
-            );
-        }
         let (transport, _) = logistics::mode(&self.levels);
-        let route_depth = self.depth();
+
         if let Some(cell) = self.removed.last() {
             let origin = [cell.x, cell.y];
             if self.haul_path.first() != Some(&origin) {
@@ -776,7 +790,7 @@ impl Game {
         } else {
             1.
         } / sites()[self.profile].haul;
-        let (legs, duration) = logistics::route(&self.haul_path, &self.levels, terrain_factor);
+        let (legs, _duration) = logistics::route(&self.haul_path, &self.levels, terrain_factor);
         let haul_rate = (UNITS as f64
             * self.crew.haulers as f64
             * if !offline && self.boosts[0] > 0 && matches!(transport, "carrying" | "wheelbarrow") {
@@ -786,48 +800,21 @@ impl Game {
             }
             * self.throughput("conveyor")
             * (1. + 0.05 * self.ranks.get("logistics").copied().unwrap_or(0) as f64)
-            * (if self.level("conveyor") > 0 { 3. } else { 1. })
-            * (if !offline && self.boosts[1] > 0 {
-                2.
-            } else {
-                1.
-            })) as u64;
-        let haul_rate = haul_rate / 20;
-        let mut remaining = haul_rate.min(cap.saturating_sub(
-            self.hauled.values().sum::<u64>()
-                + self.shipments.iter().map(|s| s.amount).sum::<u64>(),
-        ));
-        let haul_budget = remaining;
-        let mut ore_ids: Vec<_> = self
-            .ore
-            .iter()
-            .filter(|(_, q)| **q > 0)
-            .map(|(&id, _)| id)
-            .collect();
-        logistics::order_cargo(
-            &mut ore_ids,
+            * (if self.level("conveyor") > 0 { 3. } else { 1. })) as u64;
+        self.transport
+            .configure(&legs, haul_rate, self.level("capacity"));
+        let power = (self.power_factor(offline) * 1000.) as u64;
+        let haul_budget = self.transport.tick(
             self.ticks,
+            &mut self.ore,
+            &mut self.hauled,
+            cap,
             &self.priorities,
             self.cargo_policy == "preferred",
+            !offline && self.boosts[1] > 0,
+            power,
         );
-        for id in ore_ids {
-            let q = self.ore.get_mut(&id).expect("known ore");
-            let n = (*q).min(remaining);
-            *q -= n;
-            if n > 0 {
-                self.shipments.push(logistics::Shipment {
-                    material: id,
-                    amount: n,
-                    remaining: duration,
-                    duration,
-                    depth: route_depth,
-                    mode: transport.into(),
-                    path: self.haul_path.clone(),
-                    legs: legs.clone(),
-                });
-            }
-            remaining -= n;
-        }
+        let remaining = 0;
         let sort_rate = (2. * UNITS as f64 * self.throughput("sorter")) as u64 / 20;
         let mut sort_left = sort_rate.min(cap.saturating_sub(self.concentrate.values().sum()));
         let sort_budget = sort_left;
@@ -851,16 +838,7 @@ impl Game {
             sort_left -= n;
         }
         let sorted = sort_budget - sort_left;
-        let power_demand =
-            1 + self.level("chemical") + 2 * self.level("electrolytic") + 3 * self.level("trace");
-        let power_demand = power_demand as f64
-            * if !offline && self.boosts[2] > 0 {
-                1.5
-            } else {
-                1.
-            };
-        let power_supply = 1 + 5 * self.level("power");
-        let power_factor = (power_supply as f64 / power_demand as f64).min(1.);
+        let power_factor = self.power_factor(offline);
         let process_rate = (power_factor
             * if self.specialisation.as_deref() == Some("reclamation") {
                 0.85
@@ -1168,17 +1146,29 @@ impl Game {
             Stage {
                 name: "Hauling".into(),
                 rate: self.flow_window[1] as f64 / UNITS as f64 / seconds,
-                buffer: self.hauled.values().sum::<u64>()
-                    + self.shipments.iter().map(|s| s.amount).sum::<u64>(),
-                capacity: cap,
-                blocker: if haul_budget == 0 {
-                    "Cargo buffers full"
-                } else if remaining == haul_budget {
-                    "Waiting for ore"
+                buffer: self.hauled.values().sum::<u64>() + self.transport.mass(),
+                capacity: cap
+                    + self
+                        .transport
+                        .stations
+                        .iter()
+                        .map(|s| s.capacity)
+                        .sum::<u64>()
+                    + self
+                        .transport
+                        .segments
+                        .iter()
+                        .map(|s| s.capacity)
+                        .sum::<u64>(),
+                blocker: if self.transport.segments.iter().any(|s| s.blocked)
+                    || (haul_budget == 0 && ore_total > 0)
+                {
+                    "Cargo buffers full".into()
+                } else if haul_budget == 0 && self.transport.mass() == 0 {
+                    "Waiting for ore".into()
                 } else {
-                    "Working"
-                }
-                .into(),
+                    "Working".into()
+                },
             },
             Stage {
                 name: "Sorting".into(),
@@ -1242,13 +1232,7 @@ impl Game {
                 } else {
                     u64::MAX
                 };
-                let arrival = self
-                    .shipments
-                    .iter()
-                    .map(|s| 20 - self.ticks % 20 + s.remaining.saturating_sub(1) as u64 * 20)
-                    .min()
-                    .unwrap_or(u64::MAX);
-                left.min(dig).min(arrival).saturating_sub(1)
+                left.min(dig).saturating_sub(1)
             } else {
                 0
             };
@@ -1263,9 +1247,6 @@ impl Game {
                 if transport_seconds > 0 {
                     self.waste_profile
                         .reconcile(self.slag + self.depleted + self.tailings.values().sum::<u64>());
-                }
-                for shipment in &mut self.shipments {
-                    shipment.remaining = shipment.remaining.saturating_sub(transport_seconds);
                 }
                 self.ticks += skip;
                 left -= skip;
@@ -1364,6 +1345,37 @@ impl Game {
                     return Err("Invalid policy".into());
                 }
                 self.policy = a.target;
+            }
+            "buffer" => {
+                let index: usize = a.target.parse().map_err(|_| "Unknown station")?;
+                let station = self
+                    .transport
+                    .stations
+                    .get_mut(index)
+                    .ok_or("Unknown station")?;
+                let cost = (60. * 1.12f64.powi(station.level as i32)).ceil() as u64;
+                if station.level >= 50 || self.credits < cost {
+                    return Err("Buffer upgrade unavailable".into());
+                }
+                self.credits -= cost;
+                station.level += 1;
+                station.quote = (60. * 1.12f64.powi(station.level as i32))
+                    .ceil()
+                    .to_string();
+            }
+            "station_priority" => {
+                let index: usize = a.target.parse().map_err(|_| "Unknown station")?;
+                self.transport
+                    .stations
+                    .get_mut(index)
+                    .ok_or("Unknown station")?
+                    .preferred = a.value != 0;
+            }
+            "express" => {
+                if a.value >= 4 {
+                    return Err("Unknown express segment".into());
+                }
+                self.transport.express = a.value as usize;
             }
             "cargo_policy" => {
                 if !["balanced", "preferred"].contains(&a.target.as_str()) {
@@ -1661,6 +1673,9 @@ impl Game {
         {
             return Err("Invalid specialisation".into());
         }
+        if !self.transport.valid(materials().len()) {
+            return Err("Invalid transport network".into());
+        }
         if !self.waste_profile.valid() {
             return Err("Invalid waste profile".into());
         }
@@ -1730,31 +1745,6 @@ impl Game {
             return Err("Unexpected geology chunks".into());
         }
         let n = materials().len();
-        if self.shipments.len() > 20000
-            || self.shipments.iter().any(|s| {
-                s.duration == 0
-                    || s.legs.len() > 100002
-                    || s.legs.iter().any(|l| {
-                        l.milliseconds == 0
-                            || [l.from, l.to].iter().any(|p| {
-                                p[0] < 0
-                                    || p[0] > 576
-                                    || p[1] < -24
-                                    || p[1] >= terrain::MAX_ROWS as i32
-                            })
-                    })
-                    || s.path.len() > 100000
-                    || s.path
-                        .iter()
-                        .any(|p| p[0] >= WIDTH || p[1] >= terrain::MAX_ROWS)
-                    || s.material >= n
-                    || s.amount > 1_000_000_000_000
-                    || s.duration > 100000
-                    || s.remaining > s.duration
-            })
-        {
-            return Err("Invalid cargo shipment".into());
-        }
         if self
             .products
             .values()
@@ -1871,7 +1861,7 @@ mod accounting_tests {
             + g.products.values().sum::<u64>()
             + g.tailings.values().sum::<u64>()
             + g.sold_mass
-            + g.shipments.iter().map(|s| s.amount).sum::<u64>()
+            + g.transport.mass()
             + g.delivered_mass
             + g.slag
             + g.depleted
@@ -2173,9 +2163,17 @@ mod throughput_tests {
         let mut g = Game::default();
         g.hauled.insert(0, 20000 * 64);
         g.ore.insert(0, 1000 * 64);
+        g.transport.stations[0].cargo.insert(0, 4 * UNITS);
+        g.transport.segments[0].batches.push(transport::Batch {
+            material: 0,
+            amount: 20 * UNITS,
+            remaining_ms: 10000,
+            duration_ms: 10000,
+            legs: vec![],
+        });
         g.tick(&materials(), false);
         assert_eq!(g.flow_window[1], 0);
-        assert!(g.shipments.is_empty());
+        assert!(g.transport.mass() > 0);
         assert_eq!(g.stages[1].blocker, "Cargo buffers full");
     }
 }
@@ -2238,14 +2236,11 @@ mod offline_idle_tests {
         let mut g = Game::default();
         g.heights = vec![400; WIDTH as usize];
         g.terrain = terrain::Terrain::from_columns(&g.heights);
-        g.shipments.push(logistics::Shipment {
+        g.transport.segments[0].batches.push(transport::Batch {
             material: 0,
             amount: 1000,
-            remaining: 30,
-            duration: 30,
-            depth: 100,
-            mode: "carrying".into(),
-            path: vec![],
+            remaining_ms: 30000,
+            duration_ms: 30000,
             legs: vec![],
         });
         assert!(!g.quiescent(&materials()));
@@ -2470,14 +2465,11 @@ mod offline_event_tests {
                     a.levels.insert("conveyor".into(), 1);
                     a.levels.insert("furnace".into(), 1);
                 }
-                a.shipments.push(logistics::Shipment {
+                a.transport.segments[0].batches.push(transport::Batch {
                     material: 3,
                     amount: 1000,
-                    remaining: 31,
-                    duration: 31,
-                    depth: 0,
-                    mode: "carrying".into(),
-                    path: vec![],
+                    remaining_ms: 31000,
+                    duration_ms: 31000,
                     legs: vec![],
                 });
                 let mut b = a.clone();
