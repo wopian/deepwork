@@ -190,6 +190,12 @@ try {
     const started = Date.now();
     while (Date.now() - started < stressSeconds * 1000) {
       await page.waitForTimeout(10000);
+      if (!(await page.locator(".world").count())) {
+        console.log("Restoring Operations for renderer stress coverage");
+        await page.getByRole("button", { name: "Operations", exact: true }).click();
+        await page.locator(".world").waitFor();
+        await page.waitForTimeout(1200);
+      }
       const { metrics } = await cdp.send("Performance.getMetrics");
       const telemetry: Record<string, string | undefined> = await page.evaluate(
         () => {
