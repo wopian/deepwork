@@ -5,6 +5,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 pub const WIDTH: u32 = 64;
 pub const VERSION: u32 = 2;
+/// Deterministic fractional throughput without storing idle production credit.
+/// `rate` is thousandths of one work unit per tick; no multiplication by full age.
+fn work_budget(rate: u64, tick: u64) -> u64 {
+    let fraction = rate % 1000;
+    rate / 1000 + u64::from((tick % 1000 * fraction) % 1000 < fraction)
+}
 #[derive(Clone, Serialize)]
 pub struct UpgradePreview {
     pub machine_percent: f64,
@@ -929,10 +935,16 @@ impl Game {
             {
                 continue;
             }
+            let rate = (12500.
+                * power_factor
+                * self.throughput(&recipe.building)
+                * (1. + 0.05 * self.ranks.get("metallurgy").copied().unwrap_or(0) as f64))
+                as u64;
+            let recipe_budget = work_budget(rate, self.ticks);
             if recipe.id.starts_with("separate_") {
                 let source = format!("{}_residue", recipe.output);
                 let available = self.trace_feed.entry(source).or_default();
-                let amount = (*available).min(12);
+                let amount = (*available).min(recipe_budget);
                 *available -= amount;
                 if amount > 0 {
                     self.collection.insert(recipe.output.clone());
@@ -943,10 +955,24 @@ impl Game {
             let amount = recipe
                 .inputs
                 .iter()
-                .map(|(p, n)| self.products.get(p).copied().unwrap_or(0) / n)
+                .map(|(p, n)| {
+                    let committed = self
+                        .pinned
+                        .as_ref()
+                        .and_then(|id| requirements().iter().find(|u| u.id == *id))
+                        .and_then(|u| u.inputs.get(p))
+                        .copied()
+                        .unwrap_or(0);
+                    self.products
+                        .get(p)
+                        .copied()
+                        .unwrap_or(0)
+                        .saturating_sub(committed)
+                        / n
+                })
                 .min()
                 .unwrap_or(0)
-                .min(if self.ticks % 2 == 0 { 13 } else { 12 });
+                .min(recipe_budget);
             if amount > 0 {
                 for (p, n) in &recipe.inputs {
                     *self.products.entry(p.clone()).or_default() -= amount * n;
@@ -1867,8 +1893,8 @@ mod trace_tests {
         assert_eq!(g.products.get("gallium").copied().unwrap_or(0), 0);
         g.trace_feed.insert("gallium_residue".into(), 100);
         g.tick(&materials(), false);
-        assert_eq!(g.products["gallium"], 12);
-        assert_eq!(g.trace_feed["gallium_residue"], 88);
+        assert!(g.products["gallium"] > 0);
+        assert_eq!(g.products["gallium"] + g.trace_feed["gallium_residue"], 100);
     }
     #[test]
     fn trace_fractions_never_exceed_feed() {
@@ -2264,5 +2290,73 @@ mod collection_tests {
         .unwrap();
         assert!(g.collection.contains("neodymium"));
         assert!(g.products.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod recipe_power_tests {
+    use super::*;
+    #[test]
+    fn fractional_budget_preserves_slow_and_fast_work_without_overflow() {
+        for rate in [0, 1, 125, 12500, 95123] {
+            assert_eq!(
+                (1..=1000).map(|tick| work_budget(rate, tick)).sum::<u64>(),
+                rate
+            );
+            assert!(work_budget(rate, u64::MAX) <= rate / 1000 + 1);
+        }
+    }
+    #[test]
+    fn recipe_power_and_module_upgrades_change_output_without_creating_mass() {
+        fn output(power: u32, module: u32) -> u64 {
+            let mut g = Game::default();
+            g.levels.insert("manufacturing".into(), module);
+            g.levels.insert("trace".into(), 5);
+            g.levels.insert("power".into(), power);
+            g.enabled_recipes.insert("bronze".into());
+            g.products.insert("copper".into(), 6000);
+            g.products.insert("tin".into(), 2000);
+            g.reserve.insert("bronze".into(), 8000);
+            let cat = materials();
+            for _ in 0..20 {
+                g.tick(&cat, true);
+            }
+            let bronze = g.products.get("bronze").copied().unwrap_or(0);
+            assert_eq!(g.products["copper"] + g.products["tin"] + bronze, 8000);
+            bronze
+        }
+        let constrained = output(0, 1);
+        let powered = output(10, 1);
+        let upgraded = output(10, 10);
+        assert!(constrained > 0 && constrained < powered);
+        assert!(powered < upgraded);
+    }
+}
+
+#[cfg(test)]
+mod pinned_recipe_tests {
+    use super::*;
+    #[test]
+    fn automatic_steel_respects_iron_committed_to_shaft() {
+        let mut g = Game::default();
+        g.levels.insert("furnace".into(), 1);
+        g.levels.insert("steelworks".into(), 1);
+        g.products.insert("iron".into(), 2000);
+        g.products.insert("coke".into(), 8000);
+        g.products.insert("lime".into(), 8000);
+        g.pinned = Some("shaft".into());
+        g.credits = 1000;
+        g.second(&materials(), true);
+        assert_eq!(g.products["iron"], 2000);
+        assert!(!g.steel_made);
+        g.action(Action {
+            sequence: 1,
+            kind: "buy".into(),
+            target: "shaft".into(),
+            value: 0,
+        })
+        .unwrap();
+        assert_eq!(g.level("shaft"), 1);
+        assert_eq!(g.products["iron"], 0);
     }
 }

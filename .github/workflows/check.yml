@@ -15,3 +15,10 @@ jobs:
       - run: ./scripts/check-no-node.ps1
       - run: cargo test --workspace --locked
       - run: bun run test:browser
+      - run: cargo build --release -p mine-core --example balance --locked
+      - name: Verify first retirement on every geological profile
+        run: |
+          foreach ($profile in 0..2) {
+            & .\target\release\examples\balance.exe depth $profile
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
