@@ -38,6 +38,13 @@ try {
     await page.getByRole("button", { name, exact: true }).click();
     await page.waitForTimeout(50);
   }
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByLabel("Audio", { exact: true }).check();
+  await page.getByLabel("Machinery ambience", { exact: true }).uncheck();
+  await page.getByLabel("Audio", { exact: true }).uncheck();
+  await page.getByLabel("Number display").selectOption("full");
+  await page.getByLabel("Visual quality").selectOption("low");
+  await page.getByRole("button", { name: "Operations", exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({
     path: output + "/mobile-preview.png",

@@ -7,7 +7,7 @@ import { state, materials, terrainEpoch } from "./game";
 import { WasteParticles } from "./waste";
 import profiles from "../content/sites.json";
 import { routePosition, cargoPosition } from "./routes";
-import { preferences } from "./preferences";
+import { preferences, productionAudio } from "./preferences";
 const host = ref<HTMLDivElement>();
 let app: Application | undefined;
 let world: Container;
@@ -248,6 +248,7 @@ onMounted(async () => {
     world.x = offsetX;
     actors.clear();
     const g = state.value;
+    productionAudio(g?.stages.reduce((sum, s) => sum + s.rate, 0) ?? 0);
     if (g) {
       if (lastSite !== g.site) {
         lastSite = g.site;
@@ -364,6 +365,7 @@ onMounted(async () => {
   });
 });
 onBeforeUnmount(() => {
+  productionAudio(0);
   stopWatch();
   app?.destroy(true, { children: true });
 });

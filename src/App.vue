@@ -60,13 +60,14 @@ const tab = ref("Operations");
 const query = ref("");
 const showRetire = ref(false);
 async function retirementPreview() {
-  if (await act('retirement_preview')) showRetire.value = true;
+  if (await act("retirement_preview")) showRetire.value = true;
 }
 async function retirementConfirm() {
-  if (await act('retire', selectedChallenge.value, selectedSite.value)) showRetire.value = false;
+  if (await act("retire", selectedChallenge.value, selectedSite.value))
+    showRetire.value = false;
 }
 async function retirementCancel() {
-  if (await act('cancel_retirement')) showRetire.value = false;
+  if (await act("cancel_retirement")) showRetire.value = false;
 }
 const hideOffline = ref(false);
 const depth = computed(() => Math.max(...(state.value?.heights ?? [0])) * 2);
@@ -571,16 +572,14 @@ onMounted(start);
       <label
         ><input v-model="preferences.reducedMotion" type="checkbox" /> Reduced
         motion</label
-      ><label
-        ><input v-model="preferences.audio" type="checkbox" /> Purchase
-        sounds</label
+      ><label><input v-model="preferences.audio" type="checkbox" /> Audio</label
       ><label
         >Volume
         <input
           v-model.number="preferences.volume"
           type="range"
           min="0"
-          max="0.3"
+          max="1"
           step="0.01" /></label
       ><label
         >Interface size
@@ -589,6 +588,10 @@ onMounted(start);
           <option :value="1.15">115%</option>
           <option :value="1.3">130%</option>
         </select></label
+      >
+      <label
+        ><input v-model="preferences.ambience" type="checkbox" /> Machinery
+        ambience</label
       >
       <label
         >Visual quality<select v-model="preferences.quality">
@@ -681,10 +684,7 @@ onMounted(start);
           >
         </div>
         <button @click="retirementCancel">Keep mining</button
-        ><button
-          class="primary"
-          @click="retirementConfirm"
-        >
+        ><button class="primary" @click="retirementConfirm">
           Retire & start next site
         </button>
       </section>
