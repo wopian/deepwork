@@ -15,6 +15,10 @@ pub struct Terrain {
     pub visible: BTreeMap<u32, Vec<u8>>,
     #[serde(skip)]
     pub frontier: BTreeSet<u32>,
+    #[serde(skip)]
+    pub access_frontier: BTreeSet<u32>,
+    #[serde(skip)]
+    pub ore_frontiers: BTreeMap<usize, BTreeSet<u32>>,
 }
 impl Default for Terrain {
     fn default() -> Self {
@@ -24,10 +28,42 @@ impl Default for Terrain {
             revealed: BTreeMap::new(),
             visible: BTreeMap::new(),
             frontier: (0..WIDTH).collect(),
+            access_frontier: (0..WIDTH).filter(|&key| Self::access_cell(key)).collect(),
+            ore_frontiers: BTreeMap::new(),
         }
     }
 }
 impl Terrain {
+    fn access_cell(key: u32) -> bool {
+        let (x, y) = (key % WIDTH, key / WIDTH);
+        if y < crate::geometry::PIT_ROWS {
+            x >= 16 + y && x < WIDTH - (16 + (y / 24) * 24)
+        } else {
+            x.abs_diff(WIDTH / 2) < 4 || (y % 96 < 8 && (32..WIDTH - 32).contains(&x))
+        }
+    }
+    fn index_frontier(&mut self, key: u32) {
+        if !self.frontier.contains(&key) {
+            return;
+        }
+        if Self::access_cell(key) {
+            self.access_frontier.insert(key);
+        } else {
+            let (x, y) = (key % WIDTH, key / WIDTH);
+            if y >= crate::geometry::PIT_ROWS && y % 96 >= 80 && x % 64 < 48 {
+                if let Some(id) = self.known_material(x, y) {
+                    self.ore_frontiers.entry(id).or_default().insert(key);
+                }
+            }
+        }
+    }
+    fn rebuild_work_index(&mut self) {
+        self.access_frontier.clear();
+        self.ore_frontiers.clear();
+        for key in self.frontier.iter().copied().collect::<Vec<_>>() {
+            self.index_frontier(key);
+        }
+    }
     pub fn contains(&self, x: u32, y: u32) -> bool {
         if x >= WIDTH || y >= MAX_ROWS {
             return false;
@@ -73,6 +109,7 @@ impl Terrain {
                     1 << (index % 8);
                 let material = crate::geology::sample(seed, profile, px, py, cat);
                 self.visible.entry(id).or_insert_with(|| vec![255; 4096])[index] = material as u8;
+                self.index_frontier(py * WIDTH + px);
                 found.insert(material);
                 self.revision += 1;
             }
@@ -94,6 +131,12 @@ impl Terrain {
         if x >= WIDTH || y >= MAX_ROWS || !self.frontier.remove(&key) {
             return false;
         }
+        self.access_frontier.remove(&key);
+        if let Some(id) = self.known_material(x, y) {
+            if let Some(frontier) = self.ore_frontiers.get_mut(&id) {
+                frontier.remove(&key);
+            }
+        }
         let index = bit_index(x, y);
         let bytes = self
             .chunks
@@ -103,6 +146,7 @@ impl Terrain {
         for (nx, ny) in Self::neighbors(x, y) {
             if !self.contains(nx, ny) {
                 self.frontier.insert(ny * WIDTH + nx);
+                self.index_frontier(ny * WIDTH + nx);
             }
         }
         self.revision += 1;
@@ -154,9 +198,11 @@ impl Terrain {
             for (nx, ny) in Self::neighbors(x, y) {
                 if !self.contains(nx, ny) {
                     self.frontier.insert(ny * WIDTH + nx);
+                    self.index_frontier(ny * WIDTH + nx);
                 }
             }
         }
+        self.rebuild_work_index();
         Ok(())
     }
     pub fn from_columns(heights: &[u32]) -> Self {
@@ -301,6 +347,8 @@ mod tests {
             serde_json::from_str(&serde_json::to_string(&t).unwrap()).unwrap();
         restored.rebuild().unwrap();
         assert_eq!(restored.frontier, t.frontier);
+        assert_eq!(restored.access_frontier, t.access_frontier);
+        assert_eq!(restored.ore_frontiers, t.ore_frontiers);
         assert_eq!(restored.count(), 130);
     }
     #[test]

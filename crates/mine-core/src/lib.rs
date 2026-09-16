@@ -617,89 +617,104 @@ impl Game {
         let pit_complete = self
             .terrain
             .contains(geometry::PIT_LAST_X, geometry::PIT_ROWS - 1);
-        let mut candidates = self.terrain.frontier.iter().filter_map(|&key| {
-            let (x, y) = (key % WIDTH, key / WIDTH);
-            if geometry::depth(y) >= depth_limit {
-                return None;
-            }
-            let surface = y < 192;
-            if !surface && !pit_complete {
-                return None;
-            }
-            if surface {
-                let margin = 16 + (y / 24) * 24;
-                if x < 16 + y || x >= WIDTH - margin {
+        let ore_faces = self
+            .priorities
+            .iter()
+            .filter(|_| self.policy == "vein")
+            .filter_map(|id| self.terrain.ore_frontiers.get(id))
+            .flat_map(|faces| faces.iter());
+        let mut candidates = self
+            .terrain
+            .access_frontier
+            .iter()
+            .chain(ore_faces)
+            .filter_map(|&key| {
+                if !self.terrain.frontier.contains(&key) {
                     return None;
                 }
-            } else {
-                let shaft = x.abs_diff(WIDTH / 2) < 4;
-                // Complete shaft clearance before descending to the next cutting face.
-                if shaft
-                    && y > 192
-                    && !(WIDTH / 2 - 3..=WIDTH / 2 + 3).all(|sx| self.terrain.contains(sx, y - 1))
-                {
+                let (x, y) = (key % WIDTH, key / WIDTH);
+                if geometry::depth(y) >= depth_limit {
                     return None;
                 }
-                let drive = y % 96 < 8 && (32..WIDTH - 32).contains(&x);
-                let stope = self.policy == "vein"
-                    && y % 96 >= 80
-                    && x % 64 < 48
-                    && self
-                        .terrain
-                        .known_material(x, y)
-                        .is_some_and(|id| self.priorities.contains(&id));
-                if stope && !self.terrain.contains(x, (y / 96 + 1) * 96 + 7) {
+                let surface = y < 192;
+                if !surface && !pit_complete {
                     return None;
                 }
-                if !shaft && !drive && !stope {
-                    return None;
-                }
-                if !shaft && drive {
-                    let inner = if x < WIDTH / 2 { x + 1 } else { x - 1 };
-                    let top = y / 96 * 96;
-                    // Excavate the lift landing before opening either tunnel portal.
-                    if !(top..top + 8).all(|row| self.terrain.contains(WIDTH / 2, row)) {
+                if surface {
+                    let margin = 16 + (y / 24) * 24;
+                    if x < 16 + y || x >= WIDTH - margin {
                         return None;
                     }
-                    if inner.abs_diff(WIDTH / 2) >= 4
-                        && !(top..top + 8).all(|row| self.terrain.contains(inner, row))
+                } else {
+                    let shaft = x.abs_diff(WIDTH / 2) < 4;
+                    // Complete shaft clearance before descending to the next cutting face.
+                    if shaft
+                        && y > 192
+                        && !(WIDTH / 2 - 3..=WIDTH / 2 + 3)
+                            .all(|sx| self.terrain.contains(sx, y - 1))
                     {
                         return None;
                     }
-                }
-            }
-            if y >= 1200 && (self.level("supports") == 0 || y >= self.support_rows) {
-                return None;
-            }
-            if y >= 2800 && self.level("pump") == 0 {
-                return None;
-            }
-            if y >= 6000 && self.level("ventilation") == 0 {
-                return None;
-            }
-            // Bench completion outranks depth preference. Unknown rock never informs ore targeting.
-            let score = if surface {
-                y as i64 * 1024 + x as i64
-            } else {
-                match self.policy.as_str() {
-                    "depth" => -(y as i64) * 8 + x.abs_diff(WIDTH / 2) as i64,
-                    "vein" => {
-                        y as i64
-                            - if self
-                                .terrain
-                                .known_material(x, y)
-                                .is_some_and(|id| self.priorities.contains(&id))
-                            {
-                                160
-                            } else {
-                                0
-                            }
+                    let drive = y % 96 < 8 && (32..WIDTH - 32).contains(&x);
+                    let stope = self.policy == "vein"
+                        && y % 96 >= 80
+                        && x % 64 < 48
+                        && self
+                            .terrain
+                            .known_material(x, y)
+                            .is_some_and(|id| self.priorities.contains(&id));
+                    if stope && !self.terrain.contains(x, (y / 96 + 1) * 96 + 7) {
+                        return None;
                     }
-                    _ => y as i64,
+                    if !shaft && !drive && !stope {
+                        return None;
+                    }
+                    if !shaft && drive {
+                        let inner = if x < WIDTH / 2 { x + 1 } else { x - 1 };
+                        let top = y / 96 * 96;
+                        // Excavate the lift landing before opening either tunnel portal.
+                        if !(top..top + 8).all(|row| self.terrain.contains(WIDTH / 2, row)) {
+                            return None;
+                        }
+                        if inner.abs_diff(WIDTH / 2) >= 4
+                            && !(top..top + 8).all(|row| self.terrain.contains(inner, row))
+                        {
+                            return None;
+                        }
+                    }
                 }
-            };
-            Some((score, key))
-        });
+                if y >= 1200 && (self.level("supports") == 0 || y >= self.support_rows) {
+                    return None;
+                }
+                if y >= 2800 && self.level("pump") == 0 {
+                    return None;
+                }
+                if y >= 6000 && self.level("ventilation") == 0 {
+                    return None;
+                }
+                // Bench completion outranks depth preference. Unknown rock never informs ore targeting.
+                let score = if surface {
+                    y as i64 * 1024 + x as i64
+                } else {
+                    match self.policy.as_str() {
+                        "depth" => -(y as i64) * 8 + x.abs_diff(WIDTH / 2) as i64,
+                        "vein" => {
+                            y as i64
+                                - if self
+                                    .terrain
+                                    .known_material(x, y)
+                                    .is_some_and(|id| self.priorities.contains(&id))
+                                {
+                                    160
+                                } else {
+                                    0
+                                }
+                        }
+                        _ => y as i64,
+                    }
+                };
+                Some((score, key))
+            });
         if !pit_complete || self.policy == "bulk" {
             candidates.next().map(|(_, key)| key)
         } else {
