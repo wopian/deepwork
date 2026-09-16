@@ -9,7 +9,7 @@ export interface Particle {
 export class WasteParticles {
   readonly items: Particle[] = [];
   private seed = 17;
-  constructor(readonly limit = 600) {}
+  constructor(public limit = 600) {}
   emit(count: number) {
     for (
       let i = 0;
@@ -27,6 +27,7 @@ export class WasteParticles {
     }
   }
   step(delta: number, floor: number) {
+    if (this.items.length > this.limit) this.items.length = this.limit;
     const dt = Math.min(2, Math.max(0, delta));
     for (let i = this.items.length - 1; i >= 0; i--) {
       const p = this.items[i];

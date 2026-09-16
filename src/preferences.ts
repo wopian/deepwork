@@ -4,6 +4,8 @@ const defaults = {
   audio: false,
   volume: 0.2,
   uiScale: 1,
+  quality: "auto",
+  numbers: "compact",
 };
 let saved = {};
 try {

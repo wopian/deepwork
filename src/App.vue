@@ -169,7 +169,11 @@ onMounted(start);
             >
           </div>
           <World />
-          <p class="crew-roster" v-if="state"><span v-for="(count, role) in state.crew" :key="role">{{ count }} {{ role }}</span></p>
+          <p class="crew-roster" v-if="state">
+            <span v-for="(count, role) in state.crew" :key="role"
+              >{{ count }} {{ role }}</span
+            >
+          </p>
           <div class="policy">
             <span>EXCAVATION STRATEGY</span
             ><button
@@ -267,15 +271,36 @@ onMounted(start);
           </div>
         </section>
         <section class="card specialisations">
-          <div class="panel-heading"><h2>SITE SPECIALISATION</h2><span>{{ state?.specialisation ?? 'UNLOCKS AT 100 M' }}</span></div>
+          <div class="panel-heading">
+            <h2>SITE SPECIALISATION</h2>
+            <span>{{ state?.specialisation ?? "UNLOCKS AT 100 M" }}</span>
+          </div>
           <p>Choose once per site. New sites offer a fresh choice.</p>
           <div class="abilities specialisation-options">
-            <button v-for="[id, label, detail] in [
-              ['bulk', 'Bulk extraction', '+30% digging; recovery −5 percentage points.'],
-              ['precision', 'Precision refining', 'Recovery +10 points (95% cap); −20% digging.'],
-              ['reclamation', 'Reclamation', '3× tailings and slag recovery; −15% primary refining.'],
-            ]" :class="{selected: state?.specialisation === id}" :disabled="!state || depth < 100 || !!state.specialisation" @click="act('specialise',id)">
-              <strong>{{ label }}</strong><small>{{ detail }}</small>
+            <button
+              v-for="[id, label, detail] in [
+                [
+                  'bulk',
+                  'Bulk extraction',
+                  '+30% digging; recovery −5 percentage points.',
+                ],
+                [
+                  'precision',
+                  'Precision refining',
+                  'Recovery +10 points (95% cap); −20% digging.',
+                ],
+                [
+                  'reclamation',
+                  'Reclamation',
+                  '3× tailings and slag recovery; −15% primary refining.',
+                ],
+              ]"
+              :class="{ selected: state?.specialisation === id }"
+              :disabled="!state || depth < 100 || !!state.specialisation"
+              @click="act('specialise', id)"
+            >
+              <strong>{{ label }}</strong
+              ><small>{{ detail }}</small>
             </button>
           </div>
         </section>
@@ -498,6 +523,20 @@ onMounted(start);
           <option :value="1.3">130%</option>
         </select></label
       >
+      <label
+        >Visual quality<select v-model="preferences.quality">
+          <option value="auto">Automatic</option>
+          <option value="low">Low · fewer sprites and particles</option>
+          <option value="high">High · desktop budget</option>
+        </select></label
+      >
+      <label
+        >Number display<select v-model="preferences.numbers">
+          <option value="compact">Compact · 12K</option>
+          <option value="full">Full · 12,000</option>
+          <option value="scientific">Scientific · 1.2E4</option>
+        </select></label
+      >
       <p>
         Mineral names and patterns supplement colours. Settings remain on this
         device.
@@ -549,9 +588,7 @@ onMounted(start);
         </p>
         <p>
           Research earned:
-          {{
-            state?.retirement_award ?? 0
-          }}
+          {{ state?.retirement_award ?? 0 }}
         </p>
         <div class="site-options">
           <label v-for="(profile, i) in profiles"

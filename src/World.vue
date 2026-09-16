@@ -15,6 +15,7 @@ let terrain: Graphics;
 let actors: Graphics;
 let t = 0;
 const wasteParticles = new WasteParticles(600);
+let drawnKey = "";
 let lastWaste = 0;
 let lastSite = 0;
 let zoom = 1;
@@ -37,14 +38,38 @@ function rect(
 }
 function draw() {
   if (!app) return;
-  terrain.clear();
   const g = state.value;
   const W = 1100;
   const first = Math.max(
     0,
     Math.floor(-offsetY / ((app.screen.width / 1100) * zoom) / 7) - 30,
   );
-  const last = first + 130;
+  const last =
+    first +
+    Math.ceil(app.screen.height / ((app.screen.width / 1100) * zoom) / 7) +
+    32;
+  const stored = g
+    ? Object.values(g.tailings).reduce((a, b) => a + b, 0) + g.slag + g.depleted
+    : 0;
+  const key = [
+    g?.site,
+    g?.seed,
+    g?.profile,
+    g?.terrain.revision,
+    first,
+    last,
+    Math.floor(stored / 3000),
+    JSON.stringify(g?.levels),
+  ].join(":");
+  if (key === drawnKey) return;
+  drawnKey = key;
+  terrain.clear();
+  const pools = Array.from({ length: 6 }, (_, tier) => [
+    ...materials.filter((m) => m.tier <= tier),
+    ...materials.filter(
+      (m) => m.tier <= tier && profiles[g?.profile ?? 0].focus.includes(m.id),
+    ),
+  ]);
   rect(terrain, 0, 190, W, (last + 5) * 7, 0x806044);
   rect(terrain, 0, 188, W, 8, 0x6b8f47);
   rect(terrain, 0, 196, W, 12, 0xd8bc7d);
@@ -77,13 +102,7 @@ function draw() {
                 : y * 2 < 3000
                   ? 4
                   : 5;
-      const pool = materials.filter((m) => m.tier <= tier);
-      pool.push(
-        ...materials.filter(
-          (m) =>
-            m.tier <= tier && profiles[g?.profile ?? 0].focus.includes(m.id),
-        ),
-      );
+      const pool = pools[tier];
       const id =
         x >= 30 && x <= 34 && y % 24 < 3
           ? [3, 5, 6][Math.floor(y / 24) % 3]
@@ -102,6 +121,12 @@ function draw() {
           6,
           parseInt(m.color.slice(1), 16),
         );
+        // Shape marks distinguish deposits without relying only on hue.
+        if (id % 3 === 0)
+          rect(terrain, 235 + x * 7 + 2, 208 + y * 7, 1, 6, 0x101820);
+        else if (id % 3 === 1)
+          rect(terrain, 235 + x * 7 + 2, 208 + y * 7 + 2, 2, 2, 0x101820);
+        else rect(terrain, 235 + x * 7, 208 + y * 7 + 3, 6, 1, 0x101820);
       } else if (hash % 9n === 0n) {
         rect(terrain, 235 + x * 7, 208 + y * 7, 3, 2, 0x9d7751);
       }
@@ -192,6 +217,12 @@ onMounted(async () => {
           1100) *
           zoom;
     }
+    draw();
+    const low =
+      preferences.quality === "low" ||
+      (preferences.quality === "auto" && innerWidth < 700);
+    wasteParticles.limit = low ? 600 : 2000;
+    app.ticker.maxFPS = low ? 30 : 60;
     world.y = offsetY;
     world.x = offsetX;
     actors.clear();
@@ -214,35 +245,67 @@ onMounted(async () => {
     }
     const crew = g?.crew ?? { diggers: 6, haulers: 3 };
     let shown = 0;
-    const workerBudget = innerWidth < 700 ? 100 : 250;
+    const workerBudget = low ? 100 : 250;
     for (const [role, count] of Object.entries(crew)) {
       for (let i = 0; i < count && shown < workerBudget; i++, shown++) {
-        let x = 250 + i * 8, y = 185;
-        if (role === 'diggers') {
-          const cell = g?.removed[Math.max(0, g.removed.length - 1 - i % Math.max(1,g.removed.length))];
-          if (cell) { x = 235 + cell.x * 7; y = 208 + cell.y * 7 + 7; }
-        } else if (role === 'haulers') {
-          const cargo = g?.shipments[i % Math.max(1,g.shipments.length)];
+        let x = 250 + i * 8,
+          y = 185;
+        if (role === "diggers") {
+          const cell =
+            g?.removed[
+              Math.max(
+                0,
+                g.removed.length - 1 - (i % Math.max(1, g.removed.length)),
+              )
+            ];
+          if (cell) {
+            x = 235 + cell.x * 7;
+            y = 208 + cell.y * 7 + 7;
+          }
+        } else if (role === "haulers") {
+          const cargo = g?.shipments[i % Math.max(1, g.shipments.length)];
           if (cargo?.path.length) {
-            const points: [number,number][] = cargo.path.map(([px,py]) => [235+px*7,208+py*7+7]);
-            [x,y] = routePosition(points, 1-cargo.remaining/cargo.duration);
+            const points: [number, number][] = cargo.path.map(([px, py]) => [
+              235 + px * 7,
+              208 + py * 7 + 7,
+            ]);
+            [x, y] = routePosition(
+              points,
+              1 - cargo.remaining / cargo.duration,
+            );
           }
         } else {
-          x = ({operators:735, engineers:690, prospectors:225, reclaimers:980} as Record<string,number>)[role] ?? 100;
+          x =
+            (
+              {
+                operators: 735,
+                engineers: 690,
+                prospectors: 225,
+                reclaimers: 980,
+              } as Record<string, number>
+            )[role] ?? 100;
           x += (i % 8) * 8;
         }
-        rect(actors,x,y-7,4,3,0xe8dfc8);
-        rect(actors,x,y-4,5,4,role === 'diggers' ? 0xe5a34d : 0x8c9ba5);
-        if (role === 'diggers') rect(actors,x+4,y-5+(Math.floor(t/12+i)%2),3,1,0x8c9ba5);
+        rect(actors, x, y - 7, 4, 3, 0xe8dfc8);
+        rect(actors, x, y - 4, 5, 4, role === "diggers" ? 0xe5a34d : 0x8c9ba5);
+        if (role === "diggers")
+          rect(
+            actors,
+            x + 4,
+            y - 5 + (Math.floor(t / 12 + i) % 2),
+            3,
+            1,
+            0x8c9ba5,
+          );
       }
     }
     for (const cargo of g?.shipments ?? []) {
       const progress = 1 - cargo.remaining / cargo.duration;
       const points: [number, number][] = cargo.path?.length
-        ? cargo.path.map(([x,y]) => [235 + x * 7, 208 + y * 7])
-        : [[459, 208 + cargo.depth / 2 * 7]];
+        ? cargo.path.map(([x, y]) => [235 + x * 7, 208 + y * 7])
+        : [[459, 208 + (cargo.depth / 2) * 7]];
       points.push([points[points.length - 1]![0], 185], [735, 185]);
-      const [x,y] = routePosition(points, progress);
+      const [x, y] = routePosition(points, progress);
       rect(
         actors,
         x,

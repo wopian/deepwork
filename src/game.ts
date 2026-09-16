@@ -1,7 +1,8 @@
 import { shallowRef } from "vue";
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import catalogue from "../content/materials.json";
-import { purchaseSound } from "./preferences";
+import { displayNumber } from "./numbers";
+import { preferences, purchaseSound } from "./preferences";
 export const materials = catalogue;
 export interface Game {
   enabled_recipes: string[];
@@ -81,11 +82,7 @@ export const state = shallowRef<Game | null>(null);
 export const error = shallowRef("");
 export const native = isTauri();
 export function format(n: number | string) {
-  const v = Number(n);
-  return new Intl.NumberFormat("en", {
-    notation: v >= 10000 ? "compact" : "standard",
-    maximumFractionDigits: 1,
-  }).format(v);
+  return displayNumber(n, preferences.numbers);
 }
 export const upgrades = [
   [

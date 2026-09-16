@@ -4,6 +4,7 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig({
   plugins: [vue()],
   clearScreen: false,
+  optimizeDeps: { include: ["pixi.js", "pixi.js/unsafe-eval"] },
   server: {
     port: 5173,
     strictPort: true,
