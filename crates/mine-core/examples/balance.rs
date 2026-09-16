@@ -1,6 +1,17 @@
 use mine_core::{materials, Action, Game};
 fn main() {
     let mut g = Game::default();
+    let args: Vec<_> = std::env::args().collect();
+    let policy = args.get(1).map(String::as_str).unwrap_or("depth");
+    assert!(
+        ["depth", "bulk", "vein"].contains(&policy),
+        "Unknown policy"
+    );
+    g.profile = args
+        .get(2)
+        .map(|v| v.parse::<usize>().expect("Site profile number"))
+        .unwrap_or(0);
+    assert!(g.profile < mine_core::sites().len(), "Unknown profile");
     let cat = materials();
     let plan = [
         "conveyor",
@@ -15,7 +26,7 @@ fn main() {
     ];
     let mut target = 0;
     let mut milestones = Vec::new();
-    g.policy = "depth".into();
+    g.policy = policy.into();
     for second in 0..14400 {
         if target < plan.len() {
             g.pinned = Some(plan[target].into());
@@ -39,7 +50,13 @@ fn main() {
             break;
         }
     }
-    println!("{}", serde_json::to_string_pretty(&milestones).unwrap());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(
+            &serde_json::json!({"policy":policy,"profile":g.profile,"events":milestones})
+        )
+        .unwrap()
+    );
     if !(g.depth() >= 300 && g.steel_made) {
         eprintln!(
             "Baseline stalled: depth={} steel={} credits={} target={:?}",

@@ -332,8 +332,8 @@ impl Game {
         } else {
             (
                 match k {
-                    "conveyor" => 75.,
-                    "furnace" => 160.,
+                    "conveyor" => 450.,
+                    "furnace" => 800.,
                     "shaft" => 600.,
                     "steelworks" => 450.,
                     "power" => 900.,
