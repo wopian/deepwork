@@ -1,4 +1,6 @@
 pub mod content;
+pub mod geology;
+pub mod geometry;
 pub mod logistics;
 pub mod terrain;
 use serde::{Deserialize, Serialize};
