@@ -15,6 +15,7 @@ let terrain: Graphics;
 let actors: Graphics;
 let t = 0;
 let telemetryTime = 0;
+let telemetryFrames = 0;
 const wasteParticles = new WasteParticles(600);
 let drawnKey = "";
 let lastWaste = 0;
@@ -318,9 +319,12 @@ onMounted(async () => {
           );
       }
     }
+    telemetryFrames++;
     if (host.value && performance.now() - telemetryTime > 1000) {
-      telemetryTime = performance.now();
-      host.value.dataset.fps = String(Math.round(app.ticker.FPS));
+      const now = performance.now();
+      host.value.dataset.fps = String(Math.round(telemetryFrames * 1000 / (now - telemetryTime)));
+      telemetryFrames = 0;
+      telemetryTime = now;
       host.value.dataset.workers = String(shown);
       host.value.dataset.particles = String(wasteParticles.items.length);
     }
