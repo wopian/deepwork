@@ -56,7 +56,10 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
         if c.complete {
             act(g, "new_contract", "", i as u64);
         } else if g.products.get(&c.product).copied().unwrap_or(0)
-            >= c.amount + committed.max(recipe_hold)
+            >= c.amount
+                + committed
+                    .max(recipe_hold)
+                    .max(g.reserve.get(&c.product).copied().unwrap_or(0))
         {
             act(g, "contract", "", i as u64);
         }
@@ -211,7 +214,6 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
     // Recover finite tailings when an exhausted site cannot fund its next module.
     if g.level("reclaimer") == 0
         && g.level("furnace") > 0
-        && g.level("shaft") > 0
         && g.tailings.values().sum::<u64>() >= 100 * mine_core::geometry::UNITS
     {
         act(g, "buy", "reclaimer", 0);
@@ -266,7 +268,11 @@ fn record(g: &Game, wall: u64, events: &mut BTreeMap<String, u64>) {
         ("retirement", g.site > 1),
         ("power", g.level("power") > 0),
         ("chemical", g.level("chemical") > 0),
-        ("precision", g.collection.contains("precision_controls")),
+        ("precision", g.collection.contains("aluminium")),
+        (
+            "precision_controls",
+            g.collection.contains("precision_controls"),
+        ),
         ("rare_earth", g.collection.contains("magnets")),
         ("headquarters", g.megaproject),
     ] {
@@ -282,8 +288,10 @@ fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
     let mut events = BTreeMap::new();
     let mut wall = 0;
     let mut idle_visits = 0;
+    let mut stalls = Vec::new();
     for visit in 0..days * 2 {
         if idle_visits >= 2 && g.depth() >= 300 && g.steel_made {
+            stalls.push(json!({"visit":visit,"site":g.site,"depth":g.depth(),"products":g.products,"paused_recipes":g.paused_recipes,"next":g.pinned,"ranks":g.ranks}));
             act(
                 &mut g,
                 "retire",
@@ -344,7 +352,7 @@ fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
             g.credits
         );
     }
-    json!({"seed":seed,"strategy":style,"mode":mode,"complete":g.megaproject,"events":events,"sites":g.site,"depth":g.depth(),"credits":g.credits,"next_upgrade":g.pinned,"purchase_blocker":g.pinned.as_ref().and_then(|id|g.purchase_blocker(id)),"products":g.products,"levels":g.levels,"blockers":g.stages.iter().map(|f|&f.blocker).collect::<Vec<_>>(),"save_bytes":serde_json::to_vec(&g).unwrap().len()})
+    json!({"seed":seed,"strategy":style,"mode":mode,"stalls":stalls,"complete":g.megaproject,"events":events,"sites":g.site,"depth":g.depth(),"credits":g.credits,"next_upgrade":g.pinned,"purchase_blocker":g.pinned.as_ref().and_then(|id|g.purchase_blocker(id)),"products":g.products,"levels":g.levels,"blockers":g.stages.iter().map(|f|&f.blocker).collect::<Vec<_>>(),"save_bytes":serde_json::to_vec(&g).unwrap().len()})
 }
 fn main() {
     mine_core::content::validate().unwrap();

@@ -34,21 +34,60 @@
   "refining_rate": 2.0,
   "research_base": 5,
   "starter_hold_units": 3,
-  "station_units": [4, 8, 8, 12, 20],
+  "station_units": [
+    4,
+    8,
+    8,
+    12,
+    20
+  ],
   "transit_units": 20,
   "station_cost": 60,
   "windows": {
-    "worker": [0, 60],
-    "conveyor": [180, 300],
-    "furnace": [480, 720],
-    "shaft": [1500, 2100],
-    "specialisation": [2700, 3600],
-    "retirement": [86400, 259200],
-    "power": [259200, 604800],
-    "chemical": [604800, 1209600],
-    "precision": [1209600, 1814400],
-    "rare_earth": [1814400, 2419200],
-    "headquarters": [2419200, 3628800]
+    "worker": [
+      0,
+      60
+    ],
+    "conveyor": [
+      180,
+      300
+    ],
+    "furnace": [
+      480,
+      720
+    ],
+    "shaft": [
+      1500,
+      2100
+    ],
+    "specialisation": [
+      2700,
+      3600
+    ],
+    "retirement": [
+      86400,
+      259200
+    ],
+    "power": [
+      259200,
+      604800
+    ],
+    "chemical": [
+      604800,
+      1209600
+    ],
+    "precision": [
+      1209600,
+      1814400
+    ],
+    "rare_earth": [
+      1814400,
+      2419200
+    ],
+    "headquarters": [
+      2419200,
+      3628800
+    ]
   },
   "foundation_upgrades": [
     "supports",
@@ -59,5 +98,11 @@
     "pump"
   ],
   "starter_iron_multiplier": 4,
-  "headquarters_research": 700
+  "headquarters_research": 700,
+  "furnace_demand": 5,
+  "chemical_demand": 1,
+  "electrolysis_demand": 2,
+  "trace_demand": 3,
+  "base_power": 1,
+  "power_per_level": 5
 }

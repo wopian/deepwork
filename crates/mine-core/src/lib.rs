@@ -313,7 +313,7 @@ impl Game {
             specialisation: None,
             priorities: vec![],
             reserve: BTreeMap::new(),
-            pinned: None,
+            pinned: Some("furnace".into()),
             heights: vec![0; WIDTH as usize],
             terrain: terrain::Terrain::default(),
             removed: vec![],
@@ -473,16 +473,21 @@ impl Game {
         }
     }
     fn power_factor(&self, offline: bool) -> f64 {
-        let industry =
-            (1 + self.level("chemical") + 2 * self.level("electrolytic") + 3 * self.level("trace"))
-                as f64
-                * if !offline && self.boosts[2] > 0 {
-                    1.5
-                } else {
-                    1.
-                };
+        let p = pacing::get();
+        let industry = (p.base_power
+            + u32::from(self.level("furnace") > 0) * p.furnace_demand
+            + p.chemical_demand * self.level("chemical")
+            + p.electrolysis_demand * self.level("electrolytic")
+            + p.trace_demand * self.level("trace")) as f64
+            * if !offline && self.boosts[2] > 0 {
+                1.5
+            } else {
+                1.
+            };
         let logistics: u32 = self.transport.segments.iter().map(|s| s.demand).sum();
-        ((1 + 5 * self.level("power")) as f64 / (industry + logistics as f64)).min(1.)
+        ((p.base_power + p.power_per_level * self.level("power")) as f64
+            / (industry + logistics as f64))
+            .min(1.)
     }
     fn capacity_rates(&mut self) -> [f64; 4] {
         self.crew = logistics::Crew::prioritise(self.workers, &self.levels, &self.crew_priority);
@@ -1904,6 +1909,10 @@ impl Game {
                     next.levels.insert("conveyor".into(), 1);
                 }
                 next.apply_headquarters();
+                next.pinned = ["furnace", "steelworks", "shaft", "supports", "power"]
+                    .into_iter()
+                    .find(|id| next.level(id) == 0)
+                    .map(str::to_string);
                 *self = next;
             }
             _ => return Err("Unknown command".into()),
@@ -3028,5 +3037,39 @@ mod campaign_research_tests {
         g.action(command()).unwrap();
         assert!(g.megaproject);
         assert_eq!(g.products.values().sum::<u64>(), 0);
+    }
+}
+
+#[cfg(test)]
+mod retired_start_tests {
+    use super::*;
+    #[test]
+    fn researched_furnace_keeps_starter_construction_feed_while_offline() {
+        let mut g = Game::new(46, 1);
+        g.ranks.insert("metallurgy".into(), 3);
+        g.heights[256] = 300 * geometry::CELLS_PER_METRE;
+        g.steel_made = true;
+        g.action(Action {
+            sequence: 1,
+            kind: "retire".into(),
+            target: String::new(),
+            value: 0,
+        })
+        .unwrap();
+        assert_eq!(g.pinned.as_deref(), Some("steelworks"));
+        g.last_saved = 1;
+        g.advance_offline(28801, &materials());
+        assert!(g.products.get("iron").copied().unwrap_or(0) >= 4 * UNITS);
+        assert!(g.products.get("coke").copied().unwrap_or(0) >= UNITS);
+        assert!(g.products.get("lime").copied().unwrap_or(0) >= UNITS);
+        for target in ["steelworks", "shaft"] {
+            g.action(Action {
+                sequence: g.last_sequence + 1,
+                kind: "buy".into(),
+                target: target.into(),
+                value: 0,
+            })
+            .unwrap();
+        }
     }
 }

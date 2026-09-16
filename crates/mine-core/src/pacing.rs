@@ -13,6 +13,12 @@ pub struct Pacing {
     pub refining_rate: f64,
     pub research_base: u64,
     pub headquarters_research: u64,
+    pub furnace_demand: u32,
+    pub chemical_demand: u32,
+    pub electrolysis_demand: u32,
+    pub trace_demand: u32,
+    pub base_power: u32,
+    pub power_per_level: u32,
     pub starter_hold_units: u64,
     pub starter_iron_multiplier: u64,
     pub foundation_upgrades: Vec<String>,
@@ -40,6 +46,16 @@ pub fn validate() -> Result<(), String> {
         || [p.worker_rate, p.haul_rate, p.sorting_rate, p.refining_rate]
             .iter()
             .any(|v| !v.is_finite() || !(0.01..=100.).contains(v))
+        || [
+            p.furnace_demand,
+            p.chemical_demand,
+            p.electrolysis_demand,
+            p.trace_demand,
+            p.base_power,
+            p.power_per_level,
+        ]
+        .iter()
+        .any(|&v| v == 0 || v > 100)
         || p.research_base == 0
         || p.headquarters_research == 0
         || p.headquarters_research > 5000
