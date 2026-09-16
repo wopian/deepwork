@@ -181,6 +181,12 @@ pub struct Stage {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Offline {
+    #[serde(default)]
+    pub discoveries: Vec<usize>,
+    #[serde(default)]
+    pub blockers: Vec<String>,
+    #[serde(default)]
+    pub capped: u64,
     pub elapsed: u64,
     pub effective: u64,
     pub credits: String,
@@ -880,10 +886,23 @@ impl Game {
         let effective = elapsed.min(28800) / 2;
         let old = self.credits;
         let mined = self.excavated;
+        let known = self.discoveries.clone();
         for _ in 0..effective {
             self.second(cat, true)
         }
         self.offline = Some(Offline {
+            discoveries: self.discoveries.difference(&known).copied().collect(),
+            blockers: self
+                .stages
+                .iter()
+                .filter(|s| {
+                    s.blocker.contains("required")
+                        || s.blocker.contains("full")
+                        || s.blocker.contains("limited")
+                })
+                .map(|s| format!("{}: {}", s.name, s.blocker))
+                .collect(),
+            capped: elapsed.saturating_sub(28800),
             elapsed,
             effective,
             credits: (self.credits - old).to_string(),

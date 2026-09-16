@@ -71,6 +71,9 @@ export interface Game {
     blocker: string;
   }[];
   offline: null | {
+    discoveries: number[];
+    blockers: string[];
+    capped: number;
     elapsed: number;
     effective: number;
     credits: string;

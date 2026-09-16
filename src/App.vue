@@ -105,11 +105,25 @@ onMounted(start);
     <section class="offline" v-if="state?.offline?.effective && !hideOffline">
       <strong>Welcome back to the mine.</strong> Your crew excavated
       {{ format(state.offline.excavated) }} cells and earned
-      {{ format(state.offline.credits) }} credits while away.<button
-        @click="hideOffline = true"
-      >
-        Continue →
-      </button>
+      {{ format(state.offline.credits) }} credits while away.
+      <p>
+        {{ format(state.offline.effective / 60) }} simulated minutes at 50%
+        speed.
+        <span v-if="state.offline.capped"
+          >{{ format(state.offline.capped / 3600) }} hours beyond the eight-hour
+          cap.</span
+        >
+      </p>
+      <p v-if="state.offline.discoveries.length">
+        Discovered:
+        {{
+          state.offline.discoveries
+            .map((id: number) => materials[id].name)
+            .join(", ")
+        }}.
+      </p>
+      <p v-for="blocker in state.offline.blockers">{{ blocker }}</p>
+      <button @click="hideOffline = true">Continue →</button>
     </section>
     <div class="page-heading">
       <div class="eyebrow">SMALL CREW. DEEP AMBITIONS.</div>
