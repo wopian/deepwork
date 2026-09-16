@@ -240,6 +240,22 @@ onMounted(start);
               always remain.</span
             >
           </label>
+          <label class="crew-roster" v-if="state">
+            Cargo scheduling
+            <select
+              :value="state.cargo_policy || 'balanced'"
+              @change="
+                act('cargo_policy', ($event.target as HTMLSelectElement).value)
+              "
+            >
+              <option value="balanced">Balanced cargo</option>
+              <option value="preferred">Preferred minerals first</option>
+            </select>
+            <span
+              >Hauling and sorting favour your three mineral priorities. Every
+              fifth slot serves other cargo.</span
+            >
+          </label>
           <p class="crew-roster" v-if="state?.levels.supports">
             Automatic supports ready to {{ state.support_rows * 2 }} m.
             Construction progress {{ Math.floor(state.support_work / 10) }}%.
@@ -429,7 +445,7 @@ onMounted(start);
       </div>
       <p>
         Real mineral identities. Simplified game processing. Select up to three
-        excavation priorities.
+        excavation priorities. Cargo scheduling can favour the same minerals.
       </p>
       <div class="mineral-grid">
         <button

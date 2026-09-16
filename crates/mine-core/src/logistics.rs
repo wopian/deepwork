@@ -1,5 +1,19 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+/// Four preferred slots, then one rotating fair slot. The fair cursor advances
+/// independently so even catalogue sizes divisible by five cannot starve a feed.
+pub fn order_cargo(ids: &mut [usize], tick: u64, preferred: &[usize], express: bool) {
+    if ids.is_empty() {
+        return;
+    }
+    let fair = !express || tick % 5 == 0;
+    let cursor = if express && fair { tick / 5 } else { tick };
+    let offset = cursor as usize % ids.len();
+    ids.rotate_left(offset);
+    if !fair {
+        ids.sort_by_key(|id| !preferred.contains(id));
+    }
+}
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Crew {
     pub diggers: u32,
@@ -169,6 +183,22 @@ pub fn arrive_at_speed(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn preferred_cargo_has_priority_without_starving_other_feeds() {
+        let mut first = std::collections::BTreeSet::new();
+        for tick in 0..50 {
+            let mut ids: Vec<_> = (0..10).collect();
+            order_cargo(&mut ids, tick, &[8, 9], true);
+            if tick % 5 != 0 {
+                assert!([8, 9].contains(&ids[0]));
+            }
+            first.insert(ids[0]);
+        }
+        assert_eq!(first.len(), 10);
+        let mut balanced = vec![0, 1, 2];
+        order_cargo(&mut balanced, 1, &[0], false);
+        assert_eq!(balanced, vec![1, 2, 0]);
+    }
     #[test]
     fn roles_never_create_or_lose_workers() {
         for n in 3..200 {

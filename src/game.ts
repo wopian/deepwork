@@ -45,6 +45,7 @@ export interface Game {
   }[];
   crew: Record<string, number>;
   crew_priority: string;
+  cargo_policy: string;
   support_rows: number;
   support_work: number;
   heights: number[];

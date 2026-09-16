@@ -144,6 +144,8 @@ pub struct Game {
     #[serde(default)]
     pub crew_priority: String,
     #[serde(default)]
+    pub cargo_policy: String,
+    #[serde(default)]
     pub support_rows: u32,
     #[serde(default)]
     pub support_work: u64,
@@ -278,6 +280,7 @@ impl Game {
             haul_path: vec![],
             crew: logistics::Crew::assign(3, &BTreeMap::new()),
             crew_priority: String::new(),
+            cargo_policy: String::new(),
             support_rows: 150,
             support_work: 0,
             products: BTreeMap::new(),
@@ -771,10 +774,12 @@ impl Game {
             .filter(|(_, q)| **q > 0)
             .map(|(&id, _)| id)
             .collect();
-        if !ore_ids.is_empty() {
-            let offset = self.ticks as usize % ore_ids.len();
-            ore_ids.rotate_left(offset);
-        }
+        logistics::order_cargo(
+            &mut ore_ids,
+            self.ticks,
+            &self.priorities,
+            self.cargo_policy == "preferred",
+        );
         for id in ore_ids {
             let q = self.ore.get_mut(&id).expect("known ore");
             let n = (*q).min(remaining);
@@ -802,10 +807,12 @@ impl Game {
             .filter(|(_, q)| **q > 0)
             .map(|(&id, _)| id)
             .collect();
-        if !sort_ids.is_empty() {
-            let offset = self.ticks as usize % sort_ids.len();
-            sort_ids.rotate_left(offset);
-        }
+        logistics::order_cargo(
+            &mut sort_ids,
+            self.ticks,
+            &self.priorities,
+            self.cargo_policy == "preferred",
+        );
         for id in sort_ids {
             let quantity = self.hauled.get_mut(&id).expect("known feed");
             let n = (*quantity).min(sort_left);
@@ -1273,6 +1280,12 @@ impl Game {
                 }
                 self.policy = a.target;
             }
+            "cargo_policy" => {
+                if !["balanced", "preferred"].contains(&a.target.as_str()) {
+                    return Err("Unknown cargo policy".into());
+                }
+                self.cargo_policy = a.target;
+            }
             "priority" => {
                 let id = a.value as usize;
                 if id >= materials().len() {
@@ -1498,6 +1511,7 @@ impl Game {
                 next.enabled_recipes = self.enabled_recipes.clone();
                 next.policy = self.policy.clone();
                 next.crew_priority = self.crew_priority.clone();
+                next.cargo_policy = self.cargo_policy.clone();
                 next.priorities = self.priorities.clone();
                 if next.ranks.values().any(|r| *r >= 3) {
                     next.levels.insert("conveyor".into(), 1);
@@ -1576,6 +1590,7 @@ impl Game {
             "prospecting",
         ]
         .contains(&self.crew_priority.as_str())
+            || !["", "balanced", "preferred"].contains(&self.cargo_policy.as_str())
             || !["", "hard_rock", "long_haul"].contains(&self.challenge.as_str())
             || self.profile >= sites().len()
             || self.heights.len() != 64
