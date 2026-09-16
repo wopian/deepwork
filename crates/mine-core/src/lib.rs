@@ -597,15 +597,16 @@ impl Game {
     }
     /// No input, pending arrival, eligible recipe or reachable excavation event can fire.
     fn quiescent(&self, cat: &[Material]) -> bool {
+        self.quiet_pipeline(cat) && self.next_frontier(cat).is_none() && self.shipments.is_empty()
+    }
+    fn quiet_pipeline(&self, cat: &[Material]) -> bool {
         if (self.level("supports") > 0 && self.support_rows < self.support_target())
-            || self.next_frontier(cat).is_some()
             || self
                 .ore
                 .values()
                 .chain(self.hauled.values())
                 .chain(self.concentrate.values())
                 .any(|q| *q > 0)
-            || !self.shipments.is_empty()
             || self.depleted > 0
             || (self.level("slagcrusher") > 0 && self.slag > 0)
             || (self.level("reclaimer") > 0 && self.tailings.values().any(|q| *q > 0))
@@ -1197,19 +1198,44 @@ impl Game {
         let old = self.credits;
         let mined = self.excavated;
         let known = self.discoveries.clone();
-        for second in 0..effective {
-            self.second(cat, true);
-            let left = effective - second - 1;
-            if left > 0 && self.quiescent(cat) {
-                // Preserve fractional work and phase; the final tick refreshes feedback.
-                let skip = left * 20 - 1;
+        let mut left = effective * 20;
+        while left > 0 {
+            self.tick(cat, true);
+            left -= 1;
+            let skip = if self.quiescent(cat) {
+                left.saturating_sub(1)
+            } else if self.quiet_pipeline(cat) {
+                // Stop immediately before the next dig, arrival, or final feedback tick.
+                // Filled processing/reclamation pipelines still use exact fixed steps.
+                let dig = if self.next_frontier(cat).is_some() && self.dig_rate(true) > 0 {
+                    ((1000 - self.dig_progress) * 20 - self.dig_remainder)
+                        .div_ceil(self.dig_rate(true))
+                } else {
+                    u64::MAX
+                };
+                let arrival = self
+                    .shipments
+                    .iter()
+                    .map(|s| 20 - self.ticks % 20 + s.remaining.saturating_sub(1) as u64 * 20)
+                    .min()
+                    .unwrap_or(u64::MAX);
+                left.min(dig).min(arrival).saturating_sub(1)
+            } else {
+                0
+            };
+            if skip > 0 {
                 let work = self.dig_rate(true) * skip + self.dig_remainder;
                 self.dig_progress = (self.dig_progress + work / 20) % 1000;
                 self.dig_remainder = work % 20;
+                if (self.ticks - 1) / 20 != (self.ticks + skip - 1) / 20 {
+                    self.flow_window = [0; 5];
+                }
+                let transport_seconds = ((self.ticks + skip) / 20 - self.ticks / 20) as u32;
+                for shipment in &mut self.shipments {
+                    shipment.remaining = shipment.remaining.saturating_sub(transport_seconds);
+                }
                 self.ticks += skip;
-                self.flow_window = [0; 5];
-                self.tick(cat, true);
-                break;
+                left -= skip;
             }
         }
         self.offline = Some(Offline {
@@ -2358,5 +2384,54 @@ mod pinned_recipe_tests {
         .unwrap();
         assert_eq!(g.level("shaft"), 1);
         assert_eq!(g.products["iron"], 0);
+    }
+}
+
+#[cfg(test)]
+mod offline_event_tests {
+    use super::*;
+    #[test]
+    fn event_skips_match_every_tick_across_sites_policies_and_cargo() {
+        let cat = materials();
+        for profile in 0..sites().len() {
+            for (index, policy) in ["bulk", "vein", "depth"].iter().enumerate() {
+                let mut a = Game::default();
+                a.profile = profile;
+                a.policy = (*policy).into();
+                a.cargo_policy = "preferred".into();
+                a.priorities = vec![3, 5, 6];
+                a.challenge = "hard_rock".into();
+                a.dig_progress = 127;
+                a.dig_remainder = 7;
+                a.ticks = index as u64 * 7;
+                a.last_saved = 100;
+                if index > 0 {
+                    a.levels.insert("conveyor".into(), 1);
+                    a.levels.insert("furnace".into(), 1);
+                }
+                a.shipments.push(logistics::Shipment {
+                    material: 3,
+                    amount: 1000,
+                    remaining: 31,
+                    duration: 31,
+                    depth: 0,
+                    mode: "carrying".into(),
+                    path: vec![],
+                    legs: vec![],
+                });
+                let mut b = a.clone();
+                a.advance_offline(700, &cat);
+                for _ in 0..6000 {
+                    b.tick(&cat, true);
+                }
+                b.last_saved = a.last_saved;
+                b.offline = a.offline.clone();
+                assert_eq!(
+                    serde_json::to_value(&a).unwrap(),
+                    serde_json::to_value(&b).unwrap(),
+                    "profile {profile}, policy {policy}"
+                );
+            }
+        }
     }
 }

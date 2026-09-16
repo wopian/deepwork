@@ -30,7 +30,7 @@ The unpackaged Windows executable is `target/debug/deepwork.exe`. Browser-only V
 - 56 mineral feeds, colour-coded field guide, refined products, optional manufacturing and separation recipes.
 - Explicit alumina/electrolysis path, abstract mass-conserving recipe units, steel and component production.
 - Contracts, resource reserves, power throttling, recovery, research, retirement and megaproject delivery.
-- Tactical boosts, offline simulation at half rate up to eight real hours, local saves and backup recovery.
+- Tactical boosts, offline simulation at half rate up to eight real hours, local saves, background checkpoints and backup recovery.
 - Pixi world with extended terrain palette, camera pan/zoom/follow, responsive interface and reduced-motion preference.
 - Bun-only toolchain, Rust accounting tests and Windows CI.
 
