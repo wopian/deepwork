@@ -323,6 +323,7 @@ onMounted(async () => {
         );
       lastWaste = g.lifetime_waste;
     }
+    if (preferences.reducedMotion) wasteParticles.items.length = 0;
     wasteParticles.step(ticker.deltaTime, (x) => {
       const pile = state.value?.waste_profile;
       if (!pile) return 188;

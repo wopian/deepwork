@@ -277,7 +277,9 @@ try {
   };
   await tap("Settings");
   await page.locator(".settings").waitFor();
+  await page.getByLabel("Reduced motion", { exact: true }).check();
   await tap("Operations");
+  await page.waitForFunction(() => document.querySelector<HTMLElement>(".world")?.dataset.particles === "0");
   await tap("Surface ↑");
   await page.screenshot({
     path: join(output, "native-portrait.png"),
