@@ -12,7 +12,32 @@ struct Runtime {
     _save_lock: fs::File,
     game: Mutex<Game>,
     path: PathBuf,
-    channel: Mutex<Option<Channel<Game>>>,
+    channel: Mutex<Option<Channel<Update>>>,
+}
+#[derive(Clone, serde::Serialize)]
+struct Update {
+    state: Game,
+    reset: bool,
+}
+#[derive(Default)]
+struct Stream {
+    identity: Option<(u32, u64)>,
+    chunks: std::collections::BTreeMap<u32, Vec<u8>>,
+}
+impl Stream {
+    fn update(&mut self, g: &Game) -> Update {
+        let reset = self.identity != Some((g.site, g.seed));
+        let mut state = g.clone();
+        if !reset {
+            state
+                .terrain
+                .chunks
+                .retain(|id, bytes| self.chunks.get(id) != Some(bytes));
+        }
+        self.identity = Some((g.site, g.seed));
+        self.chunks = g.terrain.chunks.clone();
+        Update { state, reset }
+    }
 }
 fn now() -> u64 {
     SystemTime::now()
@@ -21,7 +46,7 @@ fn now() -> u64 {
         .as_secs()
 }
 #[tauri::command]
-fn connect(channel: Channel<Game>, state: State<Runtime>) -> Result<Game, String> {
+fn connect(channel: Channel<Update>, state: State<Runtime>) -> Result<Game, String> {
     *state.channel.lock().map_err(|e| e.to_string())? = Some(channel);
     Ok(state.game.lock().map_err(|e| e.to_string())?.clone())
 }
@@ -77,19 +102,25 @@ pub fn run() {
             std::thread::spawn(move || {
                 let cat = materials();
                 let mut previous = now();
+                let mut stream = Stream::default();
+                let mut next_tick = std::time::Instant::now();
                 loop {
-                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    next_tick += std::time::Duration::from_millis(50);
+                    std::thread::sleep(
+                        next_tick.saturating_duration_since(std::time::Instant::now()),
+                    );
                     let state = handle.state::<Runtime>();
                     if let Ok(mut g) = state.game.lock() {
                         let current = now();
                         if current.saturating_sub(previous) > 2 {
                             g.last_saved = previous;
                             g.advance_offline(current, &cat);
+                            next_tick = std::time::Instant::now();
                             if let Err(e) = save(&state.path, &g) {
                                 eprintln!("Resume save failed: {e}")
                             }
                         } else {
-                            g.second(&cat, false);
+                            g.tick(&cat, false);
                         }
                         previous = current;
                         if g.ticks % 600 == 0 {
@@ -98,9 +129,13 @@ pub fn run() {
                                 eprintln!("Save failed: {e}")
                             }
                         }
-                        if let Ok(channel) = state.channel.lock() {
-                            if let Some(c) = channel.as_ref() {
-                                let _ = c.send(g.clone());
+                        if g.ticks % 4 == 0 {
+                            if let Ok(channel) = state.channel.lock() {
+                                if let Some(c) = channel.as_ref() {
+                                    if c.send(stream.update(&g)).is_err() {
+                                        stream = Stream::default();
+                                    }
+                                }
                             }
                         }
                     };
@@ -125,4 +160,21 @@ pub fn run() {
                 };
             }
         });
+}
+
+#[cfg(test)]
+mod stream_tests {
+    use super::*;
+    #[test]
+    fn only_changed_chunks_are_sent() {
+        let mut stream = Stream::default();
+        let mut game = Game::default();
+        let first = stream.update(&game);
+        assert!(first.reset);
+        game.terrain.excavate(32, 0);
+        assert_eq!(stream.update(&game).state.terrain.chunks.len(), 1);
+        assert!(stream.update(&game).state.terrain.chunks.is_empty());
+        game.site += 1;
+        assert!(stream.update(&game).reset);
+    }
 }

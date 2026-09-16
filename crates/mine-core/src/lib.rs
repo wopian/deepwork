@@ -21,8 +21,11 @@ pub struct Recipe {
     pub inputs: BTreeMap<String, u64>,
     pub output: String,
 }
-pub fn recipes() -> Vec<Recipe> {
-    serde_json::from_str(include_str!("../../../content/recipes.json")).expect("valid recipes")
+pub fn recipes() -> &'static [Recipe] {
+    static CONTENT: std::sync::OnceLock<Vec<Recipe>> = std::sync::OnceLock::new();
+    CONTENT.get_or_init(|| {
+        serde_json::from_str(include_str!("../../../content/recipes.json")).expect("valid recipes")
+    })
 }
 pub fn materials() -> Vec<Material> {
     serde_json::from_str(include_str!("../../../content/materials.json"))
@@ -98,6 +101,10 @@ pub struct Game {
     pub sold_mass: u64,
     #[serde(default)]
     pub delivered_mass: u64,
+    #[serde(default)]
+    pub dig_progress: u64,
+    #[serde(default)]
+    pub credit_fraction: u64,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Stage {
@@ -200,6 +207,8 @@ impl Game {
             enabled_recipes: BTreeSet::new(),
             sold_mass: 0,
             delivered_mass: 0,
+            dig_progress: 0,
+            credit_fraction: 0,
         }
     }
     pub fn level(&self, k: &str) -> u32 {
@@ -262,8 +271,13 @@ impl Game {
         (1. + 0.12 * n as f64) * 1.5f64.powi((n / 10) as i32)
     }
     pub fn second(&mut self, cat: &[Material], offline: bool) {
-        self.ticks += 20;
-        if !offline {
+        for _ in 0..20 {
+            self.tick(cat, offline);
+        }
+    }
+    pub fn tick(&mut self, cat: &[Material], offline: bool) {
+        self.ticks += 1;
+        if !offline && self.ticks % 20 == 0 {
             for c in &mut self.cooldowns {
                 *c = c.saturating_sub(1)
             }
@@ -275,7 +289,7 @@ impl Game {
         let cap = 20000 + 5000 * self.level("capacity") as u64;
         let ore_total: u64 = self.ore.values().sum();
         let mut mined = 0;
-        let digs = ((self.crew.diggers as f64
+        let dig_rate = (((self.crew.diggers as f64
             * self.throughput("drill")
             * (1. + 0.05 * self.ranks.get("excavation").copied().unwrap_or(0) as f64))
             * (if !offline && self.boosts[0] > 0 {
@@ -283,7 +297,10 @@ impl Game {
             } else {
                 1.
             }))
-        .ceil() as u32;
+            * 1000.) as u64;
+        self.dig_progress += dig_rate / 20;
+        let digs = (self.dig_progress / 1000) as u32;
+        self.dig_progress %= 1000;
         let depth_limit = if self.level("shaft") == 0 {
             100
         } else {
@@ -349,7 +366,9 @@ impl Game {
                 self.site_discoveries += 1;
             }
         }
-        logistics::arrive(&mut self.shipments, &mut self.hauled, cap);
+        if self.ticks % 20 == 0 {
+            logistics::arrive(&mut self.shipments, &mut self.hauled, cap);
+        }
         let (transport, speed) = logistics::mode(&self.levels);
         let route_depth = self.depth();
         let duration = 2 + route_depth / speed;
@@ -363,6 +382,7 @@ impl Game {
             } else {
                 1.
             })) as u64;
+        let haul_rate = haul_rate / 20;
         let mut remaining = haul_rate.min(cap.saturating_sub(
             self.hauled.values().sum::<u64>()
                 + self.shipments.iter().map(|s| s.amount).sum::<u64>(),
@@ -395,6 +415,7 @@ impl Game {
             } else {
                 1.
             })) as u64;
+        let process_rate = process_rate / 20;
         let mut left = process_rate;
         let mut feed_ids: Vec<_> = self
             .hauled
@@ -423,7 +444,9 @@ impl Game {
             *q -= n;
             left -= n;
             if !unlocked {
-                self.credits += n * m.price / 2000;
+                self.credit_fraction += n * m.price;
+                self.credits += self.credit_fraction / 2000;
+                self.credit_fraction %= 2000;
                 self.sold_mass += n;
                 continue;
             }
@@ -443,7 +466,7 @@ impl Game {
             self.lifetime_waste += waste;
         }
         let recipes = recipes();
-        for recipe in &recipes {
+        for recipe in recipes {
             let automatic = recipe.id == "steel" || recipe.id == "aluminium";
             if self.level(&recipe.building) == 0
                 || (!automatic && !self.enabled_recipes.contains(&recipe.id))
@@ -456,7 +479,7 @@ impl Game {
                 .map(|(p, n)| self.products.get(p).copied().unwrap_or(0) / n)
                 .min()
                 .unwrap_or(0)
-                .min(250);
+                .min(if self.ticks % 2 == 0 { 13 } else { 12 });
             if amount > 0 {
                 for (p, n) in &recipe.inputs {
                     *self.products.entry(p.clone()).or_default() -= amount * n;
@@ -470,7 +493,10 @@ impl Game {
         }
         if self.level("reclaimer") > 0 {
             for (&id, q) in &mut self.tailings {
-                let n = (*q).min(20 + self.ranks.get("reclamation").copied().unwrap_or(0) as u64);
+                let n = (*q).min(
+                    1 + u64::from(self.ticks % 20 == 0)
+                        * self.ranks.get("reclamation").copied().unwrap_or(0) as u64,
+                );
                 *q -= n;
                 *self.hauled.entry(id).or_default() += n;
             }
@@ -504,13 +530,15 @@ impl Game {
                 .find(|m| m.product == *p)
                 .map(|m| m.price)
                 .unwrap_or(20);
-            self.credits = self.credits.saturating_add(sold * price / 1000);
+            self.credit_fraction += sold * price * 2;
+            self.credits = self.credits.saturating_add(self.credit_fraction / 2000);
+            self.credit_fraction %= 2000;
         }
-        self.depleted = self.depleted.saturating_sub(100);
+        self.depleted = self.depleted.saturating_sub(5);
         self.stages = vec![
             Stage {
                 name: "Digging".into(),
-                rate: mined as f64,
+                rate: mined as f64 * 20.,
                 buffer: self.ore.values().sum(),
                 capacity: cap,
                 blocker: if self.depth() >= depth_limit {
@@ -524,7 +552,7 @@ impl Game {
             },
             Stage {
                 name: "Hauling".into(),
-                rate: (haul_rate - remaining) as f64 / 1000.,
+                rate: (haul_rate - remaining) as f64 / 50.,
                 buffer: self.hauled.values().sum(),
                 capacity: cap,
                 blocker: if remaining == haul_rate {
@@ -536,14 +564,14 @@ impl Game {
             },
             Stage {
                 name: "Sorting".into(),
-                rate: (process_rate - left) as f64 / 1000.,
+                rate: (process_rate - left) as f64 / 50.,
                 buffer: 0,
                 capacity: cap,
                 blocker: "Automatic separation".into(),
             },
             Stage {
                 name: "Refining".into(),
-                rate: (process_rate - left) as f64 / 1000.,
+                rate: (process_rate - left) as f64 / 50.,
                 buffer: self.products.values().sum(),
                 capacity: cap,
                 blocker: if self.level("furnace") == 0 {

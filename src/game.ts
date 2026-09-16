@@ -127,8 +127,17 @@ export async function start() {
     return;
   }
   try {
-    const channel = new Channel<Game>();
-    channel.onmessage = (g) => (state.value = g);
+    const channel = new Channel<{ state: Game; reset: boolean }>();
+    channel.onmessage = (update) => {
+      const g = update.state;
+      if (!update.reset && state.value?.site === g.site) {
+        g.terrain.chunks = {
+          ...state.value.terrain.chunks,
+          ...g.terrain.chunks,
+        };
+      }
+      state.value = g;
+    };
     state.value = await invoke<Game>("connect", { channel });
   } catch (e) {
     error.value = String(e);
