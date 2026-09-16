@@ -822,9 +822,12 @@ impl Game {
             Stage {
                 name: "Hauling".into(),
                 rate: self.flow_window[1] as f64 / 1000. / seconds,
-                buffer: self.hauled.values().sum(),
+                buffer: self.hauled.values().sum::<u64>()
+                    + self.shipments.iter().map(|s| s.amount).sum::<u64>(),
                 capacity: cap,
-                blocker: if remaining == haul_rate {
+                blocker: if haul_budget == 0 {
+                    "Cargo buffers full"
+                } else if remaining == haul_budget {
                     "Waiting for ore"
                 } else {
                     "Working"
@@ -836,14 +839,23 @@ impl Game {
                 rate: self.flow_window[2] as f64 / 1000. / seconds,
                 buffer: self.concentrate.values().sum(),
                 capacity: cap,
-                blocker: "Automatic separation".into(),
+                blocker: if sort_budget == 0 {
+                    "Refining buffer full"
+                } else if sorted == 0 {
+                    "Waiting for arrivals"
+                } else {
+                    "Automatic separation"
+                }
+                .into(),
             },
             Stage {
                 name: "Refining".into(),
                 rate: self.flow_window[3] as f64 / 1000. / seconds,
                 buffer: self.products.values().sum(),
                 capacity: cap,
-                blocker: if self.level("furnace") == 0 {
+                blocker: if power_factor < 1. {
+                    "Power supply limited"
+                } else if self.level("furnace") == 0 {
                     "Raw sales · furnace locked"
                 } else {
                     "Reserves protected"
@@ -1700,5 +1712,6 @@ mod throughput_tests {
         g.tick(&materials(), false);
         assert_eq!(g.flow_window[1], 0);
         assert!(g.shipments.is_empty());
+        assert_eq!(g.stages[1].blocker, "Cargo buffers full");
     }
 }
