@@ -129,21 +129,55 @@ impl Network {
             segment.rate = rate;
             segment.demand = 0;
         }
+        let underground = legs
+            .first()
+            .is_some_and(|leg| leg.from[1] >= crate::geometry::PIT_ROWS as i32);
+        let mut reached_shaft = false;
+        let mut loaded = false;
         for leg in legs {
-            let index = if leg.from[1] < 0 && leg.to[1] < 0 {
+            let surface = leg.from[1] < 0 && leg.to[1] < 0;
+            let vertical = leg.from[0] == leg.to[0];
+            let index = if surface {
                 3
-            } else if leg.from[0] == leg.to[0] {
+            } else if underground {
+                if !reached_shaft && !vertical && leg.from[1] >= crate::geometry::PIT_ROWS as i32 {
+                    1
+                } else {
+                    reached_shaft = true;
+                    2
+                }
+            } else if leg.to[1] < 0 {
                 2
-            } else if leg.from[1] >= 192 {
-                1
             } else {
                 0
             };
-            let segment = &mut self.segments[index];
-            if matches!(leg.mode.as_str(), "conveyor" | "train" | "lift") {
-                segment.demand = 1;
+            let mut cargo_leg = leg.clone();
+            if index == 1 && !loaded {
+                loaded = true;
+                let distance = leg.from[0].abs_diff(leg.to[0]);
+                if distance > 8 && leg.milliseconds > 1 {
+                    let dx = (leg.to[0] - leg.from[0]).signum() * 8;
+                    let point = [leg.from[0] + dx, leg.from[1]];
+                    let time = (leg.milliseconds as u64 * 8 / distance as u64)
+                        .max(1)
+                        .min((leg.milliseconds - 1) as u64) as u32;
+                    let mut first = leg.clone();
+                    first.to = point;
+                    first.milliseconds = time;
+                    self.segments[0].legs.push(first);
+                    cargo_leg.from = point;
+                    cargo_leg.milliseconds -= time;
+                }
             }
-            segment.legs.push(leg.clone());
+            self.segments[index].legs.push(cargo_leg);
+        }
+        for segment in &mut self.segments {
+            segment.demand = u32::from(
+                segment
+                    .legs
+                    .iter()
+                    .any(|l| matches!(l.mode.as_str(), "conveyor" | "train" | "lift")),
+            );
         }
         for segment in &mut self.segments {
             segment.duration_ms = 2000 + segment.legs.iter().map(|l| l.milliseconds).sum::<u32>();
@@ -164,6 +198,7 @@ impl Network {
         self.segments
             .iter()
             .flat_map(|s| &s.batches)
+            .filter(|b| !b.legs.is_empty())
             .map(|b| VisualCargo {
                 material: b.material,
                 amount: b.amount,
@@ -435,5 +470,29 @@ mod tests {
         );
         assert_eq!(n.segments[0].batches[0].remaining_ms, 950);
         assert_eq!(n.segments[2].batches[0].remaining_ms, 900);
+    }
+    #[test]
+    fn underground_handoffs_preserve_physical_route_order() {
+        let path = [[128, 295], [256, 295], [256, 191], [207, 191], [16, 0]];
+        let levels = BTreeMap::from([
+            ("shaft".into(), 1),
+            ("minecart".into(), 1),
+            ("conveyor".into(), 1),
+        ]);
+        let (legs, _) = crate::logistics::route(&path, &levels, 1.);
+        let mut network = Network::default();
+        network.configure(&legs, UNITS, 0);
+        let ordered: Vec<_> = network
+            .segments
+            .iter()
+            .flat_map(|s| s.legs.iter())
+            .collect();
+        assert_eq!(ordered.first().unwrap().from, legs.first().unwrap().from);
+        assert_eq!(ordered.last().unwrap().to, legs.last().unwrap().to);
+        assert!(ordered.windows(2).all(|pair| pair[0].to == pair[1].from));
+        assert_eq!(
+            ordered.iter().map(|l| l.milliseconds).sum::<u32>(),
+            legs.iter().map(|l| l.milliseconds).sum::<u32>()
+        );
     }
 }
