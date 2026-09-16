@@ -38,6 +38,9 @@ export interface Game {
     path: [number, number][];
   }[];
   crew: Record<string, number>;
+  crew_priority: string;
+  support_rows: number;
+  support_work: number;
   heights: number[];
   terrain: { chunks: Record<string, number[]>; revision: number };
   removed: { x: number; y: number; material: number }[];

@@ -57,6 +57,7 @@ function draw() {
     g?.seed,
     g?.profile,
     g?.terrain.revision,
+    g?.support_rows,
     first,
     last,
     Math.floor(stored / 3000),
@@ -130,6 +131,23 @@ function draw() {
         else rect(terrain, 235 + x * 7, 208 + y * 7 + 3, 6, 1, 0x101820);
       } else if (hash % 9n === 0n) {
         rect(terrain, 235 + x * 7, 208 + y * 7, 3, 2, 0x9d7751);
+      }
+    }
+  }
+  if (g?.levels.supports) {
+    for (
+      let y = Math.max(first, 150);
+      y < Math.min(last, g.support_rows);
+      y++
+    ) {
+      if (y % 12 !== 0) continue;
+      for (let x = 31; x <= 33; x++) {
+        const index = (y % 64) * 64 + x,
+          mask = g.terrain.chunks[Math.floor(y / 64)];
+        if (mask && mask[index >> 3] & (1 << index % 8)) {
+          rect(terrain, 235 + x * 7, 208 + y * 7, 7, 1, 0xa67548);
+          rect(terrain, 235 + x * 7, 208 + y * 7, 1, 7, 0xa67548);
+        }
       }
     }
   }

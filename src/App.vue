@@ -198,6 +198,35 @@ onMounted(start);
               >{{ count }} {{ role }}</span
             >
           </p>
+          <label class="crew-roster" v-if="state"
+            >Crew priority
+            <select
+              :value="state.crew_priority || 'balanced'"
+              @change="
+                act('crew_priority', ($event.target as HTMLSelectElement).value)
+              "
+            >
+              <option value="engineering">
+                Engineering · needs support workshop
+              </option>
+              <option value="prospecting">
+                Prospecting · needs survey office
+              </option>
+              <option value="balanced">Balanced</option>
+              <option value="digging">Digging</option>
+              <option value="hauling">Hauling</option>
+              <option value="refining">Refining · needs furnace</option>
+              <option value="reclaiming">Reclamation · needs reclaimer</option>
+            </select>
+            <span
+              >Shift spare diggers to the bottleneck. One digger and one hauler
+              always remain.</span
+            >
+          </label>
+          <p class="crew-roster" v-if="state?.levels.supports">
+            Automatic supports ready to {{ state.support_rows * 2 }} m.
+            Construction progress {{ Math.floor(state.support_work / 10) }}%.
+          </p>
           <div class="policy">
             <span>EXCAVATION STRATEGY</span
             ><button

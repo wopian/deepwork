@@ -136,6 +136,12 @@ pub struct Game {
     haul_path: Vec<[u32; 2]>,
     #[serde(default)]
     pub crew: logistics::Crew,
+    #[serde(default)]
+    pub crew_priority: String,
+    #[serde(default)]
+    pub support_rows: u32,
+    #[serde(default)]
+    pub support_work: u64,
     pub products: BTreeMap<String, u64>,
     pub tailings: BTreeMap<usize, u64>,
     pub slag: u64,
@@ -262,6 +268,9 @@ impl Game {
             shipments: vec![],
             haul_path: vec![],
             crew: logistics::Crew::assign(3, &BTreeMap::new()),
+            crew_priority: String::new(),
+            support_rows: 150,
+            support_work: 0,
             products: BTreeMap::new(),
             tailings: BTreeMap::new(),
             slag: 0,
@@ -450,7 +459,7 @@ impl Game {
                 if self.policy != "bulk" && y >= 24 && x.abs_diff(32) > 1 && y % 12 > 1 {
                     return None;
                 }
-                if y >= 150 && self.level("supports") == 0 {
+                if y >= 150 && (self.level("supports") == 0 || y >= self.support_rows) {
                     return None;
                 }
                 if y >= 350 && self.level("pump") == 0 {
@@ -478,7 +487,8 @@ impl Game {
     }
     /// No input, pending arrival, eligible recipe or reachable excavation event can fire.
     fn quiescent(&self, cat: &[Material]) -> bool {
-        if self.next_frontier(cat).is_some()
+        if (self.level("supports") > 0 && self.support_rows < self.support_target())
+            || self.next_frontier(cat).is_some()
             || self
                 .ore
                 .values()
@@ -489,6 +499,21 @@ impl Game {
             || self.depleted > 0
             || (self.level("slagcrusher") > 0 && self.slag > 0)
             || (self.level("reclaimer") > 0 && self.tailings.values().any(|q| *q > 0))
+        {
+            return false;
+        }
+        if self.level("survey") > 0
+            && self
+                .terrain
+                .frontier
+                .iter()
+                .rev()
+                .take(self.crew.prospectors as usize)
+                .any(|key| {
+                    !self
+                        .discoveries
+                        .contains(&self.cell(key % WIDTH, key / WIDTH, cat))
+                })
         {
             return false;
         }
@@ -511,6 +536,18 @@ impl Game {
                 .all(|(p, n)| self.products.get(p).copied().unwrap_or(0) >= *n)
         })
     }
+    fn support_target(&self) -> u32 {
+        (self.heights.iter().copied().max().unwrap_or(0).max(150) + 1).min(terrain::MAX_ROWS)
+    }
+    fn construction(&mut self) {
+        let target = self.support_target();
+        if self.level("supports") > 0 && self.support_rows < target {
+            self.support_work +=
+                (10. * self.crew.engineers.max(1) as f64 * self.throughput("supports")) as u64;
+            self.support_rows = (self.support_rows + (self.support_work / 1000) as u32).min(target);
+            self.support_work %= 1000;
+        }
+    }
     pub fn second(&mut self, cat: &[Material], offline: bool) {
         for _ in 0..20 {
             self.tick(cat, offline);
@@ -530,7 +567,23 @@ impl Game {
                 *b = b.saturating_sub(1)
             }
         }
-        self.crew = logistics::Crew::assign(self.workers, &self.levels);
+        self.crew = logistics::Crew::prioritise(self.workers, &self.levels, &self.crew_priority);
+        self.construction();
+        if self.ticks % 1200 == 0 && self.level("survey") > 0 {
+            let candidates: Vec<_> = self
+                .terrain
+                .frontier
+                .iter()
+                .rev()
+                .take(self.crew.prospectors as usize)
+                .map(|key| self.cell(key % WIDTH, key / WIDTH, cat))
+                .collect();
+            for id in candidates {
+                if self.discoveries.insert(id) {
+                    self.site_discoveries += 1;
+                }
+            }
+        }
         let cap = 20000 + 5000 * self.level("capacity") as u64;
         let ore_total: u64 = self.ore.values().sum();
         let mut mined = 0;
@@ -680,6 +733,7 @@ impl Game {
             }
             * 1000.
             * self.throughput("furnace")
+            * (1. + 0.15 * self.crew.operators.saturating_sub(1) as f64)
             * (1. + 0.05 * self.ranks.get("metallurgy").copied().unwrap_or(0) as f64)
             * (if !offline && self.boosts[2] > 0 {
                 1.5
@@ -803,8 +857,9 @@ impl Game {
             };
             for (&id, q) in &mut self.tailings {
                 let n = (*q).min(
-                    1 + u64::from(self.ticks % 20 == 0)
-                        * self.ranks.get("reclamation").copied().unwrap_or(0) as u64,
+                    self.crew.reclaimers.max(1) as u64
+                        + u64::from(self.ticks % 20 == 0)
+                            * self.ranks.get("reclamation").copied().unwrap_or(0) as u64,
                 );
                 let n = (n * multiplier).min(*q).min(recovery_space);
                 recovery_space -= n;
@@ -931,6 +986,11 @@ impl Game {
                     "Drainage required"
                 } else if self.depth() >= 300 && self.level("supports") == 0 {
                     "Supports required"
+                } else if self.level("supports") > 0
+                    && self.support_rows < self.support_target()
+                    && self.depth() >= 300
+                {
+                    "Building supports"
                 } else if ore_total + 1000 > cap {
                     "Hauling buffer full"
                 } else {
@@ -1040,6 +1100,24 @@ impl Game {
             return Err("Command already processed".into());
         }
         match a.kind.as_str() {
+            "crew_priority" => {
+                if ![
+                    "balanced",
+                    "digging",
+                    "hauling",
+                    "refining",
+                    "reclaiming",
+                    "engineering",
+                    "prospecting",
+                ]
+                .contains(&a.target.as_str())
+                {
+                    return Err("Unknown crew priority".into());
+                }
+                self.crew_priority = a.target;
+                self.crew =
+                    logistics::Crew::prioritise(self.workers, &self.levels, &self.crew_priority);
+            }
             "specialise" => {
                 if self.depth() < 100 {
                     return Err("Reach 100 metres to specialise".into());
@@ -1304,6 +1382,7 @@ impl Game {
                 next.megaproject = self.megaproject;
                 next.enabled_recipes = self.enabled_recipes.clone();
                 next.policy = self.policy.clone();
+                next.crew_priority = self.crew_priority.clone();
                 next.priorities = self.priorities.clone();
                 if next.ranks.values().any(|r| *r >= 3) {
                     next.levels.insert("conveyor".into(), 1);
@@ -1348,6 +1427,9 @@ impl Game {
                 self.site_objectives.insert(format!("order-{index}"));
             }
         }
+        if self.support_rows == 0 {
+            self.support_rows = self.support_target();
+        }
         self.terrain.rebuild()?;
         self.validate()
     }
@@ -1362,10 +1444,23 @@ impl Game {
         if self.version != VERSION {
             return Err("Unsupported save version".into());
         }
-        if !["", "hard_rock", "long_haul"].contains(&self.challenge.as_str())
+        if ![
+            "",
+            "balanced",
+            "digging",
+            "hauling",
+            "refining",
+            "reclaiming",
+            "engineering",
+            "prospecting",
+        ]
+        .contains(&self.crew_priority.as_str())
+            || !["", "hard_rock", "long_haul"].contains(&self.challenge.as_str())
             || self.profile >= sites().len()
             || self.heights.len() != 64
             || self.heights.iter().any(|h| *h > 100000)
+            || self.support_rows > terrain::MAX_ROWS
+            || self.support_work >= 1000
             || self.dig_remainder >= 20
             || self.dig_progress >= 1000
             || self.workers < 3
@@ -1924,5 +2019,31 @@ mod wire_tests {
         );
         value["seed"] = serde_json::json!(73429);
         assert_eq!(serde_json::from_value::<Game>(value).unwrap().seed, 73429);
+    }
+}
+
+#[cfg(test)]
+mod construction_tests {
+    use super::*;
+    #[test]
+    fn engineers_build_supports_before_deeper_fronts_open() {
+        let cat = materials();
+        let mut g = Game::default();
+        g.levels.insert("supports".into(), 1);
+        g.levels.insert("shaft".into(), 1);
+        g.workers = 10;
+        g.housing = 12;
+        g.crew_priority = "engineering".into();
+        g.policy = "depth".into();
+        for y in 0..150 {
+            g.terrain.excavate(32, y);
+        }
+        g.heights[32] = 150;
+        assert_ne!(g.next_frontier(&cat), Some(150 * 64 + 32));
+        for _ in 0..30 {
+            g.tick(&cat, true);
+        }
+        assert!(g.support_rows > 150);
+        assert!(g.crew.engineers > 1);
     }
 }

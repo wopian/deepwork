@@ -10,6 +10,37 @@ pub struct Crew {
     pub reclaimers: u32,
 }
 impl Crew {
+    pub fn prioritise(total: u32, levels: &BTreeMap<String, u32>, priority: &str) -> Self {
+        let mut crew = Self::assign(total, levels);
+        if priority == "digging" {
+            let extra = crew.haulers.saturating_sub(1);
+            crew.haulers -= extra;
+            crew.diggers += extra;
+            return crew;
+        }
+        let extra = (crew.diggers.saturating_sub(1) + 1) / 2;
+        let target = match priority {
+            "hauling" => Some(&mut crew.haulers),
+            "engineering" if levels.get("supports").copied().unwrap_or(0) > 0 => {
+                Some(&mut crew.engineers)
+            }
+            "prospecting" if levels.get("survey").copied().unwrap_or(0) > 0 => {
+                Some(&mut crew.prospectors)
+            }
+            "refining" if levels.get("furnace").copied().unwrap_or(0) > 0 => {
+                Some(&mut crew.operators)
+            }
+            "reclaiming" if levels.get("reclaimer").copied().unwrap_or(0) > 0 => {
+                Some(&mut crew.reclaimers)
+            }
+            _ => None,
+        };
+        if let Some(role) = target {
+            *role += extra;
+            crew.diggers -= extra;
+        }
+        crew
+    }
     pub fn assign(total: u32, levels: &BTreeMap<String, u32>) -> Self {
         let mut c = Self {
             haulers: (total / 4).max(1),
@@ -88,6 +119,27 @@ mod tests {
                 c.diggers + c.haulers + c.operators + c.engineers + c.prospectors + c.reclaimers
             );
             assert!(c.diggers > 0)
+        }
+    }
+    #[test]
+    fn priorities_preserve_population_and_a_working_front() {
+        let levels = [("furnace".into(), 1), ("reclaimer".into(), 1)]
+            .into_iter()
+            .collect();
+        for total in 3..100 {
+            for priority in ["balanced", "digging", "hauling", "refining", "reclaiming"] {
+                let c = Crew::prioritise(total, &levels, priority);
+                assert_eq!(
+                    total,
+                    c.diggers
+                        + c.haulers
+                        + c.operators
+                        + c.engineers
+                        + c.prospectors
+                        + c.reclaimers
+                );
+                assert!(c.diggers > 0 && c.haulers > 0);
+            }
         }
     }
     #[test]
