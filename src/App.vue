@@ -614,8 +614,8 @@ onMounted(start);
       </div>
       <h2>Next equipment purchase</h2>
       <p>
-        Pin an upgrade to reserve its material cost automatically. Pin again to
-        release it.
+        Pin an upgrade to reserve its material cost and foundation steel for
+        upcoming infrastructure. Pin again to release these reserves.
       </p>
       <div class="mineral-grid">
         <button
@@ -633,6 +633,35 @@ onMounted(start);
             ><small>Requires {{ upgrade.requires }}</small></strong
           >
         </button>
+      </div>
+      <h2>Reserved feed warehouse</h2>
+      <p v-if="state">
+        {{ format(cargoTotal(state.raw_stock) / RESOURCE_UNIT) }} /
+        {{ format(state.raw_stock_capacity / RESOURCE_UNIT) }} units. Reserved
+        feed waits for its processing module. Loading depot upgrades add space.
+      </p>
+      <div class="mineral-grid">
+        <div
+          v-for="m in materials.filter((m) =>
+            state?.discoveries.includes(m.id),
+          )"
+          :key="m.id"
+          class="inventory"
+        >
+          <strong
+            >{{ m.name }} ·
+            {{
+              format((state?.raw_stock[m.id] ?? 0) / RESOURCE_UNIT)
+            }}
+            stored</strong
+          >
+          <button @click="act('reserve', m.product, 4 * RESOURCE_UNIT)">
+            Reserve feed + 4 product
+          </button>
+          <button @click="act('reserve', m.product, 0)">
+            Release manual reserve
+          </button>
+        </div>
       </div>
       <h2>Stockpile reserves</h2>
       <div class="mineral-grid">

@@ -31,6 +31,8 @@ export interface Game {
   reserve: Record<string, number>;
   pinned: string | null;
   work_route: [number, number][];
+  raw_stock: Record<string, number>;
+  raw_stock_capacity: number;
   shipments: {
     material: number;
     amount: number;

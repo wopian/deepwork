@@ -34,6 +34,7 @@ struct Snapshot {
     requires_reset: bool,
     shipments: Vec<mine_core::transport::VisualCargo>,
     work_route: Vec<[u32; 2]>,
+    raw_stock_capacity: u64,
     upgrade_previews: std::collections::BTreeMap<String, mine_core::UpgradePreview>,
     purchase_blockers: std::collections::BTreeMap<String, String>,
 }
@@ -63,6 +64,7 @@ impl From<Game> for Snapshot {
             requires_reset: game.legacy_pending,
             shipments: game.transport.visual(),
             work_route: game.work_route().to_vec(),
+            raw_stock_capacity: game.raw_stock_capacity(),
             game,
             quotes,
             retirement_award,
@@ -304,7 +306,6 @@ pub fn run() {
                         } else {
                             g.tick(&cat, false);
                         }
-                        previous = current;
                         if g.ticks % 600 == 0 {
                             g.last_saved = now();
                             if let Err(e) = save(&state.path, &g) {
@@ -320,6 +321,9 @@ pub fn run() {
                                 }
                             }
                         }
+                        // Checkpoint/IPC work is foreground time, not an OS suspension.
+                        // The monotonic deadline catches up fixed ticks after this work.
+                        previous = now();
                     };
                 }
             });

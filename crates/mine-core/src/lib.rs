@@ -162,6 +162,8 @@ pub struct Game {
     #[serde(default)]
     pub concentrate: BTreeMap<usize, u64>,
     #[serde(default)]
+    pub raw_stock: BTreeMap<usize, u64>,
+    #[serde(default)]
     pub flow_window: [u64; 5],
     #[serde(default)]
     pub trace_feed: BTreeMap<String, u64>,
@@ -183,6 +185,8 @@ pub struct Game {
     pub support_work: u64,
     pub products: BTreeMap<String, u64>,
     pub tailings: BTreeMap<usize, u64>,
+    #[serde(default)]
+    pub recovery_fraction: BTreeMap<usize, u64>,
     pub slag: u64,
     pub depleted: u64,
     #[serde(default)]
@@ -310,6 +314,7 @@ impl Game {
             ore: BTreeMap::new(),
             hauled: BTreeMap::new(),
             concentrate: BTreeMap::new(),
+            raw_stock: BTreeMap::new(),
             flow_window: [0; 5],
             trace_feed: BTreeMap::new(),
             trace_fraction: BTreeMap::new(),
@@ -322,6 +327,7 @@ impl Game {
             support_work: 0,
             products: BTreeMap::new(),
             tailings: BTreeMap::new(),
+            recovery_fraction: BTreeMap::new(),
             slag: 0,
             depleted: 0,
             disposed_mass: 0,
@@ -411,6 +417,37 @@ impl Game {
             return Some("More credits required".into());
         }
         None
+    }
+    pub fn raw_stock_capacity(&self) -> u64 {
+        (128 + 16 * self.level("capacity") as u64) * UNITS
+    }
+    fn reserved_feed_target(&self, id: usize, m: &Material) -> u64 {
+        let starter = if matches!(id, 3 | 5 | 6) {
+            pacing::get().starter_hold_units
+                * UNITS
+                * if id == 3 {
+                    pacing::get().starter_iron_multiplier
+                } else {
+                    1
+                }
+        } else {
+            0
+        };
+        starter.max(
+            self.reserve
+                .get(&m.product)
+                .copied()
+                .unwrap_or(0)
+                .saturating_mul(2),
+        )
+    }
+    fn feed_unlocked(&self, m: &Material) -> bool {
+        match m.family.as_str() {
+            "physical" => true,
+            "furnace" | "industrial" => self.level("furnace") > 0,
+            "sulfide" | "chemical" | "electrolytic" => self.level("chemical") > 0,
+            _ => self.level("trace") > 0,
+        }
     }
     fn power_factor(&self, offline: bool) -> f64 {
         let industry =
@@ -681,19 +718,10 @@ impl Game {
                 .values()
                 .chain(self.hauled.values())
                 .any(|q| *q > 0)
-            || self.concentrate.iter().any(|(&id, &q)| {
-                let held = if self.level("furnace") == 0 && matches!(id, 3 | 5 | 6) {
-                    pacing::get().starter_hold_units
-                        * UNITS
-                        * if id == 3 {
-                            pacing::get().starter_iron_multiplier
-                        } else {
-                            1
-                        }
-                } else {
-                    0
-                };
-                q > held
+            || self.concentrate.values().any(|&q| q > 0)
+            || self.raw_stock.iter().any(|(&id, &q)| {
+                q > 0
+                    && (self.feed_unlocked(&cat[id]) || q > self.reserved_feed_target(id, &cat[id]))
             })
             || self.depleted > 0
             || (self.level("slagcrusher") > 0 && self.slag > 0)
@@ -716,6 +744,32 @@ impl Game {
         {
             return false;
         }
+        self.recipes_idle()
+    }
+    fn stationary_pipeline(&self, cat: &[Material]) -> bool {
+        self.ticks % 20 == 0
+            && self.flow_window.iter().all(|&q| q == 0)
+            && self
+                .transport
+                .stations
+                .iter()
+                .all(|s| s.incoming == 0 && s.outgoing == 0)
+            && self
+                .transport
+                .segments
+                .iter()
+                .all(|s| s.batches.iter().all(|b| b.remaining_ms == 0))
+            && (self.ore.values().sum::<u64>() + CELL_MASS
+                > 20 * UNITS + 5 * UNITS * self.level("capacity") as u64
+                || self.next_frontier(cat).is_none())
+            && self.level("survey") == 0
+            && !(self.level("supports") > 0 && self.support_rows < self.support_target())
+            && self.depleted == 0
+            && !(self.level("slagcrusher") > 0 && self.slag > 0)
+            && !(self.level("reclaimer") > 0 && self.tailings.values().any(|&q| q > 0))
+            && self.recipes_idle()
+    }
+    fn recipes_idle(&self) -> bool {
         !recipes().iter().any(|r| {
             if self.level(&r.building) == 0
                 || !(r.id == "steel" || r.id == "aluminium" || self.enabled_recipes.contains(&r.id))
@@ -738,6 +792,17 @@ impl Game {
                     .and_then(|u| u.inputs.get(p))
                     .copied()
                     .unwrap_or(0);
+                let committed = committed.max(
+                    if p == "iron"
+                        && self.pinned.is_some()
+                        && self.level("shaft") > 0
+                        && self.level("shaft") < 50
+                    {
+                        2 * UNITS
+                    } else {
+                        0
+                    },
+                );
                 self.products
                     .get(p)
                     .copied()
@@ -904,6 +969,23 @@ impl Game {
             sort_left -= n;
         }
         let sorted = sort_budget - sort_left;
+        let mut intake_space = cap.saturating_sub(self.concentrate.values().sum());
+        for id in self.raw_stock.keys().copied().collect::<Vec<_>>() {
+            let held = if self.feed_unlocked(&cat[id]) {
+                0
+            } else {
+                self.reserved_feed_target(id, &cat[id])
+            };
+            let q = self.raw_stock.get_mut(&id).unwrap();
+            let n = q.saturating_sub(held).min(intake_space);
+            *q -= n;
+            *self.concentrate.entry(id).or_default() += n;
+            intake_space -= n;
+        }
+        let mut stock_space = self
+            .raw_stock_capacity()
+            .saturating_sub(self.raw_stock.values().sum());
+
         let power_factor = self.power_factor(offline);
         let process_rate = (power_factor
             * if self.specialisation.as_deref() == Some("reclamation") {
@@ -938,28 +1020,41 @@ impl Game {
             let unlocked = match m.family.as_str() {
                 "physical" => true,
                 "furnace" | "industrial" => self.levels.get("furnace").copied().unwrap_or(0) > 0,
-                "sulfide" | "chemical" => self.levels.get("chemical").copied().unwrap_or(0) > 0,
-                "electrolytic" => self.levels.get("chemical").copied().unwrap_or(0) > 0,
+                "sulfide" | "chemical" | "electrolytic" => {
+                    self.levels.get("chemical").copied().unwrap_or(0) > 0
+                }
                 _ => self.levels.get("trace").copied().unwrap_or(0) > 0,
             };
-            let starter_hold = if !unlocked && matches!(id, 3 | 5 | 6) {
-                pacing::get().starter_hold_units
-                    * UNITS
-                    * if id == 3 {
-                        pacing::get().starter_iron_multiplier
-                    } else {
-                        1
-                    }
-            } else {
-                0
-            };
-            let n = q.saturating_sub(starter_hold).min(left);
+            let n = (*q).min(left);
             if n == 0 {
                 continue;
             }
             *q -= n;
             left -= n;
             if !unlocked {
+                let starter = if matches!(id, 3 | 5 | 6) {
+                    pacing::get().starter_hold_units
+                        * UNITS
+                        * if id == 3 {
+                            pacing::get().starter_iron_multiplier
+                        } else {
+                            1
+                        }
+                } else {
+                    0
+                };
+                let wanted = starter.max(
+                    self.reserve
+                        .get(&m.product)
+                        .copied()
+                        .unwrap_or(0)
+                        .saturating_mul(2),
+                );
+                let stored = self.raw_stock.entry(id).or_default();
+                let held = n.min(wanted.saturating_sub(*stored)).min(stock_space);
+                *stored += held;
+                stock_space -= held;
+                let n = n - held;
                 self.credit_fraction += n * m.price;
                 self.credits += self.credit_fraction / (2 * UNITS);
                 self.credit_fraction %= 2 * UNITS;
@@ -974,7 +1069,10 @@ impl Game {
                     _ => 0,
                 })
             .clamp(0, 95) as u64;
-            let good = n * recovery / 100;
+            let fraction = self.recovery_fraction.entry(id).or_default();
+            let recovered = n * recovery + *fraction;
+            let good = recovered / 100;
+            *fraction = recovered % 100;
             let waste = n - good;
             let mut primary = good;
             for rule in traces().iter().filter(|rule| rule.feed == id) {
@@ -1041,7 +1139,18 @@ impl Game {
                         .and_then(|id| requirements().iter().find(|u| u.id == *id))
                         .and_then(|u| u.inputs.get(p))
                         .copied()
-                        .unwrap_or(0);
+                        .unwrap_or(0)
+                        .max(
+                            if p == "iron"
+                                && self.pinned.is_some()
+                                && self.level("shaft") > 0
+                                && self.level("shaft") < 50
+                            {
+                                2 * UNITS
+                            } else {
+                                0
+                            },
+                        );
                     self.products
                         .get(p)
                         .copied()
@@ -1262,7 +1371,9 @@ impl Game {
                         .iter()
                         .map(|s| s.capacity)
                         .sum::<u64>(),
-                blocker: if self.transport.segments.iter().any(|s| s.blocked)
+                blocker: if self.haul_path.is_empty() && self.ore.values().any(|&q| q > 0) {
+                    "No walkable loading access".into()
+                } else if self.transport.segments.iter().any(|s| s.blocked)
                     || (haul_budget == 0 && ore_total > 0)
                 {
                     "Cargo buffers full".into()
@@ -1323,7 +1434,7 @@ impl Game {
         while left > 0 {
             self.tick(cat, true);
             left -= 1;
-            let skip = if self.quiescent(cat) {
+            let skip = if self.quiescent(cat) || self.stationary_pipeline(cat) {
                 left.saturating_sub(1)
             } else if self.quiet_pipeline(cat) {
                 // Stop immediately before the next dig, arrival, or final feedback tick.
@@ -1349,6 +1460,11 @@ impl Game {
                 if transport_seconds > 0 {
                     self.waste_profile
                         .reconcile(self.slag + self.depleted + self.tailings.values().sum::<u64>());
+                }
+                let power = (self.power_factor(true) * 1000.) as u64;
+                for segment in &mut self.transport.segments {
+                    let speed = if segment.demand > 0 { power } else { 1000 };
+                    segment.time_fraction = (segment.time_fraction + 50 * speed * skip) % 1000;
                 }
                 self.ticks += skip;
                 left -= skip;
@@ -1778,6 +1894,15 @@ impl Game {
         {
             return Err("Invalid specialisation".into());
         }
+        if self.raw_stock.keys().any(|&id| id >= materials().len())
+            || self
+                .raw_stock
+                .values()
+                .any(|&q| q > self.raw_stock_capacity())
+            || self.raw_stock.values().sum::<u64>() > self.raw_stock_capacity()
+        {
+            return Err("Invalid reserved feed stock".into());
+        }
         if !self.transport.valid(materials().len()) {
             return Err("Invalid transport network".into());
         }
@@ -1824,6 +1949,13 @@ impl Game {
             return Err("Invalid terrain chunk".into());
         }
         let material_count = materials().len();
+        if self
+            .recovery_fraction
+            .iter()
+            .any(|(&id, &fraction)| id >= material_count || fraction >= 100)
+        {
+            return Err("Invalid recovery remainder".into());
+        }
         for (&id, mask) in &self.terrain.revealed {
             if id >= terrain::MAX_ROWS / 64 * geometry::CHUNKS_ACROSS || mask.len() != 512 {
                 return Err("Invalid reveal mask".into());
@@ -1856,6 +1988,7 @@ impl Game {
             .chain(self.ore.values())
             .chain(self.hauled.values())
             .chain(self.concentrate.values())
+            .chain(self.raw_stock.values())
             .chain(self.trace_feed.values())
             .chain(self.tailings.values())
             .chain(self.reserve.values())
@@ -1967,6 +2100,7 @@ mod accounting_tests {
             + g.tailings.values().sum::<u64>()
             + g.sold_mass
             + g.transport.mass()
+            + g.raw_stock.values().sum::<u64>()
             + g.delivered_mass
             + g.slag
             + g.depleted
@@ -2614,5 +2748,79 @@ mod pit_access_tests {
         }
         let next = g.next_frontier(&cat).unwrap();
         assert_eq!([next % WIDTH, next / WIDTH], [254, 191]);
+    }
+}
+
+#[cfg(test)]
+mod fine_recovery_tests {
+    use super::*;
+    #[test]
+    fn single_quantum_tailings_finish_reprocessing_without_loss_or_loop() {
+        let mut game = Game::default();
+        game.terrain.frontier.clear();
+        game.levels.insert("furnace".into(), 1);
+        game.levels.insert("reclaimer".into(), 1);
+        game.tailings.insert(3, 1);
+        for _ in 0..100 {
+            game.tick(&materials(), false);
+        }
+        assert_eq!(game.tailings.get(&3).copied().unwrap_or(0), 0);
+        assert_eq!(game.products.get("iron").copied().unwrap_or(0), 1);
+    }
+}
+
+#[cfg(test)]
+mod reserved_feed_tests {
+    use super::*;
+    #[test]
+    fn locked_feed_is_owned_once_and_released_after_module_purchase() {
+        let mut g = Game::default();
+        g.terrain.frontier.clear();
+        g.concentrate.insert(4, UNITS);
+        g.reserve.insert("copper".into(), UNITS);
+        let cat = materials();
+        for _ in 0..40 {
+            g.tick(&cat, false);
+        }
+        assert_eq!(g.raw_stock[&4], UNITS);
+        assert_eq!(g.sold_mass, 0);
+        g.levels.insert("chemical".into(), 1);
+        for _ in 0..80 {
+            g.tick(&cat, false);
+        }
+        assert_eq!(g.raw_stock[&4], 0);
+        assert!(g.products["copper"] > 0);
+        let total = g.products.values().sum::<u64>()
+            + g.tailings.values().sum::<u64>()
+            + g.trace_feed.values().sum::<u64>()
+            + g.slag
+            + g.depleted
+            + g.disposed_mass
+            + g.sold_mass;
+        assert_eq!(total, UNITS);
+    }
+}
+
+#[cfg(test)]
+mod stationary_network_tests {
+    use super::*;
+    #[test]
+    fn stationary_loaded_stockpile_matches_fixed_steps() {
+        let mut a = Game::default();
+        a.terrain.frontier.clear();
+        a.ore.insert(1, 20 * UNITS);
+        a.last_saved = 100;
+        let mut b = a.clone();
+        let cat = materials();
+        a.advance_offline(500, &cat);
+        for _ in 0..4000 {
+            b.tick(&cat, true);
+        }
+        a.offline = None;
+        b.last_saved = a.last_saved;
+        assert_eq!(
+            serde_json::to_value(a).unwrap(),
+            serde_json::to_value(b).unwrap()
+        );
     }
 }
