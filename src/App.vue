@@ -21,6 +21,11 @@ const materialUpgrades = upgradeRequirements.filter(
   (u) => Object.keys(u.inputs).length,
 );
 const selectedSite = ref(0);
+function sectionPath(section: number[]) {
+  return section
+    .map((open, i) => (open ? `M${i % 64} ${Math.floor(i / 64)}h1v1h-1z` : ""))
+    .join(" ");
+}
 const tab = ref("Operations");
 const query = ref("");
 const showRetire = ref(false);
@@ -385,6 +390,21 @@ onMounted(start);
           <span>{{ 5 * ((state?.ranks[branch] ?? 0) + 1) ** 2 }} research</span>
         </button>
       </div>
+      <h2>Rebuild blueprints</h2>
+      <p>
+        Logistics rank 3 unlocks foreground rebuilding. Purchases stop while
+        offline.
+      </p>
+      <button @click="act('blueprint', 'camp')">Camp blueprint</button
+      ><button @click="act('blueprint', 'industry')">Industry blueprint</button
+      ><button @click="act('blueprint', 'off')">Disable</button>
+      <p>Queue: {{ state?.build_queue.join(" → ") || "None" }}</p>
+      <h2>Campaign milestones</h2>
+      <div class="mineral-grid">
+        <div v-for="milestone in state?.milestones" class="inventory">
+          ✓ {{ milestone }}
+        </div>
+      </div>
       <h2>Headquarters megaproject</h2>
       <p>
         Reserve ten units each of advanced structures, precision controls,
@@ -448,6 +468,16 @@ onMounted(start);
       <div v-for="r in state?.records" class="record">
         SITE {{ r.site }} · {{ r.depth }} m · {{ format(r.excavated) }} cells ·
         {{ r.research }} research
+        <svg
+          v-if="r.section?.length"
+          viewBox="0 0 64 64"
+          width="192"
+          height="192"
+          aria-label="Retired mine cross-section"
+        >
+          <rect width="64" height="64" fill="#806044" />
+          <path :d="sectionPath(r.section)" fill="#101820" />
+        </svg>
       </div>
       <h2>Save management</h2>
       <button :disabled="!state" @click="exportSave">Export save</button

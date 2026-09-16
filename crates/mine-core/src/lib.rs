@@ -84,6 +84,8 @@ pub struct Contract {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Record {
+    #[serde(default)]
+    pub section: Vec<u8>,
     pub site: u32,
     pub depth: u32,
     pub research: u64,
@@ -146,6 +148,12 @@ pub struct Game {
     pub offline: Option<Offline>,
     pub steel_made: bool,
     pub megaproject: bool,
+    #[serde(default)]
+    pub milestones: BTreeSet<String>,
+    #[serde(default)]
+    pub blueprint: Vec<String>,
+    #[serde(default)]
+    pub build_queue: Vec<String>,
     #[serde(default)]
     pub enabled_recipes: BTreeSet<String>,
     #[serde(default)]
@@ -261,6 +269,9 @@ impl Game {
             offline: None,
             steel_made: false,
             megaproject: false,
+            milestones: BTreeSet::new(),
+            blueprint: vec![],
+            build_queue: vec![],
             enabled_recipes: BTreeSet::new(),
             sold_mass: 0,
             delivered_mass: 0,
@@ -694,6 +705,41 @@ impl Game {
             self.flow_window[i] += n;
         }
         let seconds = ((self.ticks - 1) % 20 + 1) as f64 / 20.;
+        for (name, reached) in [
+            ("First mineral", !self.discoveries.is_empty()),
+            ("Mechanised hauling", self.level("conveyor") > 0),
+            ("First steel", self.steel_made),
+            ("300 metres", self.depth() >= 300),
+            ("One kilometre", self.depth() >= 1000),
+            ("Rare-earth separation", self.level("trace") > 0),
+            ("Headquarters complete", self.megaproject),
+        ] {
+            if reached && self.milestones.insert(name.into()) {
+                self.research += 2;
+            }
+        }
+        if !offline && self.ticks % 20 == 0 {
+            if let Some(id) = self.build_queue.first().cloned() {
+                if self.level(&id) > 0 {
+                    self.build_queue.remove(0);
+                } else {
+                    self.pinned = Some(id.clone());
+                    let sequence = self.last_sequence;
+                    if self
+                        .action(Action {
+                            sequence: sequence + 1,
+                            kind: "buy".into(),
+                            target: id,
+                            value: 0,
+                        })
+                        .is_ok()
+                    {
+                        self.build_queue.remove(0);
+                    }
+                    self.last_sequence = sequence;
+                }
+            }
+        }
         self.stages = vec![
             Stage {
                 name: "Digging".into(),
@@ -864,6 +910,30 @@ impl Game {
                     return Err("Three priorities maximum".into());
                 }
             }
+            "blueprint" => {
+                if self.ranks.get("logistics").copied().unwrap_or(0) < 3 {
+                    return Err("Requires logistics research rank 3".into());
+                }
+                self.blueprint = match a.target.as_str() {
+                    "camp" => vec!["conveyor", "furnace", "steelworks", "shaft"],
+                    "industry" => vec![
+                        "conveyor",
+                        "furnace",
+                        "steelworks",
+                        "shaft",
+                        "supports",
+                        "manufacturing",
+                        "power",
+                        "chemical",
+                    ],
+                    "off" => vec![],
+                    _ => return Err("Unknown blueprint".into()),
+                }
+                .into_iter()
+                .map(str::to_string)
+                .collect();
+                self.build_queue = self.blueprint.clone();
+            }
             "pin" => {
                 if !requirements().iter().any(|u| u.id == a.target) {
                     return Err("Unknown upgrade".into());
@@ -980,11 +1050,23 @@ impl Game {
                 }
                 let mut next = Game::new(self.seed.wrapping_add(7919 + a.value), self.site + 1);
                 next.profile = a.value as usize;
+                next.milestones = self.milestones.clone();
+                next.blueprint = self.blueprint.clone();
+                next.build_queue = next.blueprint.clone();
                 next.research = self.research + award;
                 next.discoveries = self.discoveries.clone();
                 next.ranks = self.ranks.clone();
                 next.records = self.records.clone();
+                let mut section = vec![0; 4096];
+                let rows = (self.depth() / 2).max(1);
+                for y in 0..64 {
+                    for x in 0..64 {
+                        section[(y * 64 + x) as usize] =
+                            u8::from(self.terrain.contains(x, y * rows / 64));
+                    }
+                }
                 next.records.push(Record {
+                    section,
                     site: self.site,
                     depth: self.depth(),
                     research: award,
@@ -998,12 +1080,29 @@ impl Game {
                 if next.ranks.values().any(|r| *r >= 3) {
                     next.levels.insert("conveyor".into(), 1);
                 }
+                next.apply_headquarters();
                 *self = next;
             }
             _ => return Err("Unknown command".into()),
         }
         self.last_sequence = a.sequence;
         Ok(())
+    }
+    pub fn apply_headquarters(&mut self) {
+        for (branch, buildings) in [
+            ("excavation", ["drill", "supports", "shaft"]),
+            ("logistics", ["conveyor", "minecart", "train"]),
+            ("metallurgy", ["furnace", "chemical", "electrolytic"]),
+            ("prospecting", ["survey", "pump", "trace"]),
+            ("reclamation", ["recovery", "reclaimer", "slagcrusher"]),
+        ] {
+            let rank = self.ranks.get(branch).copied().unwrap_or(0);
+            for (required, building) in [3, 6, 10].into_iter().zip(buildings) {
+                if rank >= required {
+                    self.levels.entry(building.into()).or_insert(1);
+                }
+            }
+        }
     }
     pub fn migrate(&mut self) -> Result<(), String> {
         if self.version == 1 {
@@ -1343,5 +1442,39 @@ mod upgrade_tests {
         g.contracts.clear();
         g.tick(&materials(), false);
         assert_eq!(g.products["iron"], 2000);
+    }
+}
+
+#[cfg(test)]
+mod progression_tests {
+    use super::*;
+    #[test]
+    fn blueprint_does_not_spend_offline() {
+        let mut g = Game::default();
+        g.credits = 10000;
+        g.build_queue = vec!["furnace".into()];
+        g.second(&materials(), true);
+        assert_eq!(g.level("furnace"), 0);
+        g.second(&materials(), false);
+        assert_eq!(g.level("furnace"), 1);
+        assert!(g.build_queue.is_empty());
+    }
+    #[test]
+    fn headquarters_tiers_apply_to_fresh_site() {
+        let mut g = Game::default();
+        g.ranks.insert("logistics".into(), 6);
+        g.apply_headquarters();
+        assert_eq!(g.level("conveyor"), 1);
+        assert_eq!(g.level("minecart"), 1);
+        assert_eq!(g.level("train"), 0);
+    }
+    #[test]
+    fn milestones_award_only_once() {
+        let mut g = Game::default();
+        g.levels.insert("conveyor".into(), 1);
+        g.tick(&materials(), false);
+        let research = g.research;
+        g.tick(&materials(), false);
+        assert_eq!(g.research, research);
     }
 }

@@ -17,6 +17,8 @@ export interface Game {
   workers: number;
   housing: number;
   levels: Record<string, number>;
+  milestones: string[];
+  build_queue: string[];
   research: number;
   ranks: Record<string, number>;
   policy: string;
@@ -47,8 +49,7 @@ export interface Game {
   contracts: { product: string; amount: number; complete: boolean }[];
   records: {
     site: number;
-    profile: number;
-    trace_feed: Record<string, number>;
+    section: number[];
     depth: number;
     research: number;
     excavated: number;
