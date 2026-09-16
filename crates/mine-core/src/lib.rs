@@ -399,6 +399,107 @@ impl Game {
         let n = self.level(k);
         (1. + 0.12 * n as f64) * 1.5f64.powi((n / 10) as i32)
     }
+    fn dig_rate(&self, offline: bool) -> u64 {
+        (((self.crew.diggers as f64 * self.throughput("drill")
+            / sites()[self.profile].hardness
+            / if self.challenge == "hard_rock" {
+                1.5
+            } else {
+                1.
+            }
+            / self.rock_work()
+            * match self.specialisation.as_deref() {
+                Some("bulk") => 1.3,
+                Some("precision") => 0.8,
+                _ => 1.,
+            }
+            * (1. + 0.05 * self.ranks.get("excavation").copied().unwrap_or(0) as f64))
+            * (if !offline && self.boosts[0] > 0 {
+                1.5
+            } else {
+                1.
+            }))
+            * 1000.) as u64
+    }
+    fn next_frontier(&self, cat: &[Material]) -> Option<u32> {
+        let depth_limit = if self.level("shaft") == 0 {
+            100
+        } else {
+            300 * (1 + self.level("shaft"))
+        };
+        self.terrain
+            .frontier
+            .iter()
+            .filter_map(|&key| {
+                let (x, y) = (key % WIDTH, key / WIDTH);
+                if y * 2 >= depth_limit {
+                    return None;
+                }
+                // Below the open pit, create a main shaft with branches every 12 rows.
+                if self.policy != "bulk" && y >= 24 && x.abs_diff(32) > 1 && y % 12 > 1 {
+                    return None;
+                }
+                if y >= 150 && self.level("supports") == 0 {
+                    return None;
+                }
+                if y >= 350 && self.level("pump") == 0 {
+                    return None;
+                }
+                if y >= 750 && self.level("ventilation") == 0 {
+                    return None;
+                }
+                let score = match self.policy.as_str() {
+                    "depth" => -(y as i64) * 8 + x.abs_diff(32) as i64,
+                    "vein" => {
+                        y as i64
+                            - if self.priorities.contains(&self.cell(x, y, cat)) {
+                                40
+                            } else {
+                                0
+                            }
+                    }
+                    _ => y as i64,
+                };
+                Some((score, key))
+            })
+            .min()
+            .map(|(_, key)| key)
+    }
+    /// No input, pending arrival, eligible recipe or reachable excavation event can fire.
+    fn quiescent(&self, cat: &[Material]) -> bool {
+        if self.next_frontier(cat).is_some()
+            || self
+                .ore
+                .values()
+                .chain(self.hauled.values())
+                .chain(self.concentrate.values())
+                .any(|q| *q > 0)
+            || !self.shipments.is_empty()
+            || self.depleted > 0
+            || (self.level("slagcrusher") > 0 && self.slag > 0)
+            || (self.level("reclaimer") > 0 && self.tailings.values().any(|q| *q > 0))
+        {
+            return false;
+        }
+        !recipes().iter().any(|r| {
+            if self.level(&r.building) == 0
+                || !(r.id == "steel" || r.id == "aluminium" || self.enabled_recipes.contains(&r.id))
+            {
+                return false;
+            }
+            if r.id.starts_with("separate_") {
+                return self
+                    .trace_feed
+                    .get(&format!("{}_residue", r.output))
+                    .copied()
+                    .unwrap_or(0)
+                    > 0;
+            }
+            r.inputs
+                .iter()
+                .all(|(p, n)| self.products.get(p).copied().unwrap_or(0) >= *n)
+        })
+    }
     pub fn second(&mut self, cat: &[Material], offline: bool) {
         for _ in 0..20 {
             self.tick(cat, offline);
@@ -422,26 +523,7 @@ impl Game {
         let cap = 20000 + 5000 * self.level("capacity") as u64;
         let ore_total: u64 = self.ore.values().sum();
         let mut mined = 0;
-        let dig_rate = (((self.crew.diggers as f64 * self.throughput("drill")
-            / sites()[self.profile].hardness
-            / if self.challenge == "hard_rock" {
-                1.5
-            } else {
-                1.
-            }
-            / self.rock_work()
-            * match self.specialisation.as_deref() {
-                Some("bulk") => 1.3,
-                Some("precision") => 0.8,
-                _ => 1.,
-            }
-            * (1. + 0.05 * self.ranks.get("excavation").copied().unwrap_or(0) as f64))
-            * (if !offline && self.boosts[0] > 0 {
-                1.5
-            } else {
-                1.
-            }))
-            * 1000.) as u64;
+        let dig_rate = self.dig_rate(offline);
         self.dig_progress += dig_rate / 20;
         let digs = (self.dig_progress / 1000) as u32;
         self.dig_progress %= 1000;
@@ -454,44 +536,7 @@ impl Game {
             if ore_total + (mined + 1) * 1000 > cap {
                 break;
             }
-            let target = self
-                .terrain
-                .frontier
-                .iter()
-                .filter_map(|&key| {
-                    let (x, y) = (key % WIDTH, key / WIDTH);
-                    if y * 2 >= depth_limit {
-                        return None;
-                    }
-                    // Below the open pit, create a main shaft with branches every 12 rows.
-                    if self.policy != "bulk" && y >= 24 && x.abs_diff(32) > 1 && y % 12 > 1 {
-                        return None;
-                    }
-                    if y >= 150 && self.level("supports") == 0 {
-                        return None;
-                    }
-                    if y >= 350 && self.level("pump") == 0 {
-                        return None;
-                    }
-                    if y >= 750 && self.level("ventilation") == 0 {
-                        return None;
-                    }
-                    let score = match self.policy.as_str() {
-                        "depth" => -(y as i64) * 8 + x.abs_diff(32) as i64,
-                        "vein" => {
-                            y as i64
-                                - if self.priorities.contains(&self.cell(x, y, cat)) {
-                                    40
-                                } else {
-                                    0
-                                }
-                        }
-                        _ => y as i64,
-                    };
-                    Some((score, key))
-                })
-                .min()
-                .map(|(_, key)| key);
+            let target = self.next_frontier(cat);
             let Some(key) = target else { break };
             let (x, y) = (key % WIDTH, key / WIDTH);
             let id = self.cell(x, y, cat);
@@ -942,8 +987,19 @@ impl Game {
         let old = self.credits;
         let mined = self.excavated;
         let known = self.discoveries.clone();
-        for _ in 0..effective {
-            self.second(cat, true)
+        for second in 0..effective {
+            self.second(cat, true);
+            let left = effective - second - 1;
+            if left > 0 && self.quiescent(cat) {
+                // Preserve fractional work and phase; the final tick refreshes feedback.
+                let skip = left * 20 - 1;
+                self.dig_progress =
+                    (self.dig_progress + self.dig_rate(true) / 20 * (skip % 1000)) % 1000;
+                self.ticks += skip;
+                self.flow_window = [0; 5];
+                self.tick(cat, true);
+                break;
+            }
         }
         self.offline = Some(Offline {
             discoveries: self.discoveries.difference(&known).copied().collect(),
@@ -1779,5 +1835,46 @@ mod challenge_tests {
         assert_eq!(g.challenge, "long_haul");
         assert!(g.specialisation.is_none());
         assert!(g.site_objectives.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod offline_idle_tests {
+    use super::*;
+    #[test]
+    fn blocked_interval_skip_matches_every_tick() {
+        let cat = materials();
+        let mut a = Game::default();
+        a.heights = vec![50; 64];
+        a.terrain = terrain::Terrain::from_columns(&a.heights);
+        a.dig_progress = 127;
+        a.last_saved = 100;
+        let mut b = a.clone();
+        a.advance_offline(2100, &cat);
+        for _ in 0..1000 {
+            b.second(&cat, true);
+        }
+        b.last_saved = a.last_saved;
+        b.offline = a.offline.clone();
+        assert_eq!(
+            serde_json::to_value(&a).unwrap(),
+            serde_json::to_value(&b).unwrap()
+        );
+    }
+    #[test]
+    fn pending_arrival_prevents_idle_skip() {
+        let mut g = Game::default();
+        g.heights = vec![50; 64];
+        g.terrain = terrain::Terrain::from_columns(&g.heights);
+        g.shipments.push(logistics::Shipment {
+            material: 0,
+            amount: 1000,
+            remaining: 30,
+            duration: 30,
+            depth: 100,
+            mode: "carrying".into(),
+            path: vec![],
+        });
+        assert!(!g.quiescent(&materials()));
     }
 }
