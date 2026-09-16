@@ -26,6 +26,35 @@ function sectionPath(section: number[]) {
     .map((open, i) => (open ? `M${i % 64} ${Math.floor(i / 64)}h1v1h-1z` : ""))
     .join(" ");
 }
+const upgradeOrder = [
+  "worker",
+  "housing",
+  "drill",
+  "wheelbarrow",
+  "conveyor",
+  "sorter",
+  "furnace",
+  "steelworks",
+  "shaft",
+  "supports",
+  "minecart",
+  "power",
+  "manufacturing",
+  "chemical",
+  "pump",
+  "electrolytic",
+  "ventilation",
+  "train",
+  "trace",
+  "survey",
+  "recovery",
+  "capacity",
+  "reclaimer",
+  "slagcrusher",
+];
+const orderedUpgrades = [...upgrades].sort(
+  (a, b) => upgradeOrder.indexOf(a[0]) - upgradeOrder.indexOf(b[0]),
+);
 const tab = ref("Operations");
 const query = ref("");
 const showRetire = ref(false);
@@ -191,7 +220,7 @@ onMounted(start);
           <div class="upgrade-list">
             <button
               class="upgrade"
-              v-for="u in upgrades"
+              v-for="u in orderedUpgrades"
               :key="u[0]"
               :disabled="!state || Number(state.credits) < cost(u[0])"
               @click="act('buy', u[0])"

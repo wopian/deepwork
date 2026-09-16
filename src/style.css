@@ -672,3 +672,23 @@ nav {
     flex-shrink: 0;
   }
 }
+
+.operation-grid > * {
+  min-width: 0;
+}
+.world canvas {
+  max-width: 100%;
+}
+@media (max-width: 800px) {
+  .operation-grid,
+  .bottom-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .title-row h1 {
+    min-width: 0;
+  }
+  .panel-heading > span {
+    max-width: 48%;
+    text-align: right;
+  }
+}
