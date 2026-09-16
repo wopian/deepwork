@@ -32,6 +32,7 @@ export interface Game {
     duration: number;
     depth: number;
     mode: string;
+    path: [number, number][];
   }[];
   crew: Record<string, number>;
   heights: number[];

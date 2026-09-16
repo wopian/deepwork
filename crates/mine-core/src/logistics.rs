@@ -39,6 +39,8 @@ pub struct Shipment {
     pub duration: u32,
     pub depth: u32,
     pub mode: String,
+    #[serde(default)]
+    pub path: Vec<[u32; 2]>,
 }
 pub fn mode(levels: &BTreeMap<String, u32>) -> (&'static str, u32) {
     for (key, name, speed) in [
@@ -97,6 +99,7 @@ mod tests {
             duration: 1,
             depth: 100,
             mode: "carrying".into(),
+            path: vec![],
         }];
         let mut hauled = BTreeMap::new();
         arrive(&mut shipments, &mut hauled, 250);

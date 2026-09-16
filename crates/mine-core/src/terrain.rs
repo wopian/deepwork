@@ -1,6 +1,6 @@
 //! Sparse excavation masks. Each chunk covers 64 × 64 cells; solid geology is seeded.
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 pub const WIDTH: u32 = 64;
 pub const MAX_ROWS: u32 = 100_000;
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -99,6 +99,46 @@ impl Terrain {
         }
         t
     }
+    /// Shortest open-cell route to daylight, compressed at changes of direction.
+    pub fn surface_route(&self, start: [u32; 2]) -> Vec<[u32; 2]> {
+        if !self.contains(start[0], start[1]) {
+            return vec![];
+        }
+        let mut parents = BTreeMap::from([(start, start)]);
+        let mut queue = VecDeque::from([start]);
+        while let Some(p) = queue.pop_front() {
+            if p[1] == 0 {
+                let mut path = vec![p];
+                let mut current = p;
+                while current != start {
+                    current = parents[&current];
+                    path.push(current);
+                }
+                path.reverse();
+                let mut turns = vec![start];
+                for window in path.windows(3) {
+                    let direction = |a: [u32; 2], b: [u32; 2]| {
+                        (b[0] as i64 - a[0] as i64, b[1] as i64 - a[1] as i64)
+                    };
+                    if direction(window[0], window[1]) != direction(window[1], window[2]) {
+                        turns.push(window[1]);
+                    }
+                }
+                if p != start {
+                    turns.push(p);
+                }
+                return turns;
+            }
+            for (x, y) in Self::neighbors(p[0], p[1]) {
+                let next = [x, y];
+                if self.contains(x, y) && !parents.contains_key(&next) {
+                    parents.insert(next, p);
+                    queue.push_back(next);
+                }
+            }
+        }
+        vec![]
+    }
     pub fn count(&self) -> u64 {
         self.chunks
             .values()
@@ -110,6 +150,18 @@ impl Terrain {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn route_turns_around_solid_rock() {
+        let mut t = Terrain::default();
+        for y in 0..5 {
+            assert!(t.excavate(30, y));
+        }
+        for x in 31..35 {
+            assert!(t.excavate(x, 4));
+        }
+        assert_eq!(t.surface_route([34, 4]), vec![[34, 4], [30, 4], [30, 0]]);
+        assert!(t.surface_route([34, 3]).is_empty());
+    }
     #[test]
     fn only_reachable_faces_can_be_removed() {
         let mut t = Terrain::default();

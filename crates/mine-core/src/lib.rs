@@ -126,6 +126,8 @@ pub struct Game {
     pub trace_fraction: BTreeMap<String, u64>,
     #[serde(default)]
     pub shipments: Vec<logistics::Shipment>,
+    #[serde(skip)]
+    haul_path: Vec<[u32; 2]>,
     #[serde(default)]
     pub crew: logistics::Crew,
     pub products: BTreeMap<String, u64>,
@@ -233,6 +235,7 @@ impl Game {
             trace_feed: BTreeMap::new(),
             trace_fraction: BTreeMap::new(),
             shipments: vec![],
+            haul_path: vec![],
             crew: logistics::Crew::assign(3, &BTreeMap::new()),
             products: BTreeMap::new(),
             tailings: BTreeMap::new(),
@@ -461,8 +464,19 @@ impl Game {
         }
         let (transport, speed) = logistics::mode(&self.levels);
         let route_depth = self.depth();
+        if let Some(cell) = self.removed.last() {
+            let origin = [cell.x, cell.y];
+            if self.haul_path.first() != Some(&origin) {
+                self.haul_path = self.terrain.surface_route(origin);
+            }
+        }
+        let route_length: u32 = self
+            .haul_path
+            .windows(2)
+            .map(|p| p[0][0].abs_diff(p[1][0]) + p[0][1].abs_diff(p[1][1]))
+            .sum();
         let duration =
-            2 + (route_depth as f64 / (speed as f64 * sites()[self.profile].haul)) as u32;
+            2 + (route_length as f64 * 2. / (speed as f64 * sites()[self.profile].haul)) as u32;
         let haul_rate = (1000.
             * self.crew.haulers as f64
             * self.throughput("conveyor")
@@ -500,6 +514,7 @@ impl Game {
                     duration,
                     depth: route_depth,
                     mode: transport.into(),
+                    path: self.haul_path.clone(),
                 });
             }
             remaining -= n;
@@ -1157,7 +1172,11 @@ impl Game {
         let n = materials().len();
         if self.shipments.len() > 20000
             || self.shipments.iter().any(|s| {
-                s.material >= n
+                s.path.len() > 100000
+                    || s.path
+                        .iter()
+                        .any(|p| p[0] >= 64 || p[1] >= terrain::MAX_ROWS)
+                    || s.material >= n
                     || s.amount > 1_000_000_000_000
                     || s.duration > 100000
                     || s.remaining > s.duration

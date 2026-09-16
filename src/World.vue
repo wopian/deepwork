@@ -4,6 +4,7 @@ import { Application, Graphics, Text, Container } from "pixi.js";
 import { state, materials } from "./game";
 import { WasteParticles } from "./waste";
 import profiles from "../content/sites.json";
+import { routePosition } from "./routes";
 import { preferences } from "./preferences";
 const host = ref<HTMLDivElement>();
 let app: Application | undefined;
@@ -222,8 +223,11 @@ onMounted(async () => {
     }
     for (const cargo of g?.shipments ?? []) {
       const progress = 1 - cargo.remaining / cargo.duration;
-      const x = 235 + 32 * 7 + progress * 240;
-      const y = 208 + (((1 - progress) * cargo.depth) / 2) * 7;
+      const points: [number, number][] = cargo.path?.length
+        ? cargo.path.map(([x,y]) => [235 + x * 7, 208 + y * 7])
+        : [[459, 208 + cargo.depth / 2 * 7]];
+      points.push([points[points.length - 1]![0], 185], [735, 185]);
+      const [x,y] = routePosition(points, progress);
       rect(
         actors,
         x,
