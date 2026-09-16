@@ -13,6 +13,8 @@ pub struct Pacing {
     pub refining_rate: f64,
     pub research_base: u64,
     pub starter_hold_units: u64,
+    pub starter_iron_multiplier: u64,
+    pub foundation_upgrades: Vec<String>,
     pub station_units: [u64; 5],
     pub transit_units: u64,
     pub station_cost: u64,
@@ -39,6 +41,10 @@ pub fn validate() -> Result<(), String> {
             .any(|v| !v.is_finite() || !(0.01..=100.).contains(v))
         || p.research_base == 0
         || p.starter_hold_units > 8
+        || !(1..=4).contains(&p.starter_iron_multiplier)
+        || p.foundation_upgrades
+            .iter()
+            .any(|id| !crate::requirements().iter().any(|u| u.id == *id))
         || p.station_cost == 0
         || p.station_units.iter().any(|&v| v == 0 || v > 1000)
         || p.transit_units == 0

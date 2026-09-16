@@ -33,7 +33,7 @@
   "sorting_rate": 2.0,
   "refining_rate": 2.0,
   "research_base": 5,
-  "starter_hold_units": 4,
+  "starter_hold_units": 3,
   "station_units": [
     4,
     8,
@@ -88,5 +88,14 @@
       2419200,
       3628800
     ]
-  }
+  },
+  "foundation_upgrades": [
+    "supports",
+    "minecart",
+    "power",
+    "manufacturing",
+    "chemical",
+    "pump"
+  ],
+  "starter_iron_multiplier": 4
 }

@@ -683,7 +683,13 @@ impl Game {
                 .any(|q| *q > 0)
             || self.concentrate.iter().any(|(&id, &q)| {
                 let held = if self.level("furnace") == 0 && matches!(id, 3 | 5 | 6) {
-                    pacing::get().starter_hold_units * UNITS * if id == 3 { 2 } else { 1 }
+                    pacing::get().starter_hold_units
+                        * UNITS
+                        * if id == 3 {
+                            pacing::get().starter_iron_multiplier
+                        } else {
+                            1
+                        }
                 } else {
                     0
                 };
@@ -937,7 +943,13 @@ impl Game {
                 _ => self.levels.get("trace").copied().unwrap_or(0) > 0,
             };
             let starter_hold = if !unlocked && matches!(id, 3 | 5 | 6) {
-                pacing::get().starter_hold_units * UNITS * if id == 3 { 2 } else { 1 }
+                pacing::get().starter_hold_units
+                    * UNITS
+                    * if id == 3 {
+                        pacing::get().starter_iron_multiplier
+                    } else {
+                        1
+                    }
             } else {
                 0
             };
@@ -1084,14 +1096,26 @@ impl Game {
             let progression_hold =
                 if matches!(self.pinned.as_deref(), Some("furnace" | "steelworks")) {
                     match p.as_str() {
-                        "iron" => 6 * UNITS,
+                        "iron" => 8 * UNITS,
                         "coke" | "lime" => 2 * UNITS,
                         _ => 0,
                     }
                 } else {
                     0
                 };
-            let reserved = progression_hold.max(
+            let foundation_hold = if p == "steel" && self.pinned.is_some() {
+                requirements()
+                    .iter()
+                    .filter(|u| {
+                        pacing::get().foundation_upgrades.contains(&u.id)
+                            && self.levels.get(&u.id).copied().unwrap_or(0) == 0
+                    })
+                    .filter_map(|u| u.inputs.get("steel"))
+                    .sum()
+            } else {
+                0
+            };
+            let reserved = progression_hold.max(foundation_hold).max(
                 self.reserve
                     .get(p)
                     .copied()

@@ -16,7 +16,7 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
         act(g, "buy", "worker", 0);
     }
     for i in 0..3 {
-        if g.level("supports") == 0 {
+        if g.level("pump") == 0 {
             continue;
         }
         let c = &g.contracts[i];
@@ -52,6 +52,13 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
         "bulk" => "excavation",
         "precision" => "metallurgy",
         _ => "reclamation",
+    };
+    let branch = if g.ranks.get(branch).copied().unwrap_or(0) >= 3
+        && g.ranks.get("metallurgy").copied().unwrap_or(0) < 6
+    {
+        "metallurgy"
+    } else {
+        branch
     };
     act(g, "research", branch, 0);
     if g.specialisation.is_none() {
