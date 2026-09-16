@@ -75,7 +75,7 @@ impl Default for Network {
             id: index.to_string(),
             name: name.into(),
             level: 0,
-            capacity: [4, 8, 8, 12, 20][index] * UNITS,
+            capacity: crate::pacing::get().station_units[index] * UNITS,
             cargo: BTreeMap::new(),
             preferred: false,
             incoming: 0,
@@ -93,7 +93,7 @@ impl Default for Network {
         .map(|name| Segment {
             name: name.into(),
             batches: vec![],
-            capacity: 20 * UNITS,
+            capacity: crate::pacing::get().transit_units * UNITS,
             duration_ms: 2000,
             legs: vec![],
             rate: UNITS,
@@ -113,12 +113,16 @@ impl Default for Network {
 impl Network {
     pub fn configure(&mut self, legs: &[Leg], rate: u64, global_capacity: u32) {
         for (i, station) in self.stations.iter_mut().enumerate() {
-            station.capacity = ([4, 8, 8, 12, 20][i] * UNITS + 5 * UNITS * global_capacity as u64)
+            station.capacity = (crate::pacing::get().station_units[i] * UNITS
+                + 5 * UNITS * global_capacity as u64)
                 * (4 + station.level as u64)
                 / 4;
-            station.quote = (60. * 1.12f64.powi(station.level as i32))
-                .ceil()
-                .to_string();
+            station.quote = (crate::pacing::get().station_cost as f64
+                * crate::pacing::get()
+                    .capacity_growth
+                    .powi(station.level as i32))
+            .ceil()
+            .to_string();
         }
         for segment in &mut self.segments {
             segment.legs.clear();
@@ -143,7 +147,8 @@ impl Network {
         }
         for segment in &mut self.segments {
             segment.duration_ms = 2000 + segment.legs.iter().map(|l| l.milliseconds).sum::<u32>();
-            segment.capacity = (20 + global_capacity as u64 * 5) * UNITS;
+            segment.capacity =
+                (crate::pacing::get().transit_units + global_capacity as u64 * 5) * UNITS;
         }
     }
     pub fn mass(&self) -> u64 {

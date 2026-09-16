@@ -1,0 +1,92 @@
+{
+  "costs": {
+    "worker": 25,
+    "housing": 90,
+    "drill": 100,
+    "conveyor": 250,
+    "sorter": 100,
+    "furnace": 380,
+    "shaft": 140,
+    "steelworks": 160,
+    "power": 900,
+    "chemical": 1500,
+    "electrolytic": 2200,
+    "trace": 3500,
+    "recovery": 100,
+    "capacity": 100,
+    "reclaimer": 100,
+    "manufacturing": 100,
+    "supports": 100,
+    "pump": 100,
+    "ventilation": 100,
+    "wheelbarrow": 100,
+    "minecart": 100,
+    "train": 100,
+    "survey": 100,
+    "slagcrusher": 100
+  },
+  "worker_growth": 1.15,
+  "machine_growth": 1.18,
+  "capacity_growth": 1.12,
+  "worker_rate": 1.0,
+  "haul_rate": 1.0,
+  "sorting_rate": 2.0,
+  "refining_rate": 2.0,
+  "research_base": 5,
+  "starter_hold_units": 4,
+  "station_units": [
+    4,
+    8,
+    8,
+    12,
+    20
+  ],
+  "transit_units": 20,
+  "station_cost": 60,
+  "windows": {
+    "worker": [
+      0,
+      60
+    ],
+    "conveyor": [
+      180,
+      300
+    ],
+    "furnace": [
+      480,
+      720
+    ],
+    "shaft": [
+      1500,
+      2100
+    ],
+    "specialisation": [
+      2700,
+      3600
+    ],
+    "retirement": [
+      86400,
+      259200
+    ],
+    "power": [
+      259200,
+      604800
+    ],
+    "chemical": [
+      604800,
+      1209600
+    ],
+    "precision": [
+      1209600,
+      1814400
+    ],
+    "rare_earth": [
+      1814400,
+      2419200
+    ],
+    "headquarters": [
+      2419200,
+      3628800
+    ]
+  }
+}

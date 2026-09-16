@@ -2,6 +2,8 @@ pub mod content;
 pub mod geology;
 pub mod geometry;
 pub mod logistics;
+pub mod navigation;
+pub mod pacing;
 pub mod terrain;
 pub mod transport;
 pub mod waste;
@@ -375,26 +377,13 @@ impl Game {
         geometry::depth(self.heights.iter().max().copied().unwrap_or(0))
     }
     pub fn cost(&self, k: &str) -> u64 {
-        let (base, growth, n): (f64, f64, u32) = if k == "worker" {
-            (25., 1.15, self.workers - 3)
-        } else if k == "housing" {
-            (90., 1.12, (self.housing - 8) / 4)
-        } else {
-            (
-                match k {
-                    "conveyor" => 450.,
-                    "furnace" => 800.,
-                    "shaft" => 600.,
-                    "steelworks" => 450.,
-                    "power" => 900.,
-                    "chemical" => 1500.,
-                    "electrolytic" => 2200.,
-                    "trace" => 3500.,
-                    _ => 100.,
-                },
-                if k == "capacity" { 1.12 } else { 1.18 },
-                self.level(k),
-            )
+        let p = pacing::get();
+        let base = p.costs.get(k).copied().unwrap_or(100) as f64;
+        let (growth, n) = match k {
+            "worker" => (p.worker_growth, self.workers.saturating_sub(3)),
+            "housing" => (p.capacity_growth, self.housing.saturating_sub(8) / 4),
+            "capacity" => (p.capacity_growth, self.level(k)),
+            _ => (p.machine_growth, self.level(k)),
         };
         (base * growth.powi(n as i32)).ceil() as u64
     }
@@ -443,7 +432,8 @@ impl Game {
             1.
         } / sites()[self.profile].haul;
         let (legs, _) = logistics::route(&self.haul_path, &self.levels, factor);
-        let rate = self.crew.haulers as f64
+        let rate = pacing::get().haul_rate
+            * self.crew.haulers as f64
             * self.throughput("conveyor")
             * if self.level("conveyor") > 0 { 3. } else { 1. }
             * (1. + 0.05 * self.ranks.get("logistics").copied().unwrap_or(0) as f64);
@@ -465,8 +455,9 @@ impl Game {
         [
             self.dig_rate(true) as f64 / UNITS as f64,
             haul,
-            2. * self.throughput("sorter"),
-            2. * self.throughput("furnace")
+            pacing::get().sorting_rate * self.throughput("sorter"),
+            pacing::get().refining_rate
+                * self.throughput("furnace")
                 * (1. + 0.15 * self.crew.operators.saturating_sub(1) as f64)
                 * (1. + 0.05 * self.ranks.get("metallurgy").copied().unwrap_or(0) as f64)
                 * power
@@ -574,7 +565,8 @@ impl Game {
             } else {
                 1.
             }))
-            * 64000.) as u64
+            * UNITS as f64
+            * pacing::get().worker_rate) as u64
     }
     fn next_frontier(&self, cat: &[Material]) -> Option<u32> {
         let depth_limit = if self.level("shaft") == 0 {
@@ -593,19 +585,43 @@ impl Game {
                 let surface = y < 192;
                 if surface {
                     let margin = 16 + (y / 24) * 24;
-                    if x < margin || x >= WIDTH - margin {
+                    if x < 16 + y || x >= WIDTH - margin {
                         return None;
                     }
                 } else {
                     let shaft = x.abs_diff(WIDTH / 2) < 4;
+                    // Complete shaft clearance before descending to the next cutting face.
+                    if shaft
+                        && y > 192
+                        && !(WIDTH / 2 - 3..=WIDTH / 2 + 3)
+                            .all(|sx| self.terrain.contains(sx, y - 1))
+                    {
+                        return None;
+                    }
                     let drive = y % 96 < 8 && (32..WIDTH - 32).contains(&x);
                     let stope = self.policy == "vein"
-                        && y % 96 < 24
+                        && y % 96 >= 80
                         && x % 64 < 48
                         && self.terrain.is_revealed(x, y)
                         && self.priorities.contains(&self.cell(x, y, cat));
+                    if stope && !self.terrain.contains(x, (y / 96 + 1) * 96 + 7) {
+                        return None;
+                    }
                     if !shaft && !drive && !stope {
                         return None;
+                    }
+                    if !shaft && drive {
+                        let inner = if x < WIDTH / 2 { x + 1 } else { x - 1 };
+                        let top = y / 96 * 96;
+                        // Excavate the lift landing before opening either tunnel portal.
+                        if !(top..top + 8).all(|row| self.terrain.contains(WIDTH / 2, row)) {
+                            return None;
+                        }
+                        if inner.abs_diff(WIDTH / 2) >= 4
+                            && !(top..top + 8).all(|row| self.terrain.contains(inner, row))
+                        {
+                            return None;
+                        }
                     }
                 }
                 if y >= 1200 && (self.level("supports") == 0 || y >= self.support_rows) {
@@ -619,7 +635,7 @@ impl Game {
                 }
                 // Bench completion outranks depth preference. Unknown rock never informs ore targeting.
                 let score = if surface {
-                    y as i64 * 1024 + x.abs_diff(WIDTH / 2) as i64
+                    y as i64 * 1024 + x as i64
                 } else {
                     match self.policy.as_str() {
                         "depth" => -(y as i64) * 8 + x.abs_diff(WIDTH / 2) as i64,
@@ -782,7 +798,12 @@ impl Game {
         if let Some(cell) = self.removed.last() {
             let origin = [cell.x, cell.y];
             if self.haul_path.first() != Some(&origin) {
-                self.haul_path = self.terrain.surface_route(origin);
+                self.haul_path = navigation::route(
+                    &self.terrain,
+                    &self.heights,
+                    origin,
+                    self.level("shaft") > 0,
+                );
             }
         }
         let terrain_factor = if self.challenge == "long_haul" {
@@ -792,6 +813,7 @@ impl Game {
         } / sites()[self.profile].haul;
         let (legs, _duration) = logistics::route(&self.haul_path, &self.levels, terrain_factor);
         let haul_rate = (UNITS as f64
+            * pacing::get().haul_rate
             * self.crew.haulers as f64
             * if !offline && self.boosts[0] > 0 && matches!(transport, "carrying" | "wheelbarrow") {
                 1.5
@@ -804,9 +826,15 @@ impl Game {
         self.transport
             .configure(&legs, haul_rate, self.level("capacity"));
         let power = (self.power_factor(offline) * 1000.) as u64;
+        let mut inaccessible = BTreeMap::new();
+        let source = if self.haul_path.is_empty() {
+            &mut inaccessible
+        } else {
+            &mut self.ore
+        };
         let haul_budget = self.transport.tick(
             self.ticks,
-            &mut self.ore,
+            source,
             &mut self.hauled,
             cap,
             &self.priorities,
@@ -815,7 +843,8 @@ impl Game {
             power,
         );
         let remaining = 0;
-        let sort_rate = (2. * UNITS as f64 * self.throughput("sorter")) as u64 / 20;
+        let sort_rate =
+            (pacing::get().sorting_rate * UNITS as f64 * self.throughput("sorter")) as u64 / 20;
         let mut sort_left = sort_rate.min(cap.saturating_sub(self.concentrate.values().sum()));
         let sort_budget = sort_left;
         let mut sort_ids: Vec<_> = self
@@ -845,7 +874,7 @@ impl Game {
             } else {
                 1.
             }
-            * (2. * UNITS as f64)
+            * (pacing::get().refining_rate * UNITS as f64)
             * self.throughput("furnace")
             * (1. + 0.15 * self.crew.operators.saturating_sub(1) as f64)
             * (1. + 0.05 * self.ranks.get("metallurgy").copied().unwrap_or(0) as f64)
@@ -876,7 +905,12 @@ impl Game {
                 "electrolytic" => self.levels.get("chemical").copied().unwrap_or(0) > 0,
                 _ => self.levels.get("trace").copied().unwrap_or(0) > 0,
             };
-            let n = (*q).min(left);
+            let starter_hold = if !unlocked && matches!(id, 3 | 5 | 6) {
+                pacing::get().starter_hold_units * UNITS * if id == 3 { 2 } else { 1 }
+            } else {
+                0
+            };
+            let n = q.saturating_sub(starter_hold).min(left);
             if n == 0 {
                 continue;
             }
@@ -1014,20 +1048,33 @@ impl Game {
                         || self.enabled_recipes.contains(&r.id))
                     && r.inputs.contains_key(p)
             });
-            let reserved = self
-                .reserve
-                .get(p)
-                .copied()
-                .unwrap_or(0)
-                .max(if recipe_hold { 8 * UNITS } else { 0 })
-                .max(
-                    self.pinned
-                        .as_ref()
-                        .and_then(|id| requirements().iter().find(|u| u.id == *id))
-                        .and_then(|u| u.inputs.get(p))
-                        .copied()
-                        .unwrap_or(0),
-                );
+            // While the furnace is pinned, retain its first construction output.
+            // Explicitly unpinning releases these provisional reserves.
+            let progression_hold =
+                if matches!(self.pinned.as_deref(), Some("furnace" | "steelworks")) {
+                    match p.as_str() {
+                        "iron" => 4 * UNITS,
+                        "coke" | "lime" => 2 * UNITS,
+                        _ => 0,
+                    }
+                } else {
+                    0
+                };
+            let reserved = progression_hold.max(
+                self.reserve
+                    .get(p)
+                    .copied()
+                    .unwrap_or(0)
+                    .max(if recipe_hold { 8 * UNITS } else { 0 })
+                    .max(
+                        self.pinned
+                            .as_ref()
+                            .and_then(|id| requirements().iter().find(|u| u.id == *id))
+                            .and_then(|u| u.inputs.get(p))
+                            .copied()
+                            .unwrap_or(0),
+                    ),
+            );
             let contract_hold = self
                 .contracts
                 .iter()
@@ -1353,15 +1400,18 @@ impl Game {
                     .stations
                     .get_mut(index)
                     .ok_or("Unknown station")?;
-                let cost = (60. * 1.12f64.powi(station.level as i32)).ceil() as u64;
+                let cost = (pacing::get().station_cost as f64
+                    * pacing::get().capacity_growth.powi(station.level as i32))
+                .ceil() as u64;
                 if station.level >= 50 || self.credits < cost {
                     return Err("Buffer upgrade unavailable".into());
                 }
                 self.credits -= cost;
                 station.level += 1;
-                station.quote = (60. * 1.12f64.powi(station.level as i32))
-                    .ceil()
-                    .to_string();
+                station.quote = (pacing::get().station_cost as f64
+                    * pacing::get().capacity_growth.powi(station.level as i32))
+                .ceil()
+                .to_string();
             }
             "station_priority" => {
                 let index: usize = a.target.parse().map_err(|_| "Unknown station")?;
@@ -1565,7 +1615,7 @@ impl Game {
                     return Err("Unknown research".into());
                 }
                 let rank = *self.ranks.get(&a.target).unwrap_or(&0);
-                let cost = 5 * (rank as u64 + 1).pow(2);
+                let cost = pacing::get().research_base * (rank as u64 + 1).pow(2);
                 if rank >= 10 || self.research < cost {
                     return Err("Research unavailable".into());
                 }
