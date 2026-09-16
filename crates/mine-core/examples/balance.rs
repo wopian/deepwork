@@ -53,13 +53,13 @@ fn main() {
     println!(
         "{}",
         serde_json::to_string_pretty(
-            &serde_json::json!({"policy":policy,"profile":g.profile,"events":milestones})
+            &serde_json::json!({"policy":policy,"profile":g.profile,"events":milestones,"elapsed_seconds":g.ticks/20,"retirement_ready":g.depth() >= 300 && g.steel_made})
         )
         .unwrap()
     );
-    if !(g.depth() >= 300 && g.steel_made) {
+    if policy == "depth" && !(g.depth() >= 300 && g.steel_made) {
         eprintln!(
-            "Baseline stalled: depth={} steel={} credits={} target={:?}",
+            "Retirement target not reached in four simulated hours: depth={} steel={} credits={} target={:?}",
             g.depth(),
             g.steel_made,
             g.credits,

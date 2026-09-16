@@ -1,6 +1,7 @@
 //! Sparse excavation masks. Each chunk covers 64 × 64 cells; solid geology is seeded.
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::Arc;
 pub const WIDTH: u32 = 64;
 pub const MAX_ROWS: u32 = 100_000;
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -10,6 +11,9 @@ pub struct Terrain {
     pub revision: u64,
     #[serde(skip)]
     pub frontier: BTreeSet<u32>,
+    /// (distance, parent); snapshots share this immutable cache without copying it.
+    #[serde(skip)]
+    routes: Arc<BTreeMap<u32, (u32, u32)>>,
 }
 impl Default for Terrain {
     fn default() -> Self {
@@ -17,6 +21,7 @@ impl Default for Terrain {
             chunks: BTreeMap::new(),
             revision: 0,
             frontier: (0..WIDTH).collect(),
+            routes: Arc::default(),
         }
     }
 }
@@ -53,6 +58,20 @@ impl Terrain {
                 self.frontier.insert(ny * WIDTH + nx);
             }
         }
+        let routes = Arc::make_mut(&mut self.routes);
+        let (distance, parent) = if y == 0 {
+            (0, key)
+        } else {
+            Self::neighbors(x, y)
+                .filter_map(|(nx, ny)| {
+                    let next = ny * WIDTH + nx;
+                    routes.get(&next).map(|(distance, _)| (distance + 1, next))
+                })
+                .min()
+                .expect("reachable cell has a route")
+        };
+        routes.insert(key, (distance, parent));
+        Self::relax_routes(routes, VecDeque::from([key]));
         self.revision += 1;
         true
     }
@@ -81,6 +100,23 @@ impl Terrain {
                 }
             }
         }
+        let mut routes: BTreeMap<_, _> = opened
+            .iter()
+            .map(|(x, y)| (y * WIDTH + x, (u32::MAX, y * WIDTH + x)))
+            .collect();
+        let starts: VecDeque<_> = opened
+            .iter()
+            .filter(|(_, y)| *y == 0)
+            .map(|(x, _)| *x)
+            .collect();
+        for key in &starts {
+            routes.insert(*key, (0, *key));
+        }
+        Self::relax_routes(&mut routes, starts);
+        if routes.values().any(|(distance, _)| *distance == u32::MAX) {
+            return Err("Excavation disconnected from surface".into());
+        }
+        self.routes = Arc::new(routes);
         for (x, y) in opened {
             for (nx, ny) in Self::neighbors(x, y) {
                 if !self.contains(nx, ny) {
@@ -99,45 +135,48 @@ impl Terrain {
         }
         t
     }
-    /// Shortest open-cell route to daylight, compressed at changes of direction.
-    pub fn surface_route(&self, start: [u32; 2]) -> Vec<[u32; 2]> {
-        if !self.contains(start[0], start[1]) {
-            return vec![];
-        }
-        let mut parents = BTreeMap::from([(start, start)]);
-        let mut queue = VecDeque::from([start]);
-        while let Some(p) = queue.pop_front() {
-            if p[1] == 0 {
-                let mut path = vec![p];
-                let mut current = p;
-                while current != start {
-                    current = parents[&current];
-                    path.push(current);
-                }
-                path.reverse();
-                let mut turns = vec![start];
-                for window in path.windows(3) {
-                    let direction = |a: [u32; 2], b: [u32; 2]| {
-                        (b[0] as i64 - a[0] as i64, b[1] as i64 - a[1] as i64)
-                    };
-                    if direction(window[0], window[1]) != direction(window[1], window[2]) {
-                        turns.push(window[1]);
+    fn relax_routes(routes: &mut BTreeMap<u32, (u32, u32)>, mut queue: VecDeque<u32>) {
+        while let Some(key) = queue.pop_front() {
+            let distance = routes[&key].0;
+            for (x, y) in Self::neighbors(key % WIDTH, key / WIDTH) {
+                let next = y * WIDTH + x;
+                if let Some(route) = routes.get_mut(&next) {
+                    if route.0 > distance + 1 {
+                        *route = (distance + 1, key);
+                        queue.push_back(next);
+                    } else if route.0 == distance + 1 && key < route.1 {
+                        route.1 = key;
                     }
                 }
-                if p != start {
-                    turns.push(p);
-                }
-                return turns;
-            }
-            for (x, y) in Self::neighbors(p[0], p[1]) {
-                let next = [x, y];
-                if self.contains(x, y) && !parents.contains_key(&next) {
-                    parents.insert(next, p);
-                    queue.push_back(next);
-                }
             }
         }
-        vec![]
+    }
+    /// Shortest open-cell route to daylight, compressed at changes of direction.
+    pub fn surface_route(&self, start: [u32; 2]) -> Vec<[u32; 2]> {
+        let mut key = start[1].saturating_mul(WIDTH).saturating_add(start[0]);
+        if start[0] >= WIDTH || !self.routes.contains_key(&key) {
+            return vec![];
+        }
+        let mut turns = vec![start];
+        let mut previous = start;
+        let mut direction = None;
+        while key >= WIDTH {
+            key = self.routes[&key].1;
+            let next = [key % WIDTH, key / WIDTH];
+            let d = (
+                next[0] as i64 - previous[0] as i64,
+                next[1] as i64 - previous[1] as i64,
+            );
+            if direction.is_some_and(|old| old != d) {
+                turns.push(previous);
+            }
+            direction = Some(d);
+            previous = next;
+        }
+        if previous != start {
+            turns.push(previous);
+        }
+        turns
     }
     pub fn count(&self) -> u64 {
         self.chunks
@@ -150,6 +189,30 @@ impl Terrain {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn new_daylight_connection_shortens_existing_routes() {
+        let mut t = Terrain::default();
+        for y in 0..6 {
+            t.excavate(30, y);
+        }
+        for x in 31..36 {
+            t.excavate(x, 5);
+        }
+        assert_eq!(t.surface_route([34, 5]).last(), Some(&[30, 0]));
+        for y in (0..5).rev() {
+            t.excavate(35, y);
+        }
+        assert_eq!(t.surface_route([34, 5]).last(), Some(&[35, 0]));
+        let mut restored: Terrain =
+            serde_json::from_str(&serde_json::to_string(&t).unwrap()).unwrap();
+        restored.rebuild().unwrap();
+        assert_eq!(restored.surface_route([34, 5]).last(), Some(&[35, 0]));
+        for y in 0..6 {
+            for x in 30..36 {
+                assert_eq!(t.surface_route([x, y]), restored.surface_route([x, y]));
+            }
+        }
+    }
     #[test]
     fn route_turns_around_solid_rock() {
         let mut t = Terrain::default();
