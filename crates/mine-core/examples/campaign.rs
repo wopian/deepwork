@@ -120,25 +120,29 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
     }
     act(g, "megaproject", "", 0);
     // Keep mandatory purchases ahead of optional rate spending.
+    let spendable = |g: &Game| {
+        g.credits
+            .saturating_sub(g.pinned.as_ref().map(|id| g.cost(id)).unwrap_or(0))
+    };
     if g.level("shaft") > 0 {
         let target_drill = (g.depth() / 300 + 1).min(5) * 10;
-        if g.level("drill") < target_drill && g.credits > g.cost("drill") * 3 {
+        if g.level("drill") < target_drill && spendable(g) > g.cost("drill") * 3 {
             act(g, "buy", "drill", 0);
         }
-        if g.workers < 32 && g.credits > g.cost("worker") * 3 {
+        if g.workers < 32 && spendable(g) > g.cost("worker") * 3 {
             if g.workers >= g.housing {
                 act(g, "buy", "housing", 0);
             } else {
                 act(g, "buy", "worker", 0);
             }
         }
-        if g.depth() + 20 >= 300 * (1 + g.level("shaft")) {
+        if g.depth() + 20 >= 300 * (1 + g.level("shaft")) && spendable(g) >= g.cost("shaft") {
             act(g, "buy", "shaft", 0);
         }
         for id in [
             "power", "recovery", "capacity", "conveyor", "furnace", "sorter",
         ] {
-            if g.level(id) < 5 && g.credits > g.cost(id) * 5 {
+            if g.level(id) < 5 && spendable(g) > g.cost(id) * 5 {
                 act(g, "buy", id, 0);
             }
         }
@@ -180,7 +184,22 @@ fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
     let cat = materials();
     let mut events = BTreeMap::new();
     let mut wall = 0;
+    let mut idle_visits = 0;
     for visit in 0..days * 2 {
+        if idle_visits >= 2 && g.depth() >= 300 && g.steel_made {
+            act(
+                &mut g,
+                "retire",
+                "",
+                match style {
+                    "bulk" => 0,
+                    "precision" => 1,
+                    _ => 2,
+                },
+            );
+            idle_visits = 0;
+        }
+        let before = (g.site, g.excavated, g.credits, g.levels.clone());
         for second in 0..720 {
             if second % 5 == 0 {
                 strategy(&mut g, style, mode == "attentive");
@@ -214,6 +233,11 @@ fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
             wall += gap;
             record(&g, wall, &mut events);
         }
+        idle_visits = if before == (g.site, g.excavated, g.credits, g.levels.clone()) {
+            idle_visits + 1
+        } else {
+            0
+        };
         eprintln!(
             "seed={seed} strategy={style} mode={mode} visit={} depth={} next={:?} credits={}",
             visit + 1,
