@@ -53,7 +53,7 @@ fn main() {
     println!(
         "{}",
         serde_json::to_string_pretty(
-            &serde_json::json!({"policy":policy,"profile":g.profile,"events":milestones,"elapsed_seconds":g.ticks/20,"retirement_ready":g.depth() >= 300 && g.steel_made})
+            &serde_json::json!({"policy":policy,"profile":g.profile,"events":milestones,"elapsed_seconds":g.ticks/20,"retirement_ready":g.depth() >= 300 && g.steel_made,"next_upgrade":plan.get(target),"blocker":plan.get(target).and_then(|id|g.purchase_blocker(id)),"products":g.products})
         )
         .unwrap()
     );

@@ -205,7 +205,11 @@ try {
         nativeKb: memory ? Number(memory[1]!.replaceAll(",", "")) : null,
         telemetry,
         chunks: Object.keys(status.terrain.chunks).length,
-        shipments: status.shipments.length,
+        shipments: status.transport.segments.reduce(
+          (n: number, segment: any) => n + segment.batches.length,
+          0,
+        ),
+        saveBytes: new TextEncoder().encode(JSON.stringify(status)).length,
         ticks: status.ticks,
       };
       samples.push(sample);
