@@ -36,6 +36,8 @@ const app = Bun.spawn([executable, ...(release ? ["--portable"] : [])], {
   stdout: "pipe",
   stderr: "pipe",
 });
+const stderrLog = new Response(app.stderr).text();
+const stdoutLog = new Response(app.stdout).text();
 let browser: Browser | undefined;
 try {
   for (let i = 0; i < 150; i++) {
@@ -43,9 +45,7 @@ try {
       if ((await fetch(`http://127.0.0.1:${port}/json/version`)).ok) break;
     } catch {}
     if (app.exitCode !== null)
-      throw new Error(
-        `App exited ${app.exitCode}: ${await new Response(app.stderr).text()}`,
-      );
+      throw new Error(`App exited ${app.exitCode}: ${await stderrLog}`);
     await Bun.sleep(200);
   }
   browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
@@ -235,6 +235,46 @@ try {
     path: join(output, "native-game.png"),
     fullPage: true,
   });
+  const portrait = await context.newCDPSession(page);
+  await portrait.send("Emulation.setDeviceMetricsOverride", {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 1,
+    mobile: true,
+  });
+  await portrait.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+  const tap = async (name: string) => {
+    const button = page.getByRole("button", { name, exact: true });
+    await button.scrollIntoViewIfNeeded();
+    const box = await button.boundingBox();
+    if (!box) throw new Error(`Touch target missing: ${name}`);
+    const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    await portrait.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [point],
+    });
+    await portrait.send("Input.dispatchTouchEvent", {
+      type: "touchEnd",
+      touchPoints: [],
+    });
+  };
+  await tap("Settings");
+  await page.locator(".settings").waitFor();
+  await tap("Operations");
+  await tap("Surface ↑");
+  await page.screenshot({
+    path: join(output, "native-portrait.png"),
+    fullPage: true,
+  });
+  if (
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth + 2,
+    )
+  )
+    throw new Error("Portrait page overflows viewport");
+  await portrait.send("Emulation.clearDeviceMetricsOverride");
+  await portrait.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+  await portrait.detach();
   const beforeReset = JSON.parse(await invoke("export_save"));
   await page.getByRole("button", { name: "Records", exact: true }).click();
   await page
@@ -286,8 +326,25 @@ try {
       2,
     ),
   );
+} catch (error) {
+  const page = browser?.contexts()[0]?.pages()[0];
+  if (page) {
+    await page
+      .screenshot({ path: join(output, "native-failure.png"), timeout: 5000 })
+      .catch(() => {});
+    await writeFile(
+      join(output, "native-failure.txt"),
+      `${page.url()}\n${await page
+        .locator("body")
+        .innerText({ timeout: 5000 })
+        .catch(() => "Body unavailable")}`,
+    ).catch(() => {});
+  }
+  throw error;
 } finally {
   await browser?.close();
   app.kill();
   await app.exited;
+  await writeFile(join(output, "native-stderr.log"), await stderrLog);
+  await writeFile(join(output, "native-stdout.log"), await stdoutLog);
 }
