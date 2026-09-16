@@ -17,7 +17,7 @@ Install dependencies only from a Windows shell, never from WSL. Windows executab
 ```powershell
 bun.exe test
 bun.exe run build
-cargo test -p mine-core --locked
+cargo test --workspace --locked
 bun.exe run tauri build --debug --no-bundle
 ```
 
@@ -36,7 +36,23 @@ The unpackaged Windows executable is `target/debug/deepwork.exe`. Browser-only V
 
 ## Current limits against the full design
 
-This is an early playable implementation, **not the finished campaign**. Remaining work is tracked in `IMPLEMENTATION_STATUS.md`. In particular, chunked excavation supports reachable branching frontiers, while transport pathfinding is still pending; production advances in one-second batches; offline simulation replays those batches. Rendering shows representative workers and machinery rather than authoritative transport entities. Mobile builds and live visual acceptance are not yet verified.
+This is a playable implementation, **not a release-validated full campaign**. Remaining work is tracked in `IMPLEMENTATION_STATUS.md`: active offline aggregation, deeper campaign balance, richer district/equipment presentation, and mobile/platform/device verification.
+
+## Verification and packaging
+
+```powershell
+bun.exe run test:browser
+bun.exe run tauri build --debug --no-bundle
+bun.exe run test:native
+bun.exe run test:native test-results 1800
+bun.exe run tauri build --bundles nsis
+bun.exe run test:native test-results 60 release
+cargo run -p mine-core --example balance -- depth 0
+```
+
+Native checks launch the actual Windows WebView2 application with isolated saves. Release checks copy the executable into a temporary directory, enable portable saves and remove development runtimes from the app's PATH. Use `deepwork.exe --portable` to keep `deepwork-data` beside a desktop executable in a writable folder. Normal launches use the platform application-data directory.
+
+The Windows installer is produced under `target/release/bundle/nsis/`. No code-signing certificate is configured. Build success does not replace installer/device testing.
 
 ## Toolchain notes
 

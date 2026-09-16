@@ -1,24 +1,45 @@
 # Implementation status
 
-## Working foundation
+## Playable implementation
 
-Bun 1.4.0 / Vue 3 / Vite / PixiJS frontend and Tauri 2 / Rust backend are implemented. The game includes a local economic loop, persistent excavation, basic progression, optional industry recipes, research, retirement and native save commands.
+- Bun 1.4.0, Vue 3, plain Vite, PixiJS 8 WebGL, Tauri 2 and an authoritative Rust simulation.
+- Fixed 20 Hz production, five-Hz state delivery and changed terrain chunks. Seed and price strings retain integer precision across IPC.
+- Sparse 64×64 excavation masks, reachable pit/shaft/branch frontiers, depth hardness, drill tiers, automatic support construction and groundwater/heat gates.
+- Six worker roles with population-preserving priorities, recruitment and housing. Representative sprites respect visual budgets.
+- Cached deterministic routes through excavated cells, with carrying, wheelbarrows, tunnel carts/trains, shaft lifts and surface conveyors. Cargo transit and full buffers preserve material.
+- Separate sorting/refining queues, raw/refined sales, power throttling and measured production blockers.
+- 56 mineral feeds, 41 recipes, eligible finite trace residues, aluminium/alumina distinction, alloys and advanced components. Startup checks reject inaccessible recipe/module cycles.
+- Tailings, slag and depleted rock ledgers, reclamation, free disposal and bounded visual spoil particles.
+- Material-priced upgrades, pinned reserves, machine versus feed-line capacity forecasts, renewable premium contracts and campaign-unique research rewards.
+- Permanent refined-product collection, including trace products and components after sale/retirement. Cargo policies favour preferred minerals with starvation-free fair slots.
+- Three geological profiles, optional hard-rock/long-haul challenges, three site specialisations, research branches, rank 3/6/10 equipment, presets, museum cross-sections, milestones and headquarters megaproject.
+- Tactical abilities; foreground-only cooldowns. Freight priority accelerates transit; furnace overdrive raises power demand.
+- Capped half-rate offline progress, once-only checkpoints, discoveries/blocker reports and exact fast-forward of completely stalled intervals.
+- Versioned atomic saves, previous-good recovery, exclusive process locks, transactional commands/imports, explicit retirement quotes and portable desktop saves.
+- Responsive desktop/portrait controls, pan/zoom/depth and crew follow, district shortcuts, reduced motion, visual budgets, full/compact/scientific numbers, mineral pattern marks and opt-in mixed machinery/interface audio.
 
-## Required before calling the full plan complete
+## Remaining against the full plan
 
-- Tune excavation policy and automatic support placement; sparse 64×64 masks, reachable frontiers, branching policies and equipment gates are implemented.
-- Model worker roles, route graphs, actual minecarts/trains/lifts, construction and district expansion. Tie each visual actor and building to authoritative state.
-- Run foreground simulation at 20 Hz and send deltas; implement offline boundary-event advancement rather than one-second replay.
-- Separate sorting and refining queues and make each production-strip metric reflect its own measured flow.
-- Introduce site geology and three meaningful site/challenge choices, guaranteed milestone reserves, equipment tiers and material-priced unlocks.
-- Complete automatic upgrade reserves/presets, meaningful specialisation, research-rank 3/6/10 features, museum cross-sections and milestones.
-- Replace abstract one-input trace recipes with graded eligible-stream recovery; add process residue chemistry abstractions without creating material.
-- Implement fresh falling spoil particles, compacted strata, distinct slag/depleted-rock disposal and resource-preserving visual cleanup.
-- Balance the first hour and multi-week progression with headless strategy runs and player testing. Current prices are provisional.
-- Add full audio mix, quality settings, numeric-format choice and colour-independent terrain patterns.
-- Verify mobile lifecycle/import/export, package Android/iOS/macOS/Linux, and test actual touch interaction and target FPS.
-- Run 30-minute memory/visual stress test, restart/import failure scenarios scenarios; concurrent-instance locking and transactional command/import saves are implemented.
+- Aggregate **active** offline production between depletion/buffer events. Active production still uses deterministic ticks; only quiescent intervals skip ahead.
+- Expand route capacity into independently selectable segment buffers/express priorities. Current cargo handoffs use segment travel times and shared loading/arrival capacity.
+- Expand the initial district artwork further. Current presentation includes growing housing, shaft headframes, rail depots, shared processing-module halls, reclamation machinery and ten-level tier badges.
+- Validate multi-week campaign pacing, all geological profiles and endgame strategies with broader headless strategies and human playtests. Current endgame amounts/prices remain provisional.
+- Verify mobile lifecycle, real touch play, native save import/export and Android builds/devices. Android tools are not configured in the current Windows PATH/environment. macOS/Linux/iOS packaging/device checks remain separate.
+- Repeat full-duration stress testing after further simulation/render changes; distinguish JS heap/native working-set samples from total GPU/WebView process memory.
+- Validate installation/uninstallation and clean-machine WebView2 prerequisites. A successful installer build alone does not prove installation behavior.
 
-## Validation scope
+## Local evidence
 
-Rust tests cover deterministic replay, save round-trip, command deduplication, offline equivalence/cap, recipe references and material accounting. Vue templates and production frontend compile under Bun. Windows Tauri compilation and a debug application build have passed. Live UI inspection was blocked by the computer-use helper's workspace-URI error; no visual or mobile acceptance is claimed.
+51 Rust tests and six Bun tests pass locally. Rust tests cover deterministic replay, exact offline parity, clock cap/rollback, accounting, depletion/reclamation, save recovery, command deduplication, retirement quotes, reachable content, support construction, route shortcuts, imports and crew conservation. Bun tests cover catalogue routes, numeric precision, transport interpolation and bounded particle settling.
+
+Windows debug gameplay checks use the actual WebView2 application with isolated saves: live production, purchase, disk checkpoint, reload, tab navigation and corrupt-import rejection. Desktop and 390-pixel portrait browser checks also exercise audio/quality/number controls. This is not mobile-device validation.
+
+`cargo run -p mine-core --example balance -- depth 0` and `-- bulk 0` report a fixed construction-only strategy; they are not an optimal upgrade bot. With segment transport and doubled baseline sorting/refining capacity, depth policy reached conveyor at 4:15, furnace at 11:47, shaft at 30:40 and retirement at 36:54. An earlier bulk-policy run reached conveyor at 3:10 and furnace at 9:38, but remained below retirement depth after four hours without additional throughput upgrades. Re-run after economic/transport changes rather than treating these as fixed guarantees.
+
+Use `bun.exe run test:native test-results 1800` for a 30-minute isolated 1,000-worker stress scenario. Add `release` as the last argument to test a copied release executable in portable mode with development runtimes excluded from its PATH. The harness records retained visual entity counts, sampled JS heap, native working set and rendering diagnostics.
+
+### Recorded stress evidence
+
+A 30-minute native debug baseline with 1,000 simulated workers completed: visible workers stayed capped at 250, particles at 40, sampled JS heap ranged 14.3–80.9 MB and the game process working set 33.9–35.2 MiB. This preceded later route/crew/render changes. Its old instantaneous ticker FPS field is not valid evidence of sustained rendering FPS.
+
+A subsequent one-minute release run used portable data and excluded Bun/Node from the child process PATH. Whole-second rendered-frame samples measured 57–58 FPS with 250 visible workers. This does not establish mobile performance or total WebView/GPU memory usage. Windows NSIS builds succeeded; installation/uninstallation remains untested.
