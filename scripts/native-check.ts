@@ -235,10 +235,14 @@ try {
     path: join(output, "native-game.png"),
     fullPage: true,
   });
-  await page.locator(".world").screenshot({ path: join(output, "native-mine-detail.png") });
+  await page
+    .locator(".world")
+    .screenshot({ path: join(output, "native-mine-detail.png") });
   await page.getByRole("button", { name: "Waste", exact: true }).click();
   await page.waitForTimeout(250);
-  await page.locator(".world").screenshot({ path: join(output, "native-waste-detail.png") });
+  await page
+    .locator(".world")
+    .screenshot({ path: join(output, "native-waste-detail.png") });
   const portrait = await context.newCDPSession(page);
   await portrait.send("Emulation.setDeviceMetricsOverride", {
     width: 390,

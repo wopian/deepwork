@@ -19,6 +19,9 @@ let wasteLabel: Text;
 let t = 0;
 let telemetryTime = 0;
 let telemetryFrames = 0;
+let lastFrameTime = 0;
+const frameIntervals: number[] = [];
+let frameCursor = 0;
 const wasteParticles = new WasteParticles(600);
 let drawnKey = "";
 let lastWaste = 0;
@@ -255,6 +258,11 @@ onMounted(async () => {
   stopWatch = watch(state, draw);
   app.ticker.add((ticker) => {
     if (!app) return;
+    const frameNow = performance.now();
+    if (lastFrameTime > 0) {
+      frameIntervals[frameCursor++ % 120] = frameNow - lastFrameTime;
+    }
+    lastFrameTime = frameNow;
     t += preferences.reducedMotion ? 0 : ticker.deltaTime;
     world.scale.set((app.screen.width / 1100) * zoom);
     if (followCrew && state.value?.removed.length) {
@@ -413,6 +421,15 @@ onMounted(async () => {
       host.value.dataset.fps = String(
         Math.round((telemetryFrames * 1000) / (now - telemetryTime)),
       );
+      const ordered = [...frameIntervals].sort((a, b) => a - b);
+      host.value.dataset.frameP50 = (
+        ordered[Math.floor(ordered.length * 0.5)] ?? 0
+      ).toFixed(2);
+      host.value.dataset.frameP95 = (
+        ordered[
+          Math.min(ordered.length - 1, Math.floor(ordered.length * 0.95))
+        ] ?? 0
+      ).toFixed(2);
       telemetryFrames = 0;
       telemetryTime = now;
       host.value.dataset.workers = String(shown);
