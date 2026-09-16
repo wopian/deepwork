@@ -418,7 +418,19 @@ onMounted(async () => {
       host.value.dataset.workers = String(shown);
       host.value.dataset.particles = String(wasteParticles.items.length);
     }
-    for (const cargo of g?.shipments ?? []) {
+    const cargoBudget = Math.max(
+      0,
+      (low ? 600 : 2000) - wasteParticles.items.length,
+    );
+    const visibleCargo = (g?.shipments ?? []).slice(0, cargoBudget);
+    if (host.value) {
+      host.value.dataset.cargo = String(visibleCargo.length);
+      host.value.dataset.moving = String(
+        visibleCargo.length + wasteParticles.items.length,
+      );
+      host.value.dataset.residentChunks = String(fineTerrain.residentChunks);
+    }
+    for (const cargo of visibleCargo) {
       const progress = 1 - cargo.remaining / cargo.duration;
       const points: [number, number][] = cargo.path?.length
         ? cargo.path.map(([x, y]) => [

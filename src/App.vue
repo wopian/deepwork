@@ -19,6 +19,7 @@ import {
   importSave,
   resetCampaign,
 } from "./game";
+const discoveredMaterials = computed(() => materials.filter((m) => state.value?.discoveries.includes(m.id)));
 const showReset = ref(false);
 const resetText = ref("");
 async function confirmReset() {
@@ -642,9 +643,7 @@ onMounted(start);
       </p>
       <div class="mineral-grid">
         <div
-          v-for="m in materials.filter((m) =>
-            state?.discoveries.includes(m.id),
-          )"
+          v-for="m in discoveredMaterials"
           :key="m.id"
           class="inventory"
         >

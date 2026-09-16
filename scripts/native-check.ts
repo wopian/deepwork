@@ -220,7 +220,10 @@ try {
         JSON.stringify(samples, null, 2),
       );
       console.log(JSON.stringify(sample));
-      if (Number(telemetry.workers) > 250 || Number(telemetry.particles) > 2000)
+      if (
+        Number(telemetry.workers) > 250 ||
+        Number(telemetry.moving ?? telemetry.particles) > 2000
+      )
         throw new Error("Visual entity budget exceeded");
     }
     await page.screenshot({

@@ -52,6 +52,9 @@ export class TerrainView {
         this.cache.delete(id);
       }
   }
+  get residentChunks() {
+    return this.cache.size;
+  }
   clear() {
     for (const entry of this.cache.values())
       entry.sprite.destroy({ texture: true, textureSource: true });
