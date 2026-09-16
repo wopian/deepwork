@@ -144,6 +144,14 @@ export const upgrades = [
 export function cost(id: string) {
   return state.value?.quotes[id] ?? "0";
 }
+let lifecycleRegistered = false;
+async function backgroundState(background: boolean) {
+  try {
+    state.value = await invoke<Game>("set_background", { background });
+  } catch (e) {
+    error.value = String(e);
+  }
+}
 export async function start() {
   if (!native) {
     error.value =
@@ -164,6 +172,19 @@ export async function start() {
       state.value = g;
     };
     state.value = await invoke<Game>("connect", { channel });
+    await backgroundState(document.hidden);
+    if (!lifecycleRegistered) {
+      lifecycleRegistered = true;
+      document.addEventListener(
+        "visibilitychange",
+        () => void backgroundState(document.hidden),
+      );
+      window.addEventListener("pagehide", () => void backgroundState(true));
+      window.addEventListener(
+        "pageshow",
+        () => void backgroundState(document.hidden),
+      );
+    }
   } catch (e) {
     error.value = String(e);
   }

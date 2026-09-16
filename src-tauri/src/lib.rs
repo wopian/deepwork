@@ -4,13 +4,17 @@ use persistence::{recover, save};
 use std::{
     fs,
     path::PathBuf,
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{ipc::Channel, Manager, State};
 struct Runtime {
     _save_lock: fs::File,
     game: Mutex<Game>,
+    suspended: AtomicBool,
     path: PathBuf,
     channel: Mutex<Option<Channel<Update>>>,
 }
@@ -98,9 +102,37 @@ fn connect(channel: Channel<Update>, state: State<Runtime>) -> Result<Snapshot, 
     *state.channel.lock().map_err(|e| e.to_string())? = Some(channel);
     Ok(state.game.lock().map_err(|e| e.to_string())?.clone().into())
 }
+/// Persist before publishing either transition. Repeated platform/webview events
+/// are idempotent; a crash after resume cannot grant the same interval again.
+fn transition_background(
+    state: &Runtime,
+    background: bool,
+    timestamp: u64,
+) -> Result<Snapshot, String> {
+    let mut game = state.game.lock().map_err(|e| e.to_string())?;
+    if state.suspended.load(Ordering::Relaxed) != background {
+        let mut candidate = game.clone();
+        if background {
+            candidate.last_saved = timestamp;
+        } else {
+            candidate.advance_offline(timestamp, &materials());
+        }
+        save(&state.path, &candidate)?;
+        *game = candidate;
+        state.suspended.store(background, Ordering::Relaxed);
+    }
+    Ok(game.clone().into())
+}
+#[tauri::command]
+fn set_background(background: bool, state: State<Runtime>) -> Result<Snapshot, String> {
+    transition_background(&state, background, now())
+}
 #[tauri::command]
 fn command(action: Action, state: State<Runtime>) -> Result<Snapshot, String> {
     let mut g = state.game.lock().map_err(|e| e.to_string())?;
+    if state.suspended.load(Ordering::Relaxed) {
+        return Err("Resume the game before issuing commands".into());
+    }
     let mut candidate = g.clone();
     candidate.action(action)?;
     candidate.last_saved = now();
@@ -116,6 +148,9 @@ fn export_save(state: State<Runtime>) -> Result<String, String> {
 #[tauri::command]
 fn import_save(data: String, state: State<Runtime>) -> Result<Snapshot, String> {
     let mut game = state.game.lock().map_err(|e| e.to_string())?;
+    if state.suspended.load(Ordering::Relaxed) {
+        return Err("Resume the game before importing a save".into());
+    }
     let mut candidate = persistence::decode(&data)?;
     candidate.advance_offline(now(), &materials());
     save(&state.path, &candidate)?;
@@ -154,6 +189,7 @@ pub fn run() {
             app.manage(Runtime {
                 _save_lock: save_lock,
                 game: Mutex::new(game),
+                suspended: AtomicBool::new(false),
                 path,
                 channel: Mutex::new(None),
             });
@@ -171,8 +207,15 @@ pub fn run() {
                     let state = handle.state::<Runtime>();
                     if let Ok(mut g) = state.game.lock() {
                         let current = now();
-                        if current.saturating_sub(previous) > 2 {
-                            g.last_saved = previous;
+                        if state.suspended.load(Ordering::Relaxed) {
+                            previous = current;
+                            next_tick = std::time::Instant::now();
+                            continue;
+                        }
+                        // A lifecycle resume may already have consumed this clock gap.
+                        let gap_start = previous.max(g.last_saved);
+                        if current.saturating_sub(gap_start) > 2 {
+                            g.last_saved = gap_start;
                             g.advance_offline(current, &cat);
                             next_tick = std::time::Instant::now();
                             if let Err(e) = save(&state.path, &g) {
@@ -206,15 +249,33 @@ pub fn run() {
             connect,
             command,
             export_save,
-            import_save
+            import_save,
+            set_background
         ])
         .build(tauri::generate_context!())
         .expect("Tauri startup failed")
         .run(|handle, event| {
+            #[cfg(mobile)]
+            if let tauri::RunEvent::WindowEvent { event, .. } = &event {
+                let background = match event {
+                    tauri::WindowEvent::Suspended => Some(true),
+                    tauri::WindowEvent::Resumed => Some(false),
+                    _ => None,
+                };
+                if let Some(background) = background {
+                    if let Err(e) =
+                        transition_background(&handle.state::<Runtime>(), background, now())
+                    {
+                        eprintln!("Lifecycle checkpoint failed: {e}");
+                    }
+                }
+            }
             if let tauri::RunEvent::Exit = event {
                 let state = handle.state::<Runtime>();
                 if let Ok(mut g) = state.game.lock() {
-                    g.last_saved = now();
+                    if !state.suspended.load(Ordering::Relaxed) {
+                        g.last_saved = now();
+                    }
                     let _ = save(&state.path, &g);
                 };
             }
@@ -248,5 +309,41 @@ mod stream_tests {
         assert!(stream.update(&game).state.game.terrain.chunks.is_empty());
         game.site += 1;
         assert!(stream.update(&game).reset);
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    #[test]
+    fn repeated_lifecycle_events_apply_offline_interval_once() {
+        let directory = std::env::temp_dir().join(format!(
+            "deepwork-lifecycle-{}-{}",
+            std::process::id(),
+            now()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let state = Runtime {
+            _save_lock: persistence::lock(&directory.join("mine.lock")).unwrap(),
+            game: Mutex::new(Game::default()),
+            suspended: AtomicBool::new(false),
+            path: directory.join("mine.json"),
+            channel: Mutex::new(None),
+        };
+        state.game.lock().unwrap().cooldowns = [100; 4];
+        transition_background(&state, true, 100).unwrap();
+        transition_background(&state, true, 110).unwrap();
+        assert_eq!(state.game.lock().unwrap().last_saved, 100);
+        let resumed = transition_background(&state, false, 120).unwrap();
+        assert_eq!(resumed.game.offline.as_ref().unwrap().effective, 10);
+        assert_eq!(resumed.game.ticks, 200);
+        assert_eq!(resumed.game.cooldowns, [100; 4]);
+        let repeated = transition_background(&state, false, 140).unwrap();
+        assert_eq!(repeated.game.ticks, 200);
+        let recovered = recover(&state.path).unwrap().unwrap();
+        assert_eq!(recovered.last_saved, 120);
+        assert_eq!(recovered.ticks, 200);
+        drop(state);
+        fs::remove_dir_all(directory).unwrap();
     }
 }

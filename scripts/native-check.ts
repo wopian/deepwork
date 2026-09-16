@@ -144,6 +144,18 @@ try {
   )
     throw new Error("UI import did not restore exported state");
   await page.getByRole("button", { name: "Operations", exact: true }).click();
+  const paused = await invoke("set_background", { background: true });
+  await page.waitForTimeout(2200);
+  const sleeping = JSON.parse(await invoke("export_save"));
+  if (sleeping.ticks !== paused.ticks)
+    throw new Error("Background simulation advanced at foreground rate");
+  const resumed = await invoke("set_background", { background: false });
+  if (
+    !resumed.offline ||
+    resumed.offline.effective < 1 ||
+    resumed.ticks !== paused.ticks + resumed.offline.effective * 20
+  )
+    throw new Error("Resume did not apply half-rate offline interval");
   if (stressSeconds) {
     const fixture = JSON.parse(await invoke("export_save"));
     const requirements = await Bun.file("content/upgrades.json").json();
