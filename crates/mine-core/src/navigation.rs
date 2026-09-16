@@ -1,6 +1,6 @@
 //! Floor routes through the pit ramp and lift-connected underground portals.
 use crate::{geometry::WIDTH, terrain::Terrain};
-const PIT: u32 = 192;
+const PIT: u32 = crate::geometry::PIT_ROWS;
 const SHAFT: u32 = WIDTH / 2;
 const CLEARANCE: u32 = 4;
 fn clear(t: &Terrain, x: u32, feet: u32) -> bool {

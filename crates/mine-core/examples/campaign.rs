@@ -16,14 +16,30 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
         act(g, "buy", "worker", 0);
     }
     for i in 0..3 {
-        if ["iron", "coke", "lime"].contains(&g.contracts[i].product.as_str())
-            && (g.level("shaft") == 0 || !g.steel_made)
-        {
+        if g.level("supports") == 0 {
             continue;
         }
-        if g.contracts[i].complete {
-            act(g, "new_contract", "", i as u64);
+        let c = &g.contracts[i];
+        let committed = g
+            .pinned
+            .as_ref()
+            .and_then(|id| requirements().iter().find(|u| u.id == *id))
+            .and_then(|u| u.inputs.get(&c.product))
+            .copied()
+            .unwrap_or(0);
+        let recipe_hold = if recipes()
+            .iter()
+            .any(|r| g.level(&r.building) > 0 && r.inputs.contains_key(&c.product))
+        {
+            8 * mine_core::geometry::UNITS
         } else {
+            0
+        };
+        if c.complete {
+            act(g, "new_contract", "", i as u64);
+        } else if g.products.get(&c.product).copied().unwrap_or(0)
+            >= c.amount + committed.max(recipe_hold)
+        {
             act(g, "contract", "", i as u64);
         }
     }

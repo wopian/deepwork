@@ -568,94 +568,106 @@ impl Game {
             * UNITS as f64
             * pacing::get().worker_rate) as u64
     }
-    fn next_frontier(&self, cat: &[Material]) -> Option<u32> {
+    pub fn work_route(&self) -> &[[u32; 2]] {
+        &self.haul_path
+    }
+    fn next_frontier(&self, _cat: &[Material]) -> Option<u32> {
         let depth_limit = if self.level("shaft") == 0 {
             48
         } else {
             300 * (1 + self.level("shaft"))
         };
-        self.terrain
-            .frontier
-            .iter()
-            .filter_map(|&key| {
-                let (x, y) = (key % WIDTH, key / WIDTH);
-                if geometry::depth(y) >= depth_limit {
+        let pit_complete = self
+            .terrain
+            .contains(geometry::PIT_LAST_X, geometry::PIT_ROWS - 1);
+        let mut candidates = self.terrain.frontier.iter().filter_map(|&key| {
+            let (x, y) = (key % WIDTH, key / WIDTH);
+            if geometry::depth(y) >= depth_limit {
+                return None;
+            }
+            let surface = y < 192;
+            if !surface && !pit_complete {
+                return None;
+            }
+            if surface {
+                let margin = 16 + (y / 24) * 24;
+                if x < 16 + y || x >= WIDTH - margin {
                     return None;
                 }
-                let surface = y < 192;
-                if surface {
-                    let margin = 16 + (y / 24) * 24;
-                    if x < 16 + y || x >= WIDTH - margin {
+            } else {
+                let shaft = x.abs_diff(WIDTH / 2) < 4;
+                // Complete shaft clearance before descending to the next cutting face.
+                if shaft
+                    && y > 192
+                    && !(WIDTH / 2 - 3..=WIDTH / 2 + 3).all(|sx| self.terrain.contains(sx, y - 1))
+                {
+                    return None;
+                }
+                let drive = y % 96 < 8 && (32..WIDTH - 32).contains(&x);
+                let stope = self.policy == "vein"
+                    && y % 96 >= 80
+                    && x % 64 < 48
+                    && self
+                        .terrain
+                        .known_material(x, y)
+                        .is_some_and(|id| self.priorities.contains(&id));
+                if stope && !self.terrain.contains(x, (y / 96 + 1) * 96 + 7) {
+                    return None;
+                }
+                if !shaft && !drive && !stope {
+                    return None;
+                }
+                if !shaft && drive {
+                    let inner = if x < WIDTH / 2 { x + 1 } else { x - 1 };
+                    let top = y / 96 * 96;
+                    // Excavate the lift landing before opening either tunnel portal.
+                    if !(top..top + 8).all(|row| self.terrain.contains(WIDTH / 2, row)) {
                         return None;
                     }
-                } else {
-                    let shaft = x.abs_diff(WIDTH / 2) < 4;
-                    // Complete shaft clearance before descending to the next cutting face.
-                    if shaft
-                        && y > 192
-                        && !(WIDTH / 2 - 3..=WIDTH / 2 + 3)
-                            .all(|sx| self.terrain.contains(sx, y - 1))
+                    if inner.abs_diff(WIDTH / 2) >= 4
+                        && !(top..top + 8).all(|row| self.terrain.contains(inner, row))
                     {
                         return None;
                     }
-                    let drive = y % 96 < 8 && (32..WIDTH - 32).contains(&x);
-                    let stope = self.policy == "vein"
-                        && y % 96 >= 80
-                        && x % 64 < 48
-                        && self.terrain.is_revealed(x, y)
-                        && self.priorities.contains(&self.cell(x, y, cat));
-                    if stope && !self.terrain.contains(x, (y / 96 + 1) * 96 + 7) {
-                        return None;
-                    }
-                    if !shaft && !drive && !stope {
-                        return None;
-                    }
-                    if !shaft && drive {
-                        let inner = if x < WIDTH / 2 { x + 1 } else { x - 1 };
-                        let top = y / 96 * 96;
-                        // Excavate the lift landing before opening either tunnel portal.
-                        if !(top..top + 8).all(|row| self.terrain.contains(WIDTH / 2, row)) {
-                            return None;
-                        }
-                        if inner.abs_diff(WIDTH / 2) >= 4
-                            && !(top..top + 8).all(|row| self.terrain.contains(inner, row))
-                        {
-                            return None;
-                        }
-                    }
                 }
-                if y >= 1200 && (self.level("supports") == 0 || y >= self.support_rows) {
-                    return None;
-                }
-                if y >= 2800 && self.level("pump") == 0 {
-                    return None;
-                }
-                if y >= 6000 && self.level("ventilation") == 0 {
-                    return None;
-                }
-                // Bench completion outranks depth preference. Unknown rock never informs ore targeting.
-                let score = if surface {
-                    y as i64 * 1024 + x as i64
-                } else {
-                    match self.policy.as_str() {
-                        "depth" => -(y as i64) * 8 + x.abs_diff(WIDTH / 2) as i64,
-                        "vein" => {
-                            y as i64
-                                - if self.terrain.is_revealed(x, y)
-                                    && self.priorities.contains(&self.cell(x, y, cat))
-                                {
-                                    160
-                                } else {
-                                    0
-                                }
-                        }
-                        _ => y as i64,
+            }
+            if y >= 1200 && (self.level("supports") == 0 || y >= self.support_rows) {
+                return None;
+            }
+            if y >= 2800 && self.level("pump") == 0 {
+                return None;
+            }
+            if y >= 6000 && self.level("ventilation") == 0 {
+                return None;
+            }
+            // Bench completion outranks depth preference. Unknown rock never informs ore targeting.
+            let score = if surface {
+                y as i64 * 1024 + x as i64
+            } else {
+                match self.policy.as_str() {
+                    "depth" => -(y as i64) * 8 + x.abs_diff(WIDTH / 2) as i64,
+                    "vein" => {
+                        y as i64
+                            - if self
+                                .terrain
+                                .known_material(x, y)
+                                .is_some_and(|id| self.priorities.contains(&id))
+                            {
+                                160
+                            } else {
+                                0
+                            }
                     }
-                };
-                Some((score, key))
-            })
-            .min()
-            .map(|(_, key)| key)
+                    _ => y as i64,
+                }
+            };
+            Some((score, key))
+        });
+        if !pit_complete || self.policy == "bulk" {
+            candidates.next().map(|(_, key)| key)
+        } else {
+            candidates.min().map(|(_, key)| key)
+        }
     }
     /// No input, pending arrival, eligible recipe or reachable excavation event can fire.
     fn quiescent(&self, cat: &[Material]) -> bool {
@@ -668,8 +680,15 @@ impl Game {
                 .ore
                 .values()
                 .chain(self.hauled.values())
-                .chain(self.concentrate.values())
                 .any(|q| *q > 0)
+            || self.concentrate.iter().any(|(&id, &q)| {
+                let held = if self.level("furnace") == 0 && matches!(id, 3 | 5 | 6) {
+                    pacing::get().starter_hold_units * UNITS * if id == 3 { 2 } else { 1 }
+                } else {
+                    0
+                };
+                q > held
+            })
             || self.depleted > 0
             || (self.level("slagcrusher") > 0 && self.slag > 0)
             || (self.level("reclaimer") > 0 && self.tailings.values().any(|q| *q > 0))
@@ -705,9 +724,21 @@ impl Game {
                     .unwrap_or(0)
                     > 0;
             }
-            r.inputs
-                .iter()
-                .all(|(p, n)| self.products.get(p).copied().unwrap_or(0) >= *n)
+            r.inputs.iter().all(|(p, n)| {
+                let committed = self
+                    .pinned
+                    .as_ref()
+                    .and_then(|id| requirements().iter().find(|u| u.id == *id))
+                    .and_then(|u| u.inputs.get(p))
+                    .copied()
+                    .unwrap_or(0);
+                self.products
+                    .get(p)
+                    .copied()
+                    .unwrap_or(0)
+                    .saturating_sub(committed)
+                    >= *n
+            })
         })
     }
     fn support_target(&self) -> u32 {
@@ -1053,7 +1084,7 @@ impl Game {
             let progression_hold =
                 if matches!(self.pinned.as_deref(), Some("furnace" | "steelworks")) {
                     match p.as_str() {
-                        "iron" => 4 * UNITS,
+                        "iron" => 6 * UNITS,
                         "coke" | "lime" => 2 * UNITS,
                         _ => 0,
                     }
@@ -1646,7 +1677,7 @@ impl Game {
                 next.ranks = self.ranks.clone();
                 next.records = self.records.clone();
                 let mut section = vec![0; 4096];
-                let rows = (self.depth() / 2).max(1);
+                let rows = (self.depth() * geometry::CELLS_PER_METRE).max(1);
                 for y in 0..64 {
                     for x in 0..64 {
                         section[(y * 64 + x) as usize] =
@@ -2536,5 +2567,28 @@ mod offline_event_tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod pit_access_tests {
+    use super::*;
+    #[test]
+    fn depth_policy_completes_bench_before_starting_shaft() {
+        let mut g = Game::default();
+        g.policy = "depth".into();
+        g.levels.insert("shaft".into(), 1);
+        let cat = materials();
+        for y in 0..192 {
+            for x in 16 + y..WIDTH - (16 + (y / 24) * 24) {
+                if y == 191 && x >= 254 {
+                    break;
+                }
+                g.terrain.excavate(x, y);
+                g.heights[x as usize] = y + 1;
+            }
+        }
+        let next = g.next_frontier(&cat).unwrap();
+        assert_eq!([next % WIDTH, next / WIDTH], [254, 191]);
     }
 }

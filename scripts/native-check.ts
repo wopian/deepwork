@@ -204,6 +204,8 @@ try {
         heapBytes: metrics.find((m: any) => m.name === "JSHeapUsedSize")?.value,
         nativeKb: memory ? Number(memory[1]!.replaceAll(",", "")) : null,
         telemetry,
+        depthMetres: Math.max(...status.heights) / 4,
+        excavated: status.excavated,
         chunks: Object.keys(status.terrain.chunks).length,
         shipments: status.transport.segments.reduce(
           (n: number, segment: any) => n + segment.batches.length,

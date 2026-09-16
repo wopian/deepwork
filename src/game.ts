@@ -30,6 +30,7 @@ export interface Game {
   priorities: number[];
   reserve: Record<string, number>;
   pinned: string | null;
+  work_route: [number, number][];
   shipments: {
     material: number;
     amount: number;

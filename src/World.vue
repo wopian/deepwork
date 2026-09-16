@@ -324,6 +324,26 @@ onMounted(async () => {
     for (const particle of wasteParticles.items) {
       rect(actors, particle.x, particle.y, 3, 3, 0x8c9ba5);
     }
+    const access = g?.work_route ?? [];
+    for (let i = 1; i < access.length; i++) {
+      const a = access[i - 1]!,
+        b = access[i]!;
+      if (Math.max(a[1], b[1]) < 192) continue;
+      const ax = 235 + a[0] * CELL_PIXEL,
+        ay = 208 + a[1] * CELL_PIXEL;
+      const bx = 235 + b[0] * CELL_PIXEL,
+        by = 208 + b[1] * CELL_PIXEL;
+      if (a[0] === b[0]) {
+        rect(actors, ax - 2, Math.min(ay, by), 1, Math.abs(ay - by), 0x8c9ba5);
+        rect(actors, ax + 3, Math.min(ay, by), 1, Math.abs(ay - by), 0x8c9ba5);
+      } else if (a[1] === b[1]) {
+        rect(actors, Math.min(ax, bx), ay + 1, Math.abs(ax - bx), 1, 0xa67548);
+        for (let sx = Math.min(ax, bx); sx <= Math.max(ax, bx); sx += 16) {
+          rect(actors, sx, ay - 6, 1, 7, 0xa67548);
+          rect(actors, sx, ay - 6, 8, 1, 0xa67548);
+        }
+      }
+    }
     const crew = g?.crew ?? { diggers: 6, haulers: 3 };
     let shown = 0;
     const workerBudget = low ? 100 : 250;
@@ -340,8 +360,9 @@ onMounted(async () => {
               )
             ];
           if (cell) {
-            x = 235 + cell.x * CELL_PIXEL;
-            y = 208 + (cell.y + 1) * CELL_PIXEL;
+            const feet = g?.work_route?.[0] ?? [cell.x, cell.y];
+            x = 235 + feet[0]! * CELL_PIXEL;
+            y = 208 + (feet[1]! + 1) * CELL_PIXEL;
           }
         } else if (role === "haulers") {
           const cargo = g?.shipments[i % Math.max(1, g.shipments.length)];

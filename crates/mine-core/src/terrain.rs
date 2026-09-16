@@ -42,6 +42,13 @@ impl Terrain {
             .get(&chunk_id(x, y))
             .is_some_and(|bytes| bytes[index / 8] & (1 << (index % 8)) != 0)
     }
+    pub fn known_material(&self, x: u32, y: u32) -> Option<usize> {
+        self.visible
+            .get(&chunk_id(x, y))
+            .and_then(|pixels| pixels.get(bit_index(x, y)))
+            .filter(|&&id| id != 255)
+            .map(|&id| id as usize)
+    }
     pub fn is_revealed(&self, x: u32, y: u32) -> bool {
         let index = bit_index(x, y);
         self.revealed
