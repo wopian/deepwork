@@ -1,17 +1,37 @@
 import { chromium, type Browser } from "playwright-core";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  writeFile,
+  copyFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 const stressSeconds = Math.max(0, Number(process.argv[3] ?? 0));
 const output = resolve(process.argv[2] ?? "test-results");
 await mkdir(output, { recursive: true });
 const data = await mkdtemp(join(tmpdir(), "deepwork-native-"));
-const app = Bun.spawn([resolve("target/debug/deepwork.exe")], {
+const release = process.argv[4] === "release";
+const executable = release
+  ? join(data, "deepwork.exe")
+  : resolve("target/debug/deepwork.exe");
+if (release) await copyFile(resolve("target/release/deepwork.exe"), executable);
+const saves = release ? join(data, "deepwork-data") : data;
+const reservation = Bun.serve({
+  hostname: "127.0.0.1",
+  port: 0,
+  fetch: () => new Response("reserved"),
+});
+const port = reservation.port;
+await reservation.stop(true);
+const app = Bun.spawn([executable, ...(release ? ["--portable"] : [])], {
   env: {
     ...process.env,
+    ...(release ? { PATH: "C:\\Windows\\System32;C:\\Windows" } : {}),
     DEEPWORK_TEST_DATA_DIR: data,
     WEBVIEW2_USER_DATA_FOLDER: join(data, "webview"),
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: "--remote-debugging-port=9224",
+    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
   },
   stdout: "pipe",
   stderr: "pipe",
@@ -20,7 +40,7 @@ let browser: Browser | undefined;
 try {
   for (let i = 0; i < 150; i++) {
     try {
-      if ((await fetch("http://127.0.0.1:9224/json/version")).ok) break;
+      if ((await fetch(`http://127.0.0.1:${port}/json/version`)).ok) break;
     } catch {}
     if (app.exitCode !== null)
       throw new Error(
@@ -28,7 +48,7 @@ try {
       );
     await Bun.sleep(200);
   }
-  browser = await chromium.connectOverCDP("http://127.0.0.1:9224");
+  browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
   const context = browser.contexts()[0]!;
   const page = context.pages()[0] ?? (await context.waitForEvent("page"));
   page.on("console", (msg) => console.log("WEBVIEW", msg.type(), msg.text()));
@@ -70,7 +90,7 @@ try {
   });
   if (purchased.workers !== advanced.workers + 1)
     throw new Error("Worker purchase failed");
-  const disk = JSON.parse(await readFile(join(data, "mine.json"), "utf8"));
+  const disk = JSON.parse(await readFile(join(saves, "mine.json"), "utf8"));
   if (disk.workers !== purchased.workers)
     throw new Error("Purchase was not checkpointed");
   let rejected = false;

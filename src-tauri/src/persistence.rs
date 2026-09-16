@@ -24,6 +24,13 @@ pub fn load(path: &Path) -> Result<Game, String> {
     let raw = fs::read_to_string(path).map_err(|e| e.to_string())?;
     decode(&raw)
 }
+pub fn recover(path: &Path) -> Result<Option<Game>, String> {
+    let backup = path.with_extension("bak");
+    if !path.exists() && !backup.exists() {
+        return Ok(None);
+    }
+    load(path).or_else(|_| load(&backup)).map(Some)
+}
 pub fn decode(raw: &str) -> Result<Game, String> {
     if raw.len() > 32_000_000 {
         return Err("Save exceeds 32 MB".into());
@@ -77,6 +84,18 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+    #[test]
+    fn missing_primary_recovers_previous_good_checkpoint() {
+        let t = Temp::new();
+        let path = t.0.join("mine.json");
+        let mut game = Game::default();
+        game.credits = 12;
+        save(&path, &game).unwrap();
+        game.credits = 34;
+        save(&path, &game).unwrap();
+        fs::remove_file(&path).unwrap();
+        assert_eq!(recover(&path).unwrap().unwrap().credits, 12);
     }
     #[test]
     fn exclusive_lock_releases_on_drop() {

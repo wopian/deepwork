@@ -13,5 +13,5 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun test
       - run: ./scripts/check-no-node.ps1
-      - run: cargo test -p mine-core --locked
-      - run: cargo check -p deepwork --locked
+      - run: cargo test --workspace --locked
+      - run: bun run test:browser

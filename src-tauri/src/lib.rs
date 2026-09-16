@@ -1,6 +1,6 @@
 mod persistence;
 use mine_core::{materials, Action, Game};
-use persistence::{load, save};
+use persistence::{recover, save};
 use std::{
     fs,
     path::PathBuf,
@@ -125,6 +125,15 @@ pub fn run() {
         .setup(|app| {
             mine_core::content::validate().map_err(std::io::Error::other)?;
             let dir = app.path().app_data_dir()?;
+            #[cfg(not(mobile))]
+            let dir = if std::env::args().any(|arg| arg == "--portable") {
+                std::env::current_exe()?
+                    .parent()
+                    .ok_or_else(|| std::io::Error::other("Executable directory unavailable"))?
+                    .join("deepwork-data")
+            } else {
+                dir
+            };
             // Integration tests use isolated saves; release builds ignore this override.
             #[cfg(debug_assertions)]
             let dir = std::env::var_os("DEEPWORK_TEST_DATA_DIR")
@@ -134,13 +143,9 @@ pub fn run() {
             let save_lock =
                 persistence::lock(&dir.join("mine.lock")).map_err(std::io::Error::other)?;
             let path = dir.join("mine.json");
-            let mut game = if path.exists() {
-                load(&path)
-                    .or_else(|_| load(&path.with_extension("bak")))
-                    .map_err(std::io::Error::other)?
-            } else {
-                Game::default()
-            };
+            let mut game = recover(&path)
+                .map_err(std::io::Error::other)?
+                .unwrap_or_default();
             game.advance_offline(now(), &materials());
             save(&path, &game).map_err(std::io::Error::other)?;
             app.manage(Runtime {
