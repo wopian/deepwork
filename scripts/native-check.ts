@@ -55,6 +55,7 @@ try {
   page.on("console", (msg) => console.log("WEBVIEW", msg.type(), msg.text()));
   page.on("pageerror", (e) => console.log("WEBVIEW ERROR", e.message));
   console.log("Native URL", page.url());
+  console.log("Isolated automated acceptance window; temporary save", saves);
   await page.waitForLoadState("domcontentloaded");
   await page
     .locator("canvas")
@@ -190,9 +191,10 @@ try {
     while (Date.now() - started < stressSeconds * 1000) {
       await page.waitForTimeout(10000);
       const { metrics } = await cdp.send("Performance.getMetrics");
-      const telemetry = await page
-        .locator(".world")
-        .evaluate((el) => ({ ...(el as HTMLElement).dataset }));
+      const telemetry = await page.evaluate(() => {
+        const world = document.querySelector<HTMLElement>(".world");
+        return world ? { ...world.dataset } : { renderHidden: "true" };
+      });
       const status = JSON.parse(await invoke("export_save"));
       const processInfo = Bun.spawnSync([
         "tasklist.exe",
@@ -230,6 +232,7 @@ try {
       )
         throw new Error("Visual entity budget exceeded");
     }
+    await page.getByRole("button", { name: "Operations", exact: true }).click();
     await page.screenshot({
       path: join(output, "native-stress.png"),
       fullPage: true,
