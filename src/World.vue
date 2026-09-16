@@ -14,6 +14,7 @@ let world: Container;
 let terrain: Graphics;
 let actors: Graphics;
 let t = 0;
+let telemetryTime = 0;
 const wasteParticles = new WasteParticles(600);
 let drawnKey = "";
 let lastWaste = 0;
@@ -298,6 +299,12 @@ onMounted(async () => {
             0x8c9ba5,
           );
       }
+    }
+    if (host.value && performance.now() - telemetryTime > 1000) {
+      telemetryTime = performance.now();
+      host.value.dataset.fps = String(Math.round(app.ticker.FPS));
+      host.value.dataset.workers = String(shown);
+      host.value.dataset.particles = String(wasteParticles.items.length);
     }
     for (const cargo of g?.shipments ?? []) {
       const progress = 1 - cargo.remaining / cargo.duration;
