@@ -103,6 +103,10 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
         && g.depth() >= 300
         && g.steel_made
         && g.research_invested() < research_goal
+        // Commission the first electrolysis line before dismantling the site.
+        // Otherwise a five-second strategy cadence can skip its first output
+        // and falsely report precision materials weeks after they were usable.
+        && (g.level("electrolytic") == 0 || g.collection.contains("aluminium"))
         && (BUILD_ORDER.iter().any(|id| g.level(id) == 0) || endgame_known)
     {
         act(g, "retire", "", (g.site % 3) as u64);
@@ -477,6 +481,29 @@ mod strategy_tests {
         strategy(&mut held, "bulk", false);
         assert!(!held.contracts[0].complete);
         assert_eq!(held.products["magnets"], 10 * mine_core::geometry::UNITS);
+    }
+    #[test]
+    fn first_electrolysis_output_precedes_research_retirement() {
+        let mut g = Game::new(42, 2);
+        g.heights[0] = 1200;
+        g.steel_made = true;
+        g.credits = 0;
+        g.ranks.insert("excavation".into(), 3);
+        g.ranks.insert("metallurgy".into(), 5);
+        for id in BUILD_ORDER.iter().take_while(|id| **id != "trace") {
+            g.levels.insert((*id).into(), 1);
+        }
+        strategy(&mut g, "bulk", false);
+        assert_eq!(
+            g.site, 2,
+            "Do not dismantle an uncommissioned first electrolysis line"
+        );
+        g.collection.insert("aluminium".into());
+        strategy(&mut g, "bulk", false);
+        assert_eq!(
+            g.site, 3,
+            "Resume voluntary research retirement after first output"
+        );
     }
     #[test]
     fn first_visit_funds_processing_before_stockpiling_late_industry_inputs() {
