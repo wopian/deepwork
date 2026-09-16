@@ -115,6 +115,35 @@ try {
   ]) {
     await page.getByRole("button", { name, exact: true }).click();
   }
+  await page.getByLabel("Cargo scheduling").selectOption("preferred");
+  await page.waitForFunction(async () => {
+    const data = await (window as any).__TAURI_INTERNALS__.invoke(
+      "export_save",
+    );
+    return JSON.parse(data).cargo_policy === "preferred";
+  });
+  // Exercise the actual file input/download path, not only IPC commands.
+  await page.getByRole("button", { name: "Records", exact: true }).click();
+  const downloadEvent = page.waitForEvent("download", { timeout: 15000 });
+  await page.getByRole("button", { name: "Export save", exact: true }).click();
+  const download = await downloadEvent;
+  const exportedPath = join(data, "exported-save.json");
+  await download.saveAs(exportedPath);
+  const exported = JSON.parse(await readFile(exportedPath, "utf8"));
+  if (
+    exported.workers !== purchased.workers ||
+    exported.cargo_policy !== "preferred"
+  )
+    throw new Error("UI export lost authoritative state");
+  await page.locator('input[type="file"]').setInputFiles(exportedPath);
+  await page.waitForTimeout(500);
+  const imported = JSON.parse(await invoke("export_save"));
+  if (
+    imported.workers !== exported.workers ||
+    imported.cargo_policy !== "preferred"
+  )
+    throw new Error("UI import did not restore exported state");
+  await page.getByRole("button", { name: "Operations", exact: true }).click();
   if (stressSeconds) {
     const fixture = JSON.parse(await invoke("export_save"));
     const requirements = await Bun.file("content/upgrades.json").json();
