@@ -313,6 +313,7 @@ try {
     throw new Error("Portrait page overflows viewport");
   const transportBefore = JSON.parse(await invoke("export_save"));
   await tapTarget(page.locator(".transport-panel summary"));
+  await page.locator(".transport-cargo").first().waitFor({ state: "visible" });
   const loadingBay = page.locator(".transport-station").first();
   await tapTarget(
     loadingBay.getByText("Prefer selected minerals", { exact: true }),

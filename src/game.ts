@@ -71,6 +71,8 @@ export interface Game {
       utilisation: number;
       demand: number;
       batches: { amount: number }[];
+      duration_ms: number;
+      rate: number;
     }[];
   };
   crew: Record<string, number>;

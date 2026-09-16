@@ -38,6 +38,8 @@ async function confirmReset() {
     resetText.value = "";
   }
 }
+const batchTotal = (batches: { amount: number }[]) =>
+  batches.reduce((total, batch) => total + batch.amount, 0);
 const cargoTotal = (cargo: Record<string, number>) =>
   Object.values(cargo).reduce((sum, quantity) => sum + quantity, 0);
 const materialUpgrades = upgradeRequirements.filter(
@@ -310,7 +312,10 @@ onMounted(start);
                 {{ format(station.outgoing / RESOURCE_UNIT) }} this second</span
               >
               <button
-                :disabled="station.level >= 50"
+                :disabled="
+                  station.level >= 50 ||
+                  BigInt(state.credits) < BigInt(station.quote)
+                "
                 @click="act('buffer', station.id)"
               >
                 Buffer + · {{ format(station.quote) }} credits
@@ -343,6 +348,35 @@ onMounted(start);
                       : "Flowing"
                   }}</span
                 >
+                <span class="transport-cargo">
+                  In transit
+                  {{
+                    format(
+                      batchTotal(state.transport.segments[index]!.batches) /
+                        RESOURCE_UNIT,
+                    )
+                  }}
+                  /
+                  {{
+                    format(
+                      state.transport.segments[index]!.capacity / RESOURCE_UNIT,
+                    )
+                  }}
+                  units
+                </span>
+                <span>
+                  Nominal cycle
+                  {{
+                    format(state.transport.segments[index]!.duration_ms / 1000)
+                  }}
+                  s ·
+                  {{
+                    format(
+                      state.transport.segments[index]!.rate / RESOURCE_UNIT,
+                    )
+                  }}
+                  units/s · {{ state.transport.segments[index]!.demand }} power
+                </span>
                 <button
                   :class="{ selected: state.transport.express === index }"
                   @click="act('express', '', index)"
