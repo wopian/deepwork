@@ -5,6 +5,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 pub const WIDTH: u32 = 64;
 pub const VERSION: u32 = 2;
+#[derive(Clone, Serialize)]
+pub struct UpgradePreview {
+    pub machine_percent: f64,
+    pub line_percent: f64,
+}
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Material {
     pub id: usize,
@@ -151,6 +156,8 @@ pub struct Game {
     pub lifetime_waste: u64,
     pub excavated: u64,
     pub discoveries: BTreeSet<usize>,
+    #[serde(default)]
+    pub collection: BTreeSet<String>,
     pub site_discoveries: u32,
     pub contracts: Vec<Contract>,
     #[serde(default)]
@@ -281,6 +288,7 @@ impl Game {
             lifetime_waste: 0,
             excavated: 0,
             discoveries: BTreeSet::new(),
+            collection: BTreeSet::new(),
             site_discoveries: 0,
             site_objectives: BTreeSet::new(),
             retirement_quote: None,
@@ -375,6 +383,96 @@ impl Game {
             return Some("More credits required".into());
         }
         None
+    }
+    fn capacity_rates(&mut self) -> [f64; 4] {
+        self.crew = logistics::Crew::prioritise(self.workers, &self.levels, &self.crew_priority);
+        let factor = if self.challenge == "long_haul" {
+            1.5
+        } else {
+            1.
+        } / sites()[self.profile].haul;
+        let (_, duration) = logistics::route(&self.haul_path, &self.levels, factor);
+        let haul = (self.crew.haulers as f64
+            * self.throughput("conveyor")
+            * if self.level("conveyor") > 0 { 3. } else { 1. }
+            * (1. + 0.05 * self.ranks.get("logistics").copied().unwrap_or(0) as f64))
+            .min((20. + 5. * self.level("capacity") as f64) / duration as f64);
+        let power = ((1. + 5. * self.level("power") as f64)
+            / (1.
+                + self.level("chemical") as f64
+                + 2. * self.level("electrolytic") as f64
+                + 3. * self.level("trace") as f64))
+            .min(1.);
+        [
+            self.dig_rate(true) as f64 / 1000.,
+            haul,
+            2. * self.throughput("sorter"),
+            2. * self.throughput("furnace")
+                * (1. + 0.15 * self.crew.operators.saturating_sub(1) as f64)
+                * (1. + 0.05 * self.ranks.get("metallurgy").copied().unwrap_or(0) as f64)
+                * power
+                * if self.specialisation.as_deref() == Some("reclamation") {
+                    0.85
+                } else {
+                    1.
+                },
+        ]
+    }
+    pub fn upgrade_previews(&self) -> BTreeMap<String, UpgradePreview> {
+        // Forecast only rate inputs; never clone the full terrain/stockpile per offer.
+        let mut model = Game::default();
+        model.levels = self.levels.clone();
+        model.ranks = self.ranks.clone();
+        model.workers = self.workers;
+        model.heights = self.heights.clone();
+        model.crew_priority = self.crew_priority.clone();
+        model.specialisation = self.specialisation.clone();
+        model.challenge = self.challenge.clone();
+        model.profile = self.profile;
+        model.haul_path = self.haul_path.clone();
+        let before = model.capacity_rates();
+        let line = before.into_iter().fold(f64::INFINITY, f64::min);
+        let mut result = BTreeMap::new();
+        for (id, stage) in [
+            ("worker", 0),
+            ("drill", 0),
+            ("conveyor", 1),
+            ("sorter", 2),
+            ("furnace", 3),
+            ("power", 3),
+            ("capacity", 1),
+            ("shaft", 1),
+            ("minecart", 1),
+            ("train", 1),
+        ] {
+            if self.level(id) >= 50 {
+                continue;
+            }
+            let mut next = model.clone();
+            if id == "worker" {
+                next.workers += 1;
+            } else {
+                *next.levels.entry(id.into()).or_default() += 1;
+            }
+            let after = next.capacity_rates();
+            let total = after.into_iter().fold(f64::INFINITY, f64::min);
+            result.insert(
+                id.into(),
+                UpgradePreview {
+                    machine_percent: if before[stage] > 0. {
+                        100. * (after[stage] / before[stage] - 1.)
+                    } else {
+                        0.
+                    },
+                    line_percent: if line > 0. {
+                        100. * (total / line - 1.)
+                    } else {
+                        0.
+                    },
+                },
+            );
+        }
+        result
     }
     pub fn award(&self) -> u64 {
         (10. * (self.depth() as f64 / 300.).sqrt()).floor() as u64
@@ -695,7 +793,7 @@ impl Game {
             }
             remaining -= n;
         }
-        let sort_rate = (1000. * self.throughput("sorter")) as u64 / 20;
+        let sort_rate = (2000. * self.throughput("sorter")) as u64 / 20;
         let mut sort_left = sort_rate.min(cap.saturating_sub(self.concentrate.values().sum()));
         let sort_budget = sort_left;
         let mut sort_ids: Vec<_> = self
@@ -732,7 +830,7 @@ impl Game {
             } else {
                 1.
             }
-            * 1000.
+            * 2000.
             * self.throughput("furnace")
             * (1. + 0.15 * self.crew.operators.saturating_sub(1) as f64)
             * (1. + 0.05 * self.ranks.get("metallurgy").copied().unwrap_or(0) as f64)
@@ -798,14 +896,15 @@ impl Game {
                     .entry(format!("{}_residue", rule.output))
                     .or_default() += recovered;
             }
-            *self
-                .products
-                .entry(if m.name == "Bauxite" {
-                    "alumina".into()
-                } else {
-                    m.product.clone()
-                })
-                .or_default() += primary;
+            let product = if m.name == "Bauxite" {
+                "alumina".into()
+            } else {
+                m.product.clone()
+            };
+            if primary > 0 {
+                self.collection.insert(product.clone());
+            }
+            *self.products.entry(product).or_default() += primary;
             let residue = waste / 5;
             if matches!(m.family.as_str(), "furnace" | "sulfide") {
                 self.slag += residue;
@@ -828,6 +927,9 @@ impl Game {
                 let available = self.trace_feed.entry(source).or_default();
                 let amount = (*available).min(12);
                 *available -= amount;
+                if amount > 0 {
+                    self.collection.insert(recipe.output.clone());
+                }
                 *self.products.entry(recipe.output.clone()).or_default() += amount;
                 continue;
             }
@@ -842,6 +944,7 @@ impl Game {
                 for (p, n) in &recipe.inputs {
                     *self.products.entry(p.clone()).or_default() -= amount * n;
                 }
+                self.collection.insert(recipe.output.clone());
                 let mass: u64 = recipe.inputs.values().sum();
                 *self.products.entry(recipe.output.clone()).or_default() += amount * mass;
                 if recipe.id == "steel" {
@@ -1372,6 +1475,7 @@ impl Game {
                 next.build_queue = next.blueprint.clone();
                 next.research = self.research + award;
                 next.discoveries = self.discoveries.clone();
+                next.collection = self.collection.clone();
                 next.ranks = self.ranks.clone();
                 next.records = self.records.clone();
                 let mut section = vec![0; 4096];
@@ -1438,6 +1542,12 @@ impl Game {
                 self.site_objectives.insert(format!("order-{index}"));
             }
         }
+        self.collection.extend(
+            self.products
+                .iter()
+                .filter(|(_, q)| **q > 0)
+                .map(|(p, _)| p.clone()),
+        );
         if self.support_rows == 0 {
             self.support_rows = self.support_target();
         }
@@ -2099,5 +2209,45 @@ mod retirement_quote_tests {
         assert_eq!(g.records[0].research, quoted);
         assert_eq!(g.research, quoted);
         assert!(g.retirement_quote.is_none());
+    }
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::*;
+    #[test]
+    fn forecast_distinguishes_machine_gain_from_line_bottleneck() {
+        let g = Game::default();
+        let offers = g.upgrade_previews();
+        assert!(offers["conveyor"].machine_percent > offers["conveyor"].line_percent);
+        assert!((offers["conveyor"].line_percent - 100.).abs() < 0.01);
+        assert!(offers["drill"].machine_percent > 0.);
+        assert_eq!(offers["drill"].line_percent, 0.);
+    }
+}
+
+#[cfg(test)]
+mod collection_tests {
+    use super::*;
+    #[test]
+    fn trace_products_remain_collected_after_sale_and_retirement() {
+        let mut g = Game::default();
+        g.levels.insert("trace".into(), 1);
+        g.enabled_recipes.insert("separate_neodymium".into());
+        g.trace_feed.insert("neodymium_residue".into(), 12);
+        g.tick(&materials(), true);
+        assert!(g.collection.contains("neodymium"));
+        assert_eq!(g.products.get("neodymium").copied().unwrap_or(0), 0);
+        g.heights[32] = 150;
+        g.steel_made = true;
+        g.action(Action {
+            sequence: 1,
+            kind: "retire".into(),
+            target: String::new(),
+            value: 0,
+        })
+        .unwrap();
+        assert!(g.collection.contains("neodymium"));
+        assert!(g.products.is_empty());
     }
 }

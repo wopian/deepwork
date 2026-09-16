@@ -59,8 +59,13 @@ export interface Game {
   lifetime_waste: number;
   excavated: number;
   discoveries: number[];
+  collection: string[];
   quotes: Record<string, string>;
   purchase_blockers: Record<string, string>;
+  upgrade_previews: Record<
+    string,
+    { machine_percent: number; line_percent: number }
+  >;
   retirement_award: number;
   site_objectives: string[];
   contracts: { product: string; amount: number; complete: boolean }[];

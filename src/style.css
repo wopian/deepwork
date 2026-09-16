@@ -705,3 +705,7 @@ nav {
 
 .world-districts { position: absolute; bottom: 36px; left: 12px; right: 12px; display:flex; gap:4px; flex-wrap:wrap; pointer-events:none; }
 .world-districts button { pointer-events:auto; padding:6px 10px; background:#101820ed; font:10px monospace; }
+
+.collection-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; padding:20px; font:12px monospace; }
+.collection-grid span { color:#e8dfc866; }
+.collection-grid .found { color:var(--accent); }

@@ -20,6 +20,13 @@ import {
 const materialUpgrades = upgradeRequirements.filter(
   (u) => Object.keys(u.inputs).length,
 );
+const productCatalogue = [
+  ...new Set([
+    ...materials.map((m) => m.product),
+    ...recipes.map((r) => r.output),
+    "alumina",
+  ]),
+].sort();
 const selectedSite = ref(0);
 const selectedChallenge = ref("");
 function sectionPath(section: number[]) {
@@ -285,6 +292,9 @@ onMounted(start);
             <h2>GIVE THEM AN EDGE</h2>
             <span>UPGRADES</span>
           </div>
+          <p class="crew-roster">
+            Capacity estimates assume steady feed and completed construction.
+          </p>
           <div class="upgrade-list">
             <button
               class="upgrade"
@@ -302,6 +312,15 @@ onMounted(start);
                 <small>LEVEL {{ state?.levels[u[0]] ?? 0 }}</small>
               </div>
               <b>◈ {{ format(cost(u[0])) }}</b>
+              <small
+                class="upgrade-blocker"
+                v-if="state?.upgrade_previews[u[0]]"
+                >Machine
+                {{ format(state.upgrade_previews[u[0]].machine_percent) }}% ·
+                feed line ~{{
+                  format(state.upgrade_previews[u[0]].line_percent)
+                }}%</small
+              >
               <small
                 class="upgrade-blocker"
                 v-if="state?.purchase_blockers[u[0]]"
@@ -430,6 +449,21 @@ onMounted(start);
             state?.discoveries.includes(m.id) ? "FOUND" : "T" + m.tier
           }}</b>
         </button>
+      </div>
+      <div class="panel-heading">
+        <h2>REFINED COLLECTION</h2>
+        <span
+          >{{ state?.collection.length ?? 0 }} /
+          {{ productCatalogue.length }}</span
+        >
+      </div>
+      <div class="collection-grid">
+        <span
+          v-for="product in productCatalogue"
+          :class="{ found: state?.collection.includes(product) }"
+          >{{ state?.collection.includes(product) ? "◆" : "◇" }}
+          {{ product.replaceAll("_", " ") }}</span
+        >
       </div>
     </section>
     <section v-else-if="tab === 'Industry'" class="card">

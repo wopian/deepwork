@@ -26,6 +26,7 @@ struct Snapshot {
     game: Game,
     quotes: std::collections::BTreeMap<String, String>,
     retirement_award: u64,
+    upgrade_previews: std::collections::BTreeMap<String, mine_core::UpgradePreview>,
     purchase_blockers: std::collections::BTreeMap<String, String>,
 }
 impl From<Game> for Snapshot {
@@ -41,6 +42,7 @@ impl From<Game> for Snapshot {
                 .map(|id| (id.into(), game.cost(id).to_string())),
             )
             .collect();
+        let upgrade_previews = game.upgrade_previews();
         let retirement_award = game.retirement_quote.unwrap_or_else(|| game.award());
         let purchase_blockers = mine_core::requirements()
             .iter()
@@ -53,6 +55,7 @@ impl From<Game> for Snapshot {
             game,
             quotes,
             retirement_award,
+            upgrade_previews,
             purchase_blockers,
         }
     }
