@@ -106,6 +106,20 @@ try {
     rejected = true;
   }
   if (!rejected) throw new Error("Corrupt import accepted");
+  const malformedQuote = JSON.parse(await invoke("export_save"));
+  malformedQuote.transport.stations[0].quote = "NaN";
+  rejected = false;
+  try {
+    await invoke("import_save", { data: JSON.stringify(malformedQuote) });
+  } catch {
+    rejected = true;
+  }
+  if (!rejected) throw new Error("Malformed buffer quote import accepted");
+  if (
+    JSON.parse(await invoke("export_save")).campaign_id !==
+    malformedQuote.campaign_id
+  )
+    throw new Error("Rejected quote import changed active campaign");
   await page.reload();
   await page.locator("canvas").waitFor();
   const restored = JSON.parse(await invoke("export_save"));

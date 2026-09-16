@@ -373,6 +373,7 @@ impl Network {
                 s.id == index.to_string()
                     && s.name.len() <= 64
                     && s.quote.len() <= 32
+                    && s.quote.parse::<u64>().is_ok_and(|quote| quote > 0)
                     && s.level <= 50
                     && s.capacity <= 1_000_000_000_000
                     && s.cargo
@@ -420,6 +421,15 @@ fn valid_legs(legs: &[Leg]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn imported_quotes_are_safe_for_integer_display_and_affordability() {
+        let mut network = Network::default();
+        assert!(network.valid(56));
+        for quote in ["", "NaN", "-1", "2.5", "0", "18446744073709551616"] {
+            network.stations[0].quote = quote.into();
+            assert!(!network.valid(56), "Reject malformed quote {quote:?}");
+        }
+    }
     #[test]
     fn buffers_block_upstream_split_arrivals_and_conserve_material() {
         let mut n = Network::default();
