@@ -268,7 +268,7 @@ onMounted(start);
         <section class="card contracts">
           <div class="panel-heading">
             <h2>OUTGOING ORDERS</h2>
-            <span>NO DEADLINES</span>
+            <span>25% PREMIUM · NO DEADLINES</span>
           </div>
           <div v-for="(c, i) in state?.contracts ?? []">
             <span
@@ -279,11 +279,11 @@ onMounted(start);
               ></span
             ><button
               :disabled="
-                c.complete || (state?.products[c.product] ?? 0) < c.amount
+                !c.complete && (state?.products[c.product] ?? 0) < c.amount
               "
-              @click="act('contract', '', i)"
+              @click="act(c.complete ? 'new_contract' : 'contract', '', i)"
             >
-              {{ c.complete ? "Delivered ✓" : "Deliver →" }}
+              {{ c.complete ? "New order →" : "Deliver →" }}
             </button>
           </div>
           <p v-if="!state">
@@ -539,8 +539,7 @@ onMounted(start);
             Math.floor(10 * Math.sqrt(depth / 300)) +
             3 * (state?.site_discoveries ?? 0) +
             5 *
-              (state?.contracts.filter((c: { complete: boolean }) => c.complete)
-                .length ?? 0)
+              (state?.site_objectives.length ?? 0)
           }}
         </p>
         <div class="site-options">

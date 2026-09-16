@@ -141,6 +141,8 @@ pub struct Game {
     pub discoveries: BTreeSet<usize>,
     pub site_discoveries: u32,
     pub contracts: Vec<Contract>,
+    #[serde(default)]
+    pub site_objectives: BTreeSet<String>,
     pub records: Vec<Record>,
     pub cooldowns: [u32; 4],
     pub boosts: [u32; 3],
@@ -246,6 +248,7 @@ impl Game {
             excavated: 0,
             discoveries: BTreeSet::new(),
             site_discoveries: 0,
+            site_objectives: BTreeSet::new(),
             contracts: vec![
                 Contract {
                     product: "iron".into(),
@@ -306,7 +309,7 @@ impl Game {
                     "trace" => 3500.,
                     _ => 100.,
                 },
-                1.18,
+                if k == "capacity" { 1.12 } else { 1.18 },
                 self.level(k),
             )
         };
@@ -315,7 +318,7 @@ impl Game {
     pub fn award(&self) -> u64 {
         (10. * (self.depth() as f64 / 300.).sqrt()).floor() as u64
             + 3 * self.site_discoveries as u64
-            + 5 * self.contracts.iter().filter(|c| c.complete).count() as u64
+            + 5 * self.site_objectives.len() as u64
     }
     pub fn cell(&self, x: u32, y: u32, cat: &[Material]) -> usize {
         if (30..=34).contains(&x) && y % 24 < 3 {
@@ -695,8 +698,7 @@ impl Game {
                 .iter()
                 .filter(|c| !c.complete && c.product == *p)
                 .map(|c| c.amount)
-                .max()
-                .unwrap_or(0);
+                .sum::<u64>();
             let sold = q.saturating_sub(reserved.max(contract_hold));
             *q -= sold;
             self.sold_mass += sold;
@@ -1028,12 +1030,10 @@ impl Game {
                 }
             }
             "contract" => {
-                let c = self
-                    .contracts
-                    .get_mut(a.value as usize)
-                    .ok_or("Unknown contract")?;
+                let index = a.value as usize;
+                let c = self.contracts.get(index).ok_or("Unknown contract")?.clone();
                 if c.complete {
-                    return Err("Contract already delivered".into());
+                    return Err("Request a new order first".into());
                 }
                 let q = self.products.entry(c.product.clone()).or_default();
                 if *q < c.amount {
@@ -1041,9 +1041,51 @@ impl Game {
                 }
                 *q -= c.amount;
                 self.delivered_mass += c.amount;
-                c.complete = true;
-                self.credits += 50;
-                self.research += 1;
+                // Same fixed price as dispatch, with a 25% premium, retaining fractions.
+                let price = materials()
+                    .iter()
+                    .find(|m| m.product == c.product)
+                    .map(|m| m.price)
+                    .unwrap_or(20);
+                let reward = c.amount * price * 5 / 2;
+                self.credit_fraction += reward;
+                self.credits += self.credit_fraction / 2000;
+                self.credit_fraction %= 2000;
+                self.contracts[index].complete = true;
+                self.site_objectives.insert(format!("order-{index}"));
+                if self.milestones.insert(format!("delivery-{}", c.product)) {
+                    self.research += 1;
+                }
+            }
+            "new_contract" => {
+                let index = a.value as usize;
+                let old = self.contracts.get(index).ok_or("Unknown contract")?.clone();
+                if !old.complete {
+                    return Err("Deliver current order first".into());
+                }
+                let candidates: Vec<_> = self
+                    .products
+                    .iter()
+                    .filter(|(p, q)| {
+                        **q > 0
+                            && !self
+                                .contracts
+                                .iter()
+                                .enumerate()
+                                .any(|(i, c)| i != index && !c.complete && c.product == **p)
+                    })
+                    .map(|(p, _)| p.clone())
+                    .collect();
+                let product = if candidates.is_empty() {
+                    old.product
+                } else {
+                    candidates[(self.ticks as usize + index) % candidates.len()].clone()
+                };
+                self.contracts[index] = Contract {
+                    product,
+                    amount: old.amount.saturating_add(1000).min(20000),
+                    complete: false,
+                };
             }
             "research" => {
                 if ![
@@ -1139,6 +1181,11 @@ impl Game {
             }
             self.terrain = terrain::Terrain::from_columns(&self.heights);
             self.version = VERSION;
+        }
+        for (index, contract) in self.contracts.iter().enumerate() {
+            if contract.complete {
+                self.site_objectives.insert(format!("order-{index}"));
+            }
         }
         self.terrain.rebuild()?;
         self.validate()
@@ -1520,5 +1567,48 @@ mod hardness_tests {
         assert!(deep > shallow);
         g.levels.insert("drill".into(), 10);
         assert!((g.rock_work() * 3. - deep).abs() < 0.0001);
+    }
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    #[test]
+    fn repeat_orders_pay_premium_without_farming_research() {
+        let mut g = Game::default();
+        let price = materials()
+            .iter()
+            .find(|m| m.product == "iron")
+            .unwrap()
+            .price;
+        g.products.insert("iron".into(), 10000);
+        let before = g.credits;
+        g.action(Action {
+            sequence: 1,
+            kind: "contract".into(),
+            target: String::new(),
+            value: 0,
+        })
+        .unwrap();
+        assert_eq!(g.credits - before, price * 2 * 5 / 4);
+        assert_eq!(g.research, 1);
+        g.action(Action {
+            sequence: 2,
+            kind: "new_contract".into(),
+            target: String::new(),
+            value: 0,
+        })
+        .unwrap();
+        assert_eq!(g.contracts[0].amount, 3000);
+        g.action(Action {
+            sequence: 3,
+            kind: "contract".into(),
+            target: String::new(),
+            value: 0,
+        })
+        .unwrap();
+        assert_eq!(g.research, 1);
+        assert_eq!(g.site_objectives.len(), 1);
+        assert_eq!(g.delivered_mass, 5000);
     }
 }

@@ -47,6 +47,7 @@ export interface Game {
   lifetime_waste: number;
   excavated: number;
   discoveries: number[];
+  site_objectives: string[];
   contracts: { product: string; amount: number; complete: boolean }[];
   records: {
     site: number;
