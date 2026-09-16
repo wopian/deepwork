@@ -64,7 +64,11 @@ struct Stream {
 }
 impl Stream {
     fn update(&mut self, g: &Game) -> Update {
-        let reset = self.identity != Some((g.site, g.seed));
+        let reset = self.identity != Some((g.site, g.seed))
+            || self
+                .chunks
+                .keys()
+                .any(|id| !g.terrain.chunks.contains_key(id));
         let mut state = g.clone();
         if !reset {
             state
@@ -212,6 +216,19 @@ pub fn run() {
 #[cfg(test)]
 mod stream_tests {
     use super::*;
+    #[test]
+    fn importing_earlier_terrain_resets_removed_chunks() {
+        let mut stream = Stream::default();
+        let mut g = Game::default();
+        for y in 0..65 {
+            g.terrain.excavate(32, y);
+        }
+        stream.update(&g);
+        g.terrain = mine_core::terrain::Terrain::default();
+        let update = stream.update(&g);
+        assert!(update.reset);
+        assert!(update.state.game.terrain.chunks.is_empty());
+    }
     #[test]
     fn only_changed_chunks_are_sent() {
         let mut stream = Stream::default();
