@@ -29,7 +29,7 @@ The unpackaged Windows executable is `target/debug/deepwork.exe`. Browser-only V
 - Worker recruitment, housing, independently upgraded transport buffers, fair cargo priorities, reserved feed and raw sales.
 - 56 mineral feeds, colour-coded field guide, refined products, optional manufacturing and separation recipes.
 - Explicit alumina/electrolysis path, abstract mass-conserving recipe units, steel and component production.
-- Contracts, resource reserves, power throttling, recovery, research, retirement and megaproject delivery.
+- Contracts, resource reserves, pausable processing recipes, power throttling, recovery, authored headquarters equipment, retirement and megaproject delivery.
 - Tactical boosts, capped half-rate offline simulation, compact atomic saves, archived campaign reset and stale-command protection.
 - Pixi world with extended terrain palette, camera pan/zoom/follow, responsive interface and reduced-motion preference.
 - Bun-only toolchain, Rust accounting tests and Windows CI.
@@ -80,3 +80,5 @@ cargo run -p mine-core --release --example campaign -- 30 42 scheduled 8
 ```
 
 This runs 30 seeds for up to 42 days with two 12-minute visits per day and real capped offline advancement. Replace `scheduled` with `attentive` or `continuous` for comparison. Milestone targets are acceptance goals, not claims that current tuning meets them.
+
+The harness returns a failure status if any tested campaign misses headquarters completion. `cargo test -p mine-core --release --example campaign` checks that strategy contracts work before pumps and preserve endgame reserves. Use `cargo run -p mine-core --release --example activity` for an isolated ability comparison; it is not a substitute for full campaign strategy comparison.
