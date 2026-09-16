@@ -81,7 +81,7 @@ cargo run -p mine-core --release --example campaign -- 30 56 scheduled 8
 
 This runs 30 seeds for up to 56 days with two 12-minute visits per day and real capped offline advancement. Replace `scheduled` with `attentive` or `continuous` for comparison. Milestone targets are acceptance goals, not claims that current tuning meets them.
 
-The harness returns a failure status if any tested campaign misses headquarters completion. `cargo test -p mine-core --release --example campaign` checks that strategy contracts work before pumps and preserve endgame reserves. Use `cargo run -p mine-core --release --example activity` for an isolated ability comparison; it is not a substitute for full campaign strategy comparison.
+The harness returns a failure status if any tested campaign misses headquarters completion. `cargo test -p mine-core --release --example campaign` checks that strategy contracts work before pumps, preserve endgame reserves, fund early processing and commission electrolysis before research retirement. Use `cargo run -p mine-core --release --example activity` for an isolated ability comparison; it is not a substitute for full campaign strategy comparison.
 
 After a scheduled campaign report finishes, validate all 30 seeds and authored day/week medians:
 
