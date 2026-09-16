@@ -76,10 +76,10 @@ Open **Records → Reset campaign**. Type `RESET` to archive the current campaig
 ## Campaign benchmark
 
 ```powershell
-cargo run -p mine-core --release --example campaign -- 30 42 scheduled 8
+cargo run -p mine-core --release --example campaign -- 30 56 scheduled 8
 ```
 
-This runs 30 seeds for up to 42 days with two 12-minute visits per day and real capped offline advancement. Replace `scheduled` with `attentive` or `continuous` for comparison. Milestone targets are acceptance goals, not claims that current tuning meets them.
+This runs 30 seeds for up to 56 days with two 12-minute visits per day and real capped offline advancement. Replace `scheduled` with `attentive` or `continuous` for comparison. Milestone targets are acceptance goals, not claims that current tuning meets them.
 
 The harness returns a failure status if any tested campaign misses headquarters completion. `cargo test -p mine-core --release --example campaign` checks that strategy contracts work before pumps and preserve endgame reserves. Use `cargo run -p mine-core --release --example activity` for an isolated ability comparison; it is not a substitute for full campaign strategy comparison.
 
@@ -90,3 +90,5 @@ bun.exe run check:campaign campaign-report.json
 ```
 
 This gate rejects incomplete campaigns, missing milestones, duplicate seeds and mixed timing bases. Minute-scale first-site targets use the separate continuous `balance` example.
+
+The 56-day observation horizon checks late-but-completable seeds. Headquarters median target remains 28–42 days; the acceptance checker reads that unchanged target from content.

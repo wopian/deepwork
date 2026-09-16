@@ -55,8 +55,8 @@ bun.exe test
 bun.exe run build
 cargo test --workspace --locked
 cargo run -p mine-core --release --example balance -- depth 0
-cargo run -p mine-core --release --example campaign -- 30 42 scheduled 8
-cargo run -p mine-core --release --example campaign -- 30 42 attentive 8
+cargo run -p mine-core --release --example campaign -- 30 56 scheduled 8
+cargo run -p mine-core --release --example campaign -- 30 56 attentive 8
 bun.exe run tauri build --bundles nsis
 bun.exe run test:native test-results 1800 release
 ```
