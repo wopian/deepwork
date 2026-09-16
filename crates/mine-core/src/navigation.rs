@@ -67,7 +67,7 @@ pub fn route(t: &Terrain, heights: &[u32], face: [u32; 2], lift: bool) -> Vec<[u
             push(&mut points, [SHAFT, y]);
         }
         let depth = points.last().unwrap()[1];
-        if !(PIT - 1..=depth).all(|y| t.contains(SHAFT, y)) {
+        if !t.column_clear(SHAFT, PIT - 1, depth) {
             return vec![];
         }
         push(&mut points, [SHAFT, PIT - 1]);

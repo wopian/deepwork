@@ -73,6 +73,25 @@ impl Terrain {
             .get(&chunk_id(x, y))
             .is_some_and(|bytes| bytes[index / 8] & (1 << (index % 8)) != 0)
     }
+    /// Check lift clearance with one map lookup per chunk, not per vertical cell.
+    pub fn column_clear(&self, x: u32, first: u32, last: u32) -> bool {
+        if x >= WIDTH || first > last || last >= MAX_ROWS {
+            return false;
+        }
+        let byte_x = (x % 64 / 8) as usize;
+        let mask = 1 << (x % 8);
+        for chunk_y in first / 64..=last / 64 {
+            let Some(bytes) = self.chunks.get(&(chunk_y * CHUNKS_ACROSS + x / 64)) else {
+                return false;
+            };
+            let start = first.saturating_sub(chunk_y * 64);
+            let end = (last - chunk_y * 64).min(63);
+            if (start..=end).any(|row| bytes[row as usize * 8 + byte_x] & mask == 0) {
+                return false;
+            }
+        }
+        true
+    }
     pub fn known_material(&self, x: u32, y: u32) -> Option<usize> {
         self.visible
             .get(&chunk_id(x, y))
@@ -385,5 +404,32 @@ mod reveal_tests {
         let encoded = serde_json::to_string(&t).unwrap();
         let restored: Terrain = serde_json::from_str(&encoded).unwrap();
         assert_eq!(restored.visible, t.visible);
+    }
+}
+
+#[cfg(test)]
+mod clearance_tests {
+    use super::*;
+    #[test]
+    fn column_clear_matches_cell_checks_across_chunk_edges_and_gaps() {
+        let mut t = Terrain::from_columns(&vec![201; WIDTH as usize]);
+        for x in [0, 63, 64, 255, 256, 511] {
+            for missing in [0, 63, 64, 127, 128, 200] {
+                let index = bit_index(x, missing);
+                t.chunks.get_mut(&chunk_id(x, missing)).unwrap()[index / 8] &= !(1 << (index % 8));
+                for first in [0, 63, 64, 127, 128, 200] {
+                    for last in first..=200 {
+                        assert_eq!(
+                            t.column_clear(x, first, last),
+                            (first..=last).all(|y| t.contains(x, y))
+                        );
+                    }
+                }
+                t.chunks.get_mut(&chunk_id(x, missing)).unwrap()[index / 8] |= 1 << (index % 8);
+            }
+        }
+        assert!(!t.column_clear(WIDTH, 0, 1));
+        assert!(!t.column_clear(0, 2, 1));
+        assert!(!t.column_clear(0, 0, MAX_ROWS));
     }
 }
