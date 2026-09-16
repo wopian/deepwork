@@ -694,3 +694,7 @@ nav {
 }
 
 .site-options label{display:block;padding:10px;border:1px solid var(--line);margin:8px 0}.site-options p{margin:5px 0;font-size:12px;color:#e8dfc899}.record svg{display:block;margin-top:12px;image-rendering:pixelated}
+
+.specialisation-options { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.specialisation-options small { white-space: normal; }
+@media (max-width: 600px) { .specialisation-options { grid-template-columns: 1fr; } }

@@ -107,6 +107,8 @@ pub struct Game {
     pub research: u64,
     pub ranks: BTreeMap<String, u32>,
     pub policy: String,
+    #[serde(default)]
+    pub specialisation: Option<String>,
     pub priorities: Vec<usize>,
     pub reserve: BTreeMap<String, u64>,
     pub pinned: Option<String>,
@@ -224,6 +226,7 @@ impl Game {
             research: 0,
             ranks: BTreeMap::new(),
             policy: "bulk".into(),
+            specialisation: None,
             priorities: vec![],
             reserve: BTreeMap::new(),
             pinned: None,
@@ -387,6 +390,11 @@ impl Game {
         let dig_rate = (((self.crew.diggers as f64 * self.throughput("drill")
             / sites()[self.profile].hardness
             / self.rock_work()
+            * match self.specialisation.as_deref() {
+                Some("bulk") => 1.3,
+                Some("precision") => 0.8,
+                _ => 1.,
+            }
             * (1. + 0.05 * self.ranks.get("excavation").copied().unwrap_or(0) as f64))
             * (if !offline && self.boosts[0] > 0 {
                 1.5
@@ -548,6 +556,11 @@ impl Game {
         let power_supply = 1 + 5 * self.level("power");
         let power_factor = (power_supply as f64 / power_demand as f64).min(1.);
         let process_rate = (power_factor
+            * if self.specialisation.as_deref() == Some("reclamation") {
+                0.85
+            } else {
+                1.
+            }
             * 1000.
             * self.throughput("furnace")
             * (1. + 0.05 * self.ranks.get("metallurgy").copied().unwrap_or(0) as f64)
@@ -591,8 +604,14 @@ impl Game {
                 self.sold_mass += n;
                 continue;
             }
-            let recovery =
-                (65 + 3 * self.levels.get("recovery").copied().unwrap_or(0)).min(95) as u64;
+            let recovery = (65i32
+                + 3 * self.levels.get("recovery").copied().unwrap_or(0) as i32
+                + match self.specialisation.as_deref() {
+                    Some("bulk") => -5,
+                    Some("precision") => 10,
+                    _ => 0,
+                })
+            .clamp(0, 95) as u64;
             let good = n * recovery / 100;
             let waste = n - good;
             let mut primary = good;
@@ -660,12 +679,17 @@ impl Game {
         }
         let mut recovery_space = cap.saturating_sub(self.hauled.values().sum());
         if self.level("reclaimer") > 0 {
+            let multiplier = if self.specialisation.as_deref() == Some("reclamation") {
+                3
+            } else {
+                1
+            };
             for (&id, q) in &mut self.tailings {
                 let n = (*q).min(
                     1 + u64::from(self.ticks % 20 == 0)
                         * self.ranks.get("reclamation").copied().unwrap_or(0) as u64,
                 );
-                let n = n.min(recovery_space);
+                let n = (n * multiplier).min(*q).min(recovery_space);
                 recovery_space -= n;
                 *q -= n;
                 *self.hauled.entry(id).or_default() += n;
@@ -715,7 +739,13 @@ impl Game {
         self.depleted -= disposed;
         self.disposed_mass += disposed;
         if self.level("slagcrusher") > 0 {
-            let reclaimed = self.slag.min(25);
+            let reclaimed =
+                self.slag
+                    .min(if self.specialisation.as_deref() == Some("reclamation") {
+                        75
+                    } else {
+                        25
+                    });
             self.slag -= reclaimed;
             *self.products.entry("aggregate".into()).or_default() += reclaimed;
         }
@@ -853,6 +883,18 @@ impl Game {
             return Err("Command already processed".into());
         }
         match a.kind.as_str() {
+            "specialise" => {
+                if self.depth() < 100 {
+                    return Err("Reach 100 metres to specialise".into());
+                }
+                if self.specialisation.is_some() {
+                    return Err("Specialisation lasts until site retirement".into());
+                }
+                if !["bulk", "precision", "reclamation"].contains(&a.target.as_str()) {
+                    return Err("Unknown specialisation".into());
+                }
+                self.specialisation = Some(a.target.clone());
+            }
             "buy" => {
                 let allowed = [
                     "worker",
@@ -1191,6 +1233,13 @@ impl Game {
         self.validate()
     }
     pub fn validate(&self) -> Result<(), String> {
+        if self
+            .specialisation
+            .as_deref()
+            .is_some_and(|s| !["bulk", "precision", "reclamation"].contains(&s))
+        {
+            return Err("Invalid specialisation".into());
+        }
         if self.version != VERSION {
             return Err("Unsupported save version".into());
         }
@@ -1610,5 +1659,31 @@ mod contract_tests {
         assert_eq!(g.research, 1);
         assert_eq!(g.site_objectives.len(), 1);
         assert_eq!(g.delivered_mass, 5000);
+    }
+}
+
+#[cfg(test)]
+mod specialisation_tests {
+    use super::*;
+    #[test]
+    fn specialisation_is_site_locked_and_reclamation_cannot_duplicate() {
+        let mut g = Game::default();
+        let choose = |sequence| Action {
+            sequence,
+            kind: "specialise".into(),
+            target: "reclamation".into(),
+            value: 0,
+        };
+        assert!(g.action(choose(1)).is_err());
+        g.heights[32] = 50;
+        g.action(choose(2)).unwrap();
+        assert!(g.action(choose(3)).is_err());
+        g.levels.insert("reclaimer".into(), 1);
+        g.tailings.insert(0, 2);
+        g.second(&materials(), true);
+        assert_eq!(g.tailings.get(&0).copied().unwrap_or(0), 0);
+        assert!(g.hauled.get(&0).copied().unwrap_or(0) <= 2);
+        let restored: Game = serde_json::from_str(&serde_json::to_string(&g).unwrap()).unwrap();
+        assert_eq!(restored.specialisation.as_deref(), Some("reclamation"));
     }
 }

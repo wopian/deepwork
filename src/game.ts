@@ -22,6 +22,7 @@ export interface Game {
   research: number;
   ranks: Record<string, number>;
   policy: string;
+  specialisation: string | null;
   priorities: number[];
   reserve: Record<string, number>;
   pinned: string | null;

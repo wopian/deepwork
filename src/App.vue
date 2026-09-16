@@ -265,6 +265,19 @@ onMounted(start);
             </button>
           </div>
         </section>
+        <section class="card specialisations">
+          <div class="panel-heading"><h2>SITE SPECIALISATION</h2><span>{{ state?.specialisation ?? 'UNLOCKS AT 100 M' }}</span></div>
+          <p>Choose once per site. New sites offer a fresh choice.</p>
+          <div class="abilities specialisation-options">
+            <button v-for="[id, label, detail] in [
+              ['bulk', 'Bulk extraction', '+30% digging; recovery −5 percentage points.'],
+              ['precision', 'Precision refining', 'Recovery +10 points (95% cap); −20% digging.'],
+              ['reclamation', 'Reclamation', '3× tailings and slag recovery; −15% primary refining.'],
+            ]" :class="{selected: state?.specialisation === id}" :disabled="!state || depth < 100 || !!state.specialisation" @click="act('specialise',id)">
+              <strong>{{ label }}</strong><small>{{ detail }}</small>
+            </button>
+          </div>
+        </section>
         <section class="card contracts">
           <div class="panel-heading">
             <h2>OUTGOING ORDERS</h2>
