@@ -186,6 +186,9 @@ try {
       .click();
     const cdp = await context.newCDPSession(page);
     await cdp.send("Performance.enable");
+    await cdp.send("Emulation.setDeviceMetricsOverride", {
+      width: 1440, height: 940, deviceScaleFactor: 1, mobile: false,
+    });
     const samples: unknown[] = [];
     const started = Date.now();
     while (Date.now() - started < stressSeconds * 1000) {
@@ -200,7 +203,7 @@ try {
       const telemetry: Record<string, string | undefined> = await page.evaluate(
         () => {
           const world = document.querySelector<HTMLElement>(".world");
-          return world ? { ...world.dataset } : { renderHidden: "true" };
+          return world ? { ...world.dataset, viewportWidth: String(innerWidth) } : { renderHidden: "true", viewportWidth: String(innerWidth) };
         },
       );
       const status = JSON.parse(await invoke("export_save"));

@@ -179,6 +179,7 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
             act(g, "recipe", &recipe.id, 0);
         }
     }
+    let established = g.site > 1 || g.level("shaft") > 0;
     for (product, units) in [
         ("iron", 16),
         ("coke", 16),
@@ -197,7 +198,16 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
         ("borate", 4),
         ("ferrovanadium", 4),
     ] {
-        act(g, "reserve", product, units * mine_core::geometry::UNITS);
+        act(
+            g,
+            "reserve",
+            product,
+            if established {
+                units * mine_core::geometry::UNITS
+            } else {
+                0
+            },
+        );
     }
     for product in [
         "advanced_structure",
@@ -353,7 +363,7 @@ fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
             g.credits
         );
     }
-    json!({"seed":seed,"strategy":style,"mode":mode,"stalls":stalls,"complete":g.megaproject,"events":events,"sites":g.site,"depth":g.depth(),"credits":g.credits,"next_upgrade":g.pinned,"purchase_blocker":g.pinned.as_ref().and_then(|id|g.purchase_blocker(id)),"products":g.products,"levels":g.levels,"blockers":g.stages.iter().map(|f|&f.blocker).collect::<Vec<_>>(),"save_bytes":serde_json::to_vec(&g).unwrap().len()})
+    json!({"seed":seed,"strategy":style,"mode":mode,"stalls":stalls,"complete":g.megaproject,"events":events,"sites":g.site,"depth":g.depth(),"credits":g.credits,"next_upgrade":g.pinned,"purchase_blocker":g.pinned.as_ref().and_then(|id|g.purchase_blocker(id)),"products":g.products,"levels":g.levels,"blockers":g.stages.iter().map(|f|&f.blocker).collect::<Vec<_>>(),"expanded_state_bytes":serde_json::to_vec(&g).unwrap().len()})
 }
 fn main() {
     let started = std::time::Instant::now();
@@ -461,5 +471,19 @@ mod strategy_tests {
         strategy(&mut held, "bulk", false);
         assert!(!held.contracts[0].complete);
         assert_eq!(held.products["magnets"], 10 * mine_core::geometry::UNITS);
+    }
+    #[test]
+    fn first_visit_funds_processing_before_stockpiling_late_industry_inputs() {
+        let mut g = Game::default();
+        let cat = materials();
+        for second in 0..720 {
+            if second % 5 == 0 {
+                strategy(&mut g, "bulk", false);
+            }
+            g.second(&cat, false);
+        }
+        assert!(g.level("conveyor") > 0);
+        assert!(g.level("furnace") > 0);
+        assert!(g.collection.contains("iron"));
     }
 }
