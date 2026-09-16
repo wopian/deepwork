@@ -1940,17 +1940,11 @@ impl Game {
         Ok(())
     }
     pub fn apply_headquarters(&mut self) {
-        for (branch, buildings) in [
-            ("excavation", ["drill", "supports", "shaft"]),
-            ("logistics", ["conveyor", "minecart", "train"]),
-            ("metallurgy", ["furnace", "chemical", "electrolytic"]),
-            ("prospecting", ["survey", "pump", "trace"]),
-            ("reclamation", ["recovery", "reclaimer", "slagcrusher"]),
-        ] {
+        for (branch, grants) in &pacing::get().headquarters_starting {
             let rank = self.ranks.get(branch).copied().unwrap_or(0);
-            for (required, building) in [3, 6, 10].into_iter().zip(buildings) {
-                if rank >= required {
-                    self.levels.entry(building.into()).or_insert(1);
+            for grant in grants.iter().filter(|grant| rank >= grant.rank) {
+                for building in &grant.upgrades {
+                    self.levels.entry(building.clone()).or_insert(1);
                 }
             }
         }
@@ -3078,6 +3072,7 @@ mod retired_start_tests {
         })
         .unwrap();
         assert_eq!(g.pinned.as_deref(), Some("steelworks"));
+        assert_eq!(g.level("power"), 1);
         g.last_saved = 1;
         g.advance_offline(28801, &materials());
         assert!(g.products.get("iron").copied().unwrap_or(0) >= 4 * UNITS);

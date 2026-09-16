@@ -191,10 +191,12 @@ try {
     while (Date.now() - started < stressSeconds * 1000) {
       await page.waitForTimeout(10000);
       const { metrics } = await cdp.send("Performance.getMetrics");
-      const telemetry: Record<string, string | undefined> = await page.evaluate(() => {
-        const world = document.querySelector<HTMLElement>(".world");
-        return world ? { ...world.dataset } : { renderHidden: "true" };
-      });
+      const telemetry: Record<string, string | undefined> = await page.evaluate(
+        () => {
+          const world = document.querySelector<HTMLElement>(".world");
+          return world ? { ...world.dataset } : { renderHidden: "true" };
+        },
+      );
       const status = JSON.parse(await invoke("export_save"));
       const processInfo = Bun.spawnSync([
         "tasklist.exe",
@@ -355,7 +357,12 @@ try {
         .catch(() => "Body unavailable")}`,
     ).catch(() => {});
   }
-  console.log("Failure process state", app.exitCode, "browser connected", browser?.isConnected());
+  console.log(
+    "Failure process state",
+    app.exitCode,
+    "browser connected",
+    browser?.isConnected(),
+  );
   throw error;
 } finally {
   await browser?.close();

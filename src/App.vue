@@ -23,6 +23,13 @@ import {
 const discoveredMaterials = computed(() =>
   materials.filter((m) => state.value?.discoveries.includes(m.id)),
 );
+const headquartersBenefits = (branch: string) =>
+  (
+    pacing.headquarters_starting as Record<
+      string,
+      { rank: number; upgrades: string[] }[]
+    >
+  )[branch] ?? [];
 const showReset = ref(false);
 const resetText = ref("");
 async function confirmReset() {
@@ -355,7 +362,11 @@ onMounted(start);
             {{ Math.floor(state.support_work / 10) }}%.
           </p>
           <div class="policy">
-            <span>EXCAVATION STRATEGY <small v-if="state?.site === 1 && depth < pacing.tactics_depth">{{ pacing.tactics_depth }} M UNLOCK</small></span
+            <span
+              >EXCAVATION STRATEGY
+              <small v-if="state?.site === 1 && depth < pacing.tactics_depth"
+                >{{ pacing.tactics_depth }} M UNLOCK</small
+              ></span
             ><button
               v-for="[id, label] in [
                 ['bulk', 'Bulk excavation'],
@@ -363,7 +374,9 @@ onMounted(start);
                 ['depth', 'Go deeper'],
               ]"
               :class="{ selected: state?.policy === id }"
-              :disabled="!state || (state.site === 1 && depth < pacing.tactics_depth)"
+              :disabled="
+                !state || (state.site === 1 && depth < pacing.tactics_depth)
+              "
               @click="act('policy', id)"
             >
               {{ label }}
@@ -454,7 +467,11 @@ onMounted(start);
                 'Furnace overdrive',
                 'Directed survey',
               ]"
-              :disabled="!state || !!state.cooldowns[i] || (state.site === 1 && depth < pacing.tactics_depth)"
+              :disabled="
+                !state ||
+                !!state.cooldowns[i] ||
+                (state.site === 1 && depth < pacing.tactics_depth)
+              "
               @click="act('ability', '', i)"
             >
               <span>{{ ["⚑", "⇢", "♨", "⌖"][i] }}</span
@@ -462,7 +479,9 @@ onMounted(start);
               ><small>{{
                 state?.cooldowns[i]
                   ? `${state.cooldowns[i]}s cooldown`
-                  : state?.site === 1 && depth < pacing.tactics_depth ? `${pacing.tactics_depth} M UNLOCK` : "READY WHEN YOU ARE"
+                  : state?.site === 1 && depth < pacing.tactics_depth
+                    ? `${pacing.tactics_depth} M UNLOCK`
+                    : "READY WHEN YOU ARE"
               }}</small>
             </button>
           </div>
@@ -470,7 +489,10 @@ onMounted(start);
         <section class="card specialisations">
           <div class="panel-heading">
             <h2>SITE SPECIALISATION</h2>
-            <span>{{ state?.specialisation ?? `STEEL + ${pacing.specialisation_depth} M` }}</span>
+            <span>{{
+              state?.specialisation ??
+              `STEEL + ${pacing.specialisation_depth} M`
+            }}</span>
           </div>
           <p>Choose once per site. New sites offer a fresh choice.</p>
           <div class="abilities specialisation-options">
@@ -493,7 +515,12 @@ onMounted(start);
                 ],
               ]"
               :class="{ selected: state?.specialisation === id }"
-              :disabled="!state || depth < pacing.specialisation_depth || !state.steel_made || !!state.specialisation"
+              :disabled="
+                !state ||
+                depth < pacing.specialisation_depth ||
+                !state.steel_made ||
+                !!state.specialisation
+              "
               @click="act('specialise', id)"
             >
               <strong>{{ label }}</strong
@@ -696,7 +723,16 @@ onMounted(start);
         >
           <strong>{{ branch }}</strong>
           <p>Rank {{ state?.ranks[branch] ?? 0 }} / 10</p>
-          <span>{{ 5 * ((state?.ranks[branch] ?? 0) + 1) ** 2 }} research</span>
+          <small v-for="grant in headquartersBenefits(branch)" :key="grant.rank"
+            >Rank {{ grant.rank }}: start with
+            {{ grant.upgrades.join(" + ") }}</small
+          >
+          <span
+            >{{
+              pacing.research_base * ((state?.ranks[branch] ?? 0) + 1) ** 2
+            }}
+            research</span
+          >
         </button>
       </div>
       <h2>Rebuild blueprints</h2>

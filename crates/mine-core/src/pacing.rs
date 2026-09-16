@@ -2,8 +2,14 @@
 use serde::Deserialize;
 use std::{collections::BTreeMap, sync::OnceLock};
 #[derive(Deserialize)]
+pub struct StartingEquipment {
+    pub rank: u32,
+    pub upgrades: Vec<String>,
+}
+#[derive(Deserialize)]
 pub struct Pacing {
     pub costs: BTreeMap<String, u64>,
+    pub headquarters_starting: BTreeMap<String, Vec<StartingEquipment>>,
     pub worker_growth: f64,
     pub machine_growth: f64,
     pub capacity_growth: f64,
@@ -61,6 +67,26 @@ pub fn validate() -> Result<(), String> {
         || p.tactics_depth == 0
         || p.tactics_depth >= 48
         || !(100..=300).contains(&p.specialisation_depth)
+        || p.headquarters_starting.len() != 5
+        || p.headquarters_starting.iter().any(|(branch, grants)| {
+            ![
+                "excavation",
+                "logistics",
+                "metallurgy",
+                "prospecting",
+                "reclamation",
+            ]
+            .contains(&branch.as_str())
+                || grants.len() != 3
+                || grants.iter().zip([3, 6, 10]).any(|(grant, rank)| {
+                    grant.rank != rank
+                        || grant.upgrades.is_empty()
+                        || grant
+                            .upgrades
+                            .iter()
+                            .any(|id| !crate::requirements().iter().any(|u| u.id == *id))
+                })
+        })
         || p.research_base == 0
         || p.headquarters_research == 0
         || p.headquarters_research > 5000

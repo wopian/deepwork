@@ -110,5 +110,108 @@
   "base_power": 1,
   "power_per_level": 5,
   "tactics_depth": 40,
-  "specialisation_depth": 300
+  "specialisation_depth": 300,
+  "headquarters_starting": {
+    "excavation": [
+      {
+        "rank": 3,
+        "upgrades": [
+          "drill"
+        ]
+      },
+      {
+        "rank": 6,
+        "upgrades": [
+          "supports"
+        ]
+      },
+      {
+        "rank": 10,
+        "upgrades": [
+          "shaft"
+        ]
+      }
+    ],
+    "logistics": [
+      {
+        "rank": 3,
+        "upgrades": [
+          "conveyor"
+        ]
+      },
+      {
+        "rank": 6,
+        "upgrades": [
+          "minecart"
+        ]
+      },
+      {
+        "rank": 10,
+        "upgrades": [
+          "train"
+        ]
+      }
+    ],
+    "metallurgy": [
+      {
+        "rank": 3,
+        "upgrades": [
+          "furnace",
+          "power"
+        ]
+      },
+      {
+        "rank": 6,
+        "upgrades": [
+          "chemical"
+        ]
+      },
+      {
+        "rank": 10,
+        "upgrades": [
+          "electrolytic"
+        ]
+      }
+    ],
+    "prospecting": [
+      {
+        "rank": 3,
+        "upgrades": [
+          "survey"
+        ]
+      },
+      {
+        "rank": 6,
+        "upgrades": [
+          "pump"
+        ]
+      },
+      {
+        "rank": 10,
+        "upgrades": [
+          "trace"
+        ]
+      }
+    ],
+    "reclamation": [
+      {
+        "rank": 3,
+        "upgrades": [
+          "recovery"
+        ]
+      },
+      {
+        "rank": 6,
+        "upgrades": [
+          "reclaimer"
+        ]
+      },
+      {
+        "rank": 10,
+        "upgrades": [
+          "slagcrusher"
+        ]
+      }
+    ]
+  }
 }
