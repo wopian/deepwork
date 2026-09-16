@@ -12,6 +12,7 @@ export interface Game {
   seed: number;
   site: number;
   profile: number;
+  challenge: string;
   trace_feed: Record<string, number>;
   ticks: number;
   credits: string;
@@ -50,7 +51,7 @@ export interface Game {
   excavated: number;
   discoveries: number[];
   quotes: Record<string, number>;
-  purchase_blockers: Record<string,string>;
+  purchase_blockers: Record<string, string>;
   retirement_award: number;
   site_objectives: string[];
   contracts: { product: string; amount: number; complete: boolean }[];

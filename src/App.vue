@@ -21,6 +21,7 @@ const materialUpgrades = upgradeRequirements.filter(
   (u) => Object.keys(u.inputs).length,
 );
 const selectedSite = ref(0);
+const selectedChallenge = ref("");
 function sectionPath(section: number[]) {
   return section
     .map((open, i) => (open ? `M${i % 64} ${Math.floor(i / 64)}h1v1h-1z` : ""))
@@ -125,6 +126,15 @@ onMounted(start);
       <p v-for="blocker in state.offline.blockers">{{ blocker }}</p>
       <button @click="hideOffline = true">Continue →</button>
     </section>
+    <p class="notice" v-if="state?.challenge">
+      SITE CHALLENGE ·
+      {{
+        state.challenge === "hard_rock"
+          ? "Hard rock: 50% more excavation work."
+          : "Long haul: 50% longer underground routes."
+      }}
+      Steel + 300 m awards 5 extra retirement research.
+    </p>
     <div class="page-heading">
       <div class="eyebrow">SMALL CREW. DEEP AMBITIONS.</div>
       <div class="title-row">
@@ -253,7 +263,11 @@ onMounted(start);
                 <small>LEVEL {{ state?.levels[u[0]] ?? 0 }}</small>
               </div>
               <b>◈ {{ format(cost(u[0])) }}</b>
-              <small class="upgrade-blocker" v-if="state?.purchase_blockers[u[0]]">{{ state.purchase_blockers[u[0]] }}</small>
+              <small
+                class="upgrade-blocker"
+                v-if="state?.purchase_blockers[u[0]]"
+                >{{ state.purchase_blockers[u[0]] }}</small
+              >
             </button>
           </div>
         </aside>
@@ -605,6 +619,22 @@ onMounted(start);
           Research earned:
           {{ state?.retirement_award ?? 0 }}
         </p>
+        <label
+          >Optional challenge
+          <select v-model="selectedChallenge">
+            <option value="">Standard operation</option>
+            <option value="hard_rock">
+              Hard rock · 50% more excavation work
+            </option>
+            <option value="long_haul">
+              Long haul · 50% longer underground routes
+            </option>
+          </select>
+        </label>
+        <p v-if="selectedChallenge">
+          Produce steel and reach 300 m at the next site for 5 extra retirement
+          research. Challenge lasts for that site.
+        </p>
         <div class="site-options">
           <label v-for="(profile, i) in profiles"
             ><input type="radio" v-model="selectedSite" :value="i" />
@@ -617,7 +647,7 @@ onMounted(start);
           class="primary"
           @click="
             () => {
-              act('retire', '', selectedSite);
+              act('retire', selectedChallenge, selectedSite);
               showRetire = false;
             }
           "

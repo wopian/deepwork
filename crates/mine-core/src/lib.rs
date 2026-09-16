@@ -99,6 +99,8 @@ pub struct Game {
     pub site: u32,
     #[serde(default)]
     pub profile: usize,
+    #[serde(default)]
+    pub challenge: String,
     pub ticks: u64,
     #[serde(with = "decimal")]
     pub credits: u64,
@@ -225,6 +227,7 @@ impl Game {
             seed,
             site,
             profile: 0,
+            challenge: String::new(),
             ticks: 0,
             credits: 30,
             workers: 3,
@@ -421,6 +424,11 @@ impl Game {
         let mut mined = 0;
         let dig_rate = (((self.crew.diggers as f64 * self.throughput("drill")
             / sites()[self.profile].hardness
+            / if self.challenge == "hard_rock" {
+                1.5
+            } else {
+                1.
+            }
             / self.rock_work()
             * match self.specialisation.as_deref() {
                 Some("bulk") => 1.3,
@@ -518,10 +526,22 @@ impl Game {
             .windows(2)
             .map(|p| p[0][0].abs_diff(p[1][0]) + p[0][1].abs_diff(p[1][1]))
             .sum();
-        let duration =
-            2 + (route_length as f64 * 2. / (speed as f64 * sites()[self.profile].haul)) as u32;
+        let duration = 2
+            + (route_length as f64
+                * 2.
+                * if self.challenge == "long_haul" {
+                    1.5
+                } else {
+                    1.
+                }
+                / (speed as f64 * sites()[self.profile].haul)) as u32;
         let haul_rate = (1000.
             * self.crew.haulers as f64
+            * if !offline && self.boosts[0] > 0 && matches!(transport, "carrying" | "wheelbarrow") {
+                1.5
+            } else {
+                1.
+            }
             * self.throughput("conveyor")
             * (1. + 0.05 * self.ranks.get("logistics").copied().unwrap_or(0) as f64)
             * (if self.level("conveyor") > 0 { 3. } else { 1. })
@@ -586,6 +606,12 @@ impl Game {
         let sorted = sort_budget - sort_left;
         let power_demand =
             1 + self.level("chemical") + 2 * self.level("electrolytic") + 3 * self.level("trace");
+        let power_demand = power_demand as f64
+            * if !offline && self.boosts[2] > 0 {
+                1.5
+            } else {
+                1.
+            };
         let power_supply = 1 + 5 * self.level("power");
         let power_factor = (power_supply as f64 / power_demand as f64).min(1.);
         let process_rate = (power_factor
@@ -793,6 +819,9 @@ impl Game {
         .enumerate()
         {
             self.flow_window[i] += n;
+        }
+        if !self.challenge.is_empty() && self.depth() >= 300 && self.steel_made {
+            self.site_objectives.insert("challenge".into());
         }
         let seconds = ((self.ticks - 1) % 20 + 1) as f64 / 20.;
         for (name, reached) in [
@@ -1173,7 +1202,11 @@ impl Game {
                 if a.value > 2 {
                     return Err("Unknown site".into());
                 }
+                if !["", "hard_rock", "long_haul"].contains(&a.target.as_str()) {
+                    return Err("Unknown site challenge".into());
+                }
                 let mut next = Game::new(self.seed.wrapping_add(7919 + a.value), self.site + 1);
+                next.challenge = a.target;
                 next.profile = a.value as usize;
                 next.milestones = self.milestones.clone();
                 next.blueprint = self.blueprint.clone();
@@ -1259,7 +1292,8 @@ impl Game {
         if self.version != VERSION {
             return Err("Unsupported save version".into());
         }
-        if self.profile >= sites().len()
+        if !["", "hard_rock", "long_haul"].contains(&self.challenge.as_str())
+            || self.profile >= sites().len()
             || self.heights.len() != 64
             || self.heights.iter().any(|h| *h > 100000)
             || self.workers < 3
@@ -1716,5 +1750,34 @@ mod throughput_tests {
         assert_eq!(g.flow_window[1], 0);
         assert!(g.shipments.is_empty());
         assert_eq!(g.stages[1].blocker, "Cargo buffers full");
+    }
+}
+
+#[cfg(test)]
+mod challenge_tests {
+    use super::*;
+    #[test]
+    fn retirement_matches_preview_and_resets_site_choices() {
+        let mut g = Game::default();
+        g.heights[32] = 150;
+        g.steel_made = true;
+        g.challenge = "hard_rock".into();
+        g.specialisation = Some("bulk".into());
+        g.tick(&materials(), false);
+        let award = g.award();
+        let research = g.research;
+        assert!(g.site_objectives.contains("challenge"));
+        g.action(Action {
+            sequence: 1,
+            kind: "retire".into(),
+            target: "long_haul".into(),
+            value: 1,
+        })
+        .unwrap();
+        assert_eq!(g.research, research + award);
+        assert_eq!(g.records.last().unwrap().research, award);
+        assert_eq!(g.challenge, "long_haul");
+        assert!(g.specialisation.is_none());
+        assert!(g.site_objectives.is_empty());
     }
 }
