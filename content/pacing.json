@@ -103,7 +103,7 @@
   ],
   "starter_iron_multiplier": 4,
   "headquarters_research": 700,
-  "furnace_demand": 5,
+  "furnace_demand": 6,
   "chemical_demand": 1,
   "electrolysis_demand": 2,
   "trace_demand": 3,
