@@ -3,10 +3,10 @@ import { onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { Application, Graphics, Text, Container } from "pixi.js";
 // Pixi shader/uniform polyfills preserve the native CSP without eval.
 import "pixi.js/unsafe-eval";
-import { state, materials } from "./game";
+import { state, materials, terrainEpoch } from "./game";
 import { WasteParticles } from "./waste";
 import profiles from "../content/sites.json";
-import { routePosition } from "./routes";
+import { routePosition, cargoPosition } from "./routes";
 import { preferences } from "./preferences";
 const host = ref<HTMLDivElement>();
 let app: Application | undefined;
@@ -54,6 +54,7 @@ function draw() {
     ? Object.values(g.tailings).reduce((a, b) => a + b, 0) + g.slag + g.depleted
     : 0;
   const key = [
+    terrainEpoch.value,
     g?.site,
     g?.seed,
     g?.profile,
@@ -322,7 +323,9 @@ onMounted(async () => {
     telemetryFrames++;
     if (host.value && performance.now() - telemetryTime > 1000) {
       const now = performance.now();
-      host.value.dataset.fps = String(Math.round(telemetryFrames * 1000 / (now - telemetryTime)));
+      host.value.dataset.fps = String(
+        Math.round((telemetryFrames * 1000) / (now - telemetryTime)),
+      );
       telemetryFrames = 0;
       telemetryTime = now;
       host.value.dataset.workers = String(shown);
@@ -334,7 +337,14 @@ onMounted(async () => {
         ? cargo.path.map(([x, y]) => [235 + x * 7, 208 + y * 7])
         : [[459, 208 + (cargo.depth / 2) * 7]];
       points.push([points[points.length - 1]![0], 185], [735, 185]);
-      const [x, y] = routePosition(points, progress);
+      const leg = cargoPosition(
+        cargo.legs ?? [],
+        cargo.duration - cargo.remaining,
+      );
+      const [x, y] = leg
+        ? [235 + leg.point[0] * 7, 208 + leg.point[1] * 7]
+        : routePosition(points, progress);
+      const mode = leg?.mode ?? cargo.mode;
       rect(
         actors,
         x,
@@ -343,8 +353,12 @@ onMounted(async () => {
         5,
         parseInt(materials[cargo.material].color.slice(1), 16),
       );
-      if (cargo.mode === "minecart" || cargo.mode === "train") {
+      if (mode === "minecart" || mode === "train") {
         rect(actors, x - 2, y + 5, 13, 4, 0x8c9ba5);
+      } else if (mode === "lift") {
+        rect(actors, x - 2, y - 3, 1, 12, 0x8c9ba5);
+        rect(actors, x + 10, y - 3, 1, 12, 0x8c9ba5);
+        rect(actors, x - 2, y + 8, 13, 1, 0x8c9ba5);
       }
     }
   });

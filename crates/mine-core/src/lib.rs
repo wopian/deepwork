@@ -625,9 +625,14 @@ impl Game {
             }
         }
         if self.ticks % 20 == 0 {
-            logistics::arrive(&mut self.shipments, &mut self.hauled, cap);
+            logistics::arrive_at_speed(
+                &mut self.shipments,
+                &mut self.hauled,
+                cap,
+                if !offline && self.boosts[1] > 0 { 2 } else { 1 },
+            );
         }
-        let (transport, speed) = logistics::mode(&self.levels);
+        let (transport, _) = logistics::mode(&self.levels);
         let route_depth = self.depth();
         if let Some(cell) = self.removed.last() {
             let origin = [cell.x, cell.y];
@@ -635,20 +640,12 @@ impl Game {
                 self.haul_path = self.terrain.surface_route(origin);
             }
         }
-        let route_length: u32 = self
-            .haul_path
-            .windows(2)
-            .map(|p| p[0][0].abs_diff(p[1][0]) + p[0][1].abs_diff(p[1][1]))
-            .sum();
-        let duration = 2
-            + (route_length as f64
-                * 2.
-                * if self.challenge == "long_haul" {
-                    1.5
-                } else {
-                    1.
-                }
-                / (speed as f64 * sites()[self.profile].haul)) as u32;
+        let terrain_factor = if self.challenge == "long_haul" {
+            1.5
+        } else {
+            1.
+        } / sites()[self.profile].haul;
+        let (legs, duration) = logistics::route(&self.haul_path, &self.levels, terrain_factor);
         let haul_rate = (1000.
             * self.crew.haulers as f64
             * if !offline && self.boosts[0] > 0 && matches!(transport, "carrying" | "wheelbarrow") {
@@ -693,6 +690,7 @@ impl Game {
                     depth: route_depth,
                     mode: transport.into(),
                     path: self.haul_path.clone(),
+                    legs: legs.clone(),
                 });
             }
             remaining -= n;
@@ -1498,7 +1496,18 @@ impl Game {
         let n = materials().len();
         if self.shipments.len() > 20000
             || self.shipments.iter().any(|s| {
-                s.path.len() > 100000
+                s.duration == 0
+                    || s.legs.len() > 100002
+                    || s.legs.iter().any(|l| {
+                        l.milliseconds == 0
+                            || [l.from, l.to].iter().any(|p| {
+                                p[0] < 0
+                                    || p[0] > 72
+                                    || p[1] < -3
+                                    || p[1] >= terrain::MAX_ROWS as i32
+                            })
+                    })
+                    || s.path.len() > 100000
                     || s.path
                         .iter()
                         .any(|p| p[0] >= 64 || p[1] >= terrain::MAX_ROWS)
@@ -1999,6 +2008,7 @@ mod offline_idle_tests {
             depth: 100,
             mode: "carrying".into(),
             path: vec![],
+            legs: vec![],
         });
         assert!(!g.quiescent(&materials()));
     }

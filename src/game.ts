@@ -36,6 +36,12 @@ export interface Game {
     depth: number;
     mode: string;
     path: [number, number][];
+    legs: {
+      from: [number, number];
+      to: [number, number];
+      mode: string;
+      milliseconds: number;
+    }[];
   }[];
   crew: Record<string, number>;
   crew_priority: string;
@@ -87,6 +93,7 @@ export interface Game {
   steel_made: boolean;
 }
 export const state = shallowRef<Game | null>(null);
+export const terrainEpoch = shallowRef(0);
 export const error = shallowRef("");
 export const native = isTauri();
 export function format(n: number | string) {
@@ -141,6 +148,7 @@ export async function start() {
     const channel = new Channel<{ state: Game; reset: boolean }>();
     channel.onmessage = (update) => {
       const g = update.state;
+      if (update.reset) terrainEpoch.value++;
       if (!update.reset && state.value?.site === g.site) {
         g.terrain.chunks = {
           ...state.value.terrain.chunks,
@@ -192,6 +200,7 @@ export async function importSave(file: File) {
     state.value = await invoke<Game>("import_save", {
       data: await file.text(),
     });
+    terrainEpoch.value++;
   } catch (e) {
     error.value = String(e);
   }
