@@ -2,6 +2,7 @@
 import { onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { Application, Graphics, Text, Container } from "pixi.js";
 import { state, materials } from "./game";
+import profiles from "../content/sites.json";
 import { preferences } from "./preferences";
 const host = ref<HTMLDivElement>();
 let app: Application | undefined;
@@ -70,12 +71,20 @@ function draw() {
                   ? 4
                   : 5;
       const pool = materials.filter((m) => m.tier <= tier);
+      pool.push(
+        ...materials.filter(
+          (m) =>
+            m.tier <= tier && profiles[g?.profile ?? 0].focus.includes(m.id),
+        ),
+      );
       const id =
-        hash % 100n < 55n
-          ? y < 4
-            ? 0
-            : 1
-          : pool[Number((hash >> 8n) % BigInt(pool.length))].id;
+        x >= 30 && x <= 34 && y % 24 < 3
+          ? [3, 5, 6][Math.floor(y / 24) % 3]
+          : hash % 100n < 55n
+            ? y < 4
+              ? 0
+              : 1
+            : pool[Number((hash >> 8n) % BigInt(pool.length))].id;
       if (id > 1) {
         const m = materials[id];
         rect(

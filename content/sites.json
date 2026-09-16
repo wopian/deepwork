@@ -1,0 +1,23 @@
+[
+  {
+    "name": "Copper Ridge",
+    "focus": [3, 4, 8, 9],
+    "hardness": 1.0,
+    "haul": 1.0,
+    "description": "Balanced ground. More copper, iron and tin."
+  },
+  {
+    "name": "Crystal Basin",
+    "focus": [2, 24, 42, 43, 48, 49],
+    "hardness": 0.9,
+    "haul": 0.8,
+    "description": "Softer ground and crystal feeds. Hauling takes 25% longer."
+  },
+  {
+    "name": "Deep Granite",
+    "focus": [29, 30, 31, 34, 54, 55],
+    "hardness": 1.25,
+    "haul": 1.2,
+    "description": "Harder rock, specialist minerals and faster haul roads."
+  }
+]

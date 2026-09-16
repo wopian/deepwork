@@ -10,6 +10,7 @@ export interface Game {
   version: number;
   seed: number;
   site: number;
+  profile: number;
   ticks: number;
   credits: string;
   workers: number;
@@ -44,6 +45,7 @@ export interface Game {
   contracts: { product: string; amount: number; complete: boolean }[];
   records: {
     site: number;
+    profile: number;
     depth: number;
     research: number;
     excavated: number;

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import World from "./World.vue";
+import profiles from "../content/sites.json";
 import recipes from "../content/recipes.json";
 import { preferences } from "./preferences";
 import {
@@ -15,6 +16,7 @@ import {
   exportSave,
   importSave,
 } from "./game";
+const selectedSite = ref(0);
 const tab = ref("Operations");
 const query = ref("");
 const showRetire = ref(false);
@@ -56,7 +58,7 @@ onMounted(start);
       </nav>
       <div class="site-tag">
         <i /> SITE {{ String(state?.site ?? 1).padStart(2, "0") }}
-        <span> · COPPER RIDGE</span>
+        <span> · {{ profiles[state?.profile ?? 0].name.toUpperCase() }}</span>
       </div>
     </header>
     <div class="notice" v-if="error" role="status">
@@ -97,9 +99,7 @@ onMounted(start);
           <small>DEPTH REACHED</small><strong>{{ depth }} <em>m</em></strong
           ><span
             >Next frontier ·
-            {{
-              state?.levels.shaft ? 300 * (1 + state.levels.shaft) : 100
-            }}
+            {{ state?.levels.shaft ? 300 * (1 + state.levels.shaft) : 100 }}
             m</span
           >
         </div>
@@ -452,12 +452,19 @@ onMounted(start);
                 .length ?? 0)
           }}
         </p>
+        <div class="site-options">
+          <label v-for="(profile, i) in profiles"
+            ><input type="radio" v-model="selectedSite" :value="i" />
+            <strong>{{ profile.name }}</strong>
+            <p>{{ profile.description }}</p></label
+          >
+        </div>
         <button @click="showRetire = false">Keep mining</button
         ><button
           class="primary"
           @click="
             () => {
-              act('retire', '', 0);
+              act('retire', '', selectedSite);
               showRetire = false;
             }
           "

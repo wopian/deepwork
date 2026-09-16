@@ -27,6 +27,20 @@ pub fn recipes() -> &'static [Recipe] {
         serde_json::from_str(include_str!("../../../content/recipes.json")).expect("valid recipes")
     })
 }
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SiteProfile {
+    pub name: String,
+    pub focus: Vec<usize>,
+    pub hardness: f64,
+    pub haul: f64,
+    pub description: String,
+}
+pub fn sites() -> &'static [SiteProfile] {
+    static SITES: std::sync::OnceLock<Vec<SiteProfile>> = std::sync::OnceLock::new();
+    SITES.get_or_init(|| {
+        serde_json::from_str(include_str!("../../../content/sites.json")).expect("valid sites")
+    })
+}
 pub fn materials() -> Vec<Material> {
     serde_json::from_str(include_str!("../../../content/materials.json"))
         .expect("valid material catalogue")
@@ -55,6 +69,8 @@ pub struct Game {
     pub version: u32,
     pub seed: u64,
     pub site: u32,
+    #[serde(default)]
+    pub profile: usize,
     pub ticks: u64,
     #[serde(with = "decimal")]
     pub credits: u64,
@@ -156,6 +172,7 @@ impl Game {
             version: VERSION,
             seed,
             site,
+            profile: 0,
             ticks: 0,
             credits: 30,
             workers: 3,
@@ -253,6 +270,9 @@ impl Game {
             + 5 * self.contracts.iter().filter(|c| c.complete).count() as u64
     }
     pub fn cell(&self, x: u32, y: u32, cat: &[Material]) -> usize {
+        if (30..=34).contains(&x) && y % 24 < 3 {
+            return [3, 5, 6][((y / 24) % 3) as usize];
+        }
         let h = (self
             .seed
             .wrapping_add((x / 4) as u64 * 374761393)
@@ -269,7 +289,12 @@ impl Game {
             1500..=2999 => 4,
             _ => 5,
         };
-        let pool: Vec<_> = cat.iter().filter(|m| m.tier <= tier).collect();
+        let mut pool: Vec<_> = cat.iter().filter(|m| m.tier <= tier).collect();
+        let profile = &sites()[self.profile];
+        pool.extend(
+            cat.iter()
+                .filter(|m| m.tier <= tier && profile.focus.contains(&m.id)),
+        );
         pool[((h >> 8) as usize) % pool.len()].id
     }
     fn throughput(&self, k: &str) -> f64 {
@@ -299,8 +324,8 @@ impl Game {
         let cap = 20000 + 5000 * self.level("capacity") as u64;
         let ore_total: u64 = self.ore.values().sum();
         let mut mined = 0;
-        let dig_rate = (((self.crew.diggers as f64
-            * self.throughput("drill")
+        let dig_rate = (((self.crew.diggers as f64 * self.throughput("drill")
+            / sites()[self.profile].hardness
             * (1. + 0.05 * self.ranks.get("excavation").copied().unwrap_or(0) as f64))
             * (if !offline && self.boosts[0] > 0 {
                 1.5
@@ -381,7 +406,8 @@ impl Game {
         }
         let (transport, speed) = logistics::mode(&self.levels);
         let route_depth = self.depth();
-        let duration = 2 + route_depth / speed;
+        let duration =
+            2 + (route_depth as f64 / (speed as f64 * sites()[self.profile].haul)) as u32;
         let haul_rate = (1000.
             * self.crew.haulers as f64
             * self.throughput("conveyor")
@@ -849,6 +875,7 @@ impl Game {
                     return Err("Unknown site".into());
                 }
                 let mut next = Game::new(self.seed.wrapping_add(7919 + a.value), self.site + 1);
+                next.profile = a.value as usize;
                 next.research = self.research + award;
                 next.discoveries = self.discoveries.clone();
                 next.ranks = self.ranks.clone();
@@ -876,7 +903,10 @@ impl Game {
     }
     pub fn migrate(&mut self) -> Result<(), String> {
         if self.version == 1 {
-            if self.heights.len() != 64 || self.heights.iter().any(|h| *h > 100000) {
+            if self.profile >= sites().len()
+                || self.heights.len() != 64
+                || self.heights.iter().any(|h| *h > 100000)
+            {
                 return Err("Invalid legacy terrain".into());
             }
             self.terrain = terrain::Terrain::from_columns(&self.heights);
@@ -889,7 +919,8 @@ impl Game {
         if self.version != VERSION {
             return Err("Unsupported save version".into());
         }
-        if self.heights.len() != 64
+        if self.profile >= sites().len()
+            || self.heights.len() != 64
             || self.heights.iter().any(|h| *h > 100000)
             || self.workers < 3
             || self.workers > 10000
@@ -1097,5 +1128,29 @@ mod pipeline_tests {
         assert!(g.concentrate[&2] < 20000);
         g.tick(&materials(), false);
         assert!(g.flow_window[2] > 0);
+    }
+}
+
+#[cfg(test)]
+mod site_tests {
+    use super::*;
+    #[test]
+    fn every_profile_guarantees_steel_feed() {
+        let cat = materials();
+        for profile in 0..sites().len() {
+            let mut g = Game::default();
+            g.profile = profile;
+            assert_eq!(g.cell(32, 0, &cat), 3);
+            assert_eq!(g.cell(32, 24, &cat), 5);
+            assert_eq!(g.cell(32, 48, &cat), 6);
+        }
+    }
+    #[test]
+    fn site_profiles_change_deposits() {
+        let cat = materials();
+        let a = Game::default();
+        let mut b = a.clone();
+        b.profile = 1;
+        assert!((0..64).any(|x| a.cell(x, 100, &cat) != b.cell(x, 100, &cat)));
     }
 }
