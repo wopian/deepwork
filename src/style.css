@@ -702,3 +702,6 @@ nav {
 .crew-roster { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 16px; margin: 0; color: var(--muted); font: 11px monospace; }
 
 .upgrade-blocker { grid-column: 2 / -1; white-space: normal; font-size: 11px; }
+
+.world-districts { position: absolute; bottom: 36px; left: 12px; right: 12px; display:flex; gap:4px; flex-wrap:wrap; pointer-events:none; }
+.world-districts button { pointer-events:auto; padding:6px 10px; background:#101820ed; font:10px monospace; }

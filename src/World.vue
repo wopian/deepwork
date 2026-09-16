@@ -3,7 +3,7 @@ import { onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { Application, Graphics, Text, Container } from "pixi.js";
 // Pixi shader/uniform polyfills preserve the native CSP without eval.
 import "pixi.js/unsafe-eval";
-import { state, materials, terrainEpoch } from "./game";
+import { state, materials, terrainEpoch, format } from "./game";
 import { WasteParticles } from "./waste";
 import profiles from "../content/sites.json";
 import { routePosition, cargoPosition } from "./routes";
@@ -13,6 +13,7 @@ let app: Application | undefined;
 let world: Container;
 let terrain: Graphics;
 let actors: Graphics;
+let wasteLabel: Text;
 let t = 0;
 let telemetryTime = 0;
 let telemetryFrames = 0;
@@ -26,6 +27,7 @@ let dragY: number | null = null;
 let dragX: number | null = null;
 let offsetX = 0;
 let follow = false;
+let followCrew = false;
 let stopWatch: () => void = () => {};
 
 function rect(
@@ -63,6 +65,7 @@ function draw() {
     first,
     last,
     Math.floor(stored / 3000),
+    Math.floor((g?.lifetime_waste ?? 0) / 1000),
     JSON.stringify(g?.levels),
   ].join(":");
   if (key === drawnKey) return;
@@ -181,6 +184,11 @@ function draw() {
   const storedWaste = g
     ? Object.values(g.tailings).reduce((a, b) => a + b, 0) + g.slag + g.depleted
     : 0;
+  wasteLabel.text = `LIFETIME ${format((g?.lifetime_waste ?? 0) / 1000)} units`;
+  // Older spoil uses a bounded stack of coarse bands, independent of resource ledgers.
+  const strata = Math.min(12, Math.floor(Math.log2(1 + storedWaste / 1000)));
+  for (let band = 0; band < strata; band++)
+    rect(terrain, 925, 208 + band * 7, 150, 6, band % 2 ? 0x806044 : 0x8c9ba5);
   const waste = Math.min(64, 12 + storedWaste / 3000);
   for (let i = 0; i < 18; i++) {
     let h = Math.max(0, waste - Math.abs(i - 9) * 4);
@@ -207,6 +215,12 @@ onMounted(async () => {
   actors = new Graphics();
   world.addChild(terrain, actors);
   app.stage.addChild(world);
+  wasteLabel = new Text({
+    text: "",
+    style: { fontFamily: "monospace", fontSize: 9, fill: 0xe8dfc8 },
+  });
+  wasteLabel.position.set(925, 310);
+  world.addChild(wasteLabel);
   for (const [label, x] of [
     ["CAMP", 55],
     ["EXCAVATION", 370],
@@ -231,7 +245,15 @@ onMounted(async () => {
     if (!app) return;
     t += preferences.reducedMotion ? 0 : ticker.deltaTime;
     world.scale.set((app.screen.width / 1100) * zoom);
-    if (follow) {
+    if (followCrew && state.value?.removed.length) {
+      const cell = state.value.removed[state.value.removed.length - 1]!;
+      offsetX =
+        app.screen.width / 2 -
+        (((235 + cell.x * 7) * app.screen.width) / 1100) * zoom;
+      offsetY =
+        app.screen.height / 2 -
+        (((208 + cell.y * 7) * app.screen.width) / 1100) * zoom;
+    } else if (follow) {
       offsetY =
         80 -
         ((Math.max(...(state.value?.heights ?? [0])) * 7 * app.screen.width) /
@@ -369,6 +391,14 @@ onBeforeUnmount(() => {
   stopWatch();
   app?.destroy(true, { children: true });
 });
+function focusDistrict(x: number) {
+  if (!app) return;
+  follow = false;
+  followCrew = false;
+  offsetY = 0;
+  offsetX = app.screen.width / 2 - ((x * app.screen.width) / 1100) * zoom;
+  draw();
+}
 function wheel(e: WheelEvent) {
   zoom = Math.max(0.7, Math.min(2.5, zoom - e.deltaY * 0.001));
 }
@@ -382,6 +412,7 @@ function wheel(e: WheelEvent) {
       @pointerdown="
         (e: PointerEvent) => {
           follow = false;
+          followCrew = false;
           dragY = e.clientY;
           dragX = e.clientX;
           (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -413,6 +444,7 @@ function wheel(e: WheelEvent) {
             offsetX = 0;
             zoom = 1;
             follow = false;
+            followCrew = false;
             draw();
           }
         "
@@ -421,12 +453,35 @@ function wheel(e: WheelEvent) {
       ><button
         @click="
           () => {
+            followCrew = false;
             follow = !follow;
             draw();
           }
         "
       >
         Follow depth
+      </button>
+    </div>
+    <div class="world-districts">
+      <button
+        v-for="[label, x] in [
+          ['Camp', 100],
+          ['Pit', 459],
+          ['Plants', 800],
+          ['Waste', 1000],
+        ]"
+        @click="focusDistrict(Number(x))"
+      >
+        {{ label }}
+      </button>
+      <button
+        @click="
+          followCrew = !followCrew;
+          follow = false;
+        "
+        :aria-pressed="followCrew"
+      >
+        Follow crew
       </button>
     </div>
     <div class="world-caption">

@@ -45,6 +45,8 @@ try {
   await page.getByLabel("Number display").selectOption("full");
   await page.getByLabel("Visual quality").selectOption("low");
   await page.getByRole("button", { name: "Operations", exact: true }).click();
+  await page.getByRole("button", { name: "Waste", exact: true }).click();
+  await page.getByRole("button", { name: "Surface ↑", exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({
     path: output + "/mobile-preview.png",
