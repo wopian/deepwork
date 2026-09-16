@@ -35,19 +35,112 @@ pub fn decode(raw: &str) -> Result<Game, String> {
     if raw.len() > 32_000_000 {
         return Err("Save exceeds 32 MB".into());
     }
-    let header: serde_json::Value = serde_json::from_str(raw).map_err(|e| e.to_string())?;
+    let mut header: serde_json::Value = serde_json::from_str(raw).map_err(|e| e.to_string())?;
     if header.get("version").and_then(|v| v.as_u64()) != Some(mine_core::VERSION as u64) {
         return Err("Unsupported save version; archive and start a fresh campaign".into());
     }
+    let compact = match header.get("terrain_encoding").and_then(|v| v.as_str()) {
+        None => false,
+        Some("rle-v1") => true,
+        _ => return Err("Unsupported terrain encoding".into()),
+    };
+    let terrain = if compact {
+        let source = header.get_mut("terrain").ok_or("Missing terrain")?;
+        let mut t = mine_core::terrain::Terrain::default();
+        t.revision = source
+            .get("revision")
+            .and_then(|v| v.as_u64())
+            .ok_or("Invalid terrain revision")?;
+        t.chunks = decode_chunks(&source["chunks"], 512)?;
+        t.revealed = decode_chunks(&source["revealed"], 512)?;
+        t.visible = decode_chunks(&source["visible"], 4096)?;
+        *source = serde_json::to_value(mine_core::terrain::Terrain::default())
+            .map_err(|e| e.to_string())?;
+        Some(t)
+    } else {
+        None
+    };
     let mut g: Game = serde_json::from_value(header).map_err(|e| e.to_string())?;
+    if let Some(t) = terrain {
+        g.terrain = t;
+    }
     g.migrate()?;
     Ok(g)
+}
+/// Disk/export compression does not alter the full versioned IPC snapshot.
+pub fn encode(game: &Game) -> Result<String, String> {
+    let mut value = serde_json::to_value(game).map_err(|e| e.to_string())?;
+    value["terrain_encoding"] = serde_json::json!("rle-v1");
+    for (name, chunks) in [
+        ("chunks", &game.terrain.chunks),
+        ("revealed", &game.terrain.revealed),
+        ("visible", &game.terrain.visible),
+    ] {
+        let encoded: std::collections::BTreeMap<_, _> = chunks
+            .iter()
+            .map(|(id, bytes)| {
+                let mut runs: Vec<u64> = Vec::new();
+                for &byte in bytes {
+                    if runs.last() == Some(&(byte as u64)) {
+                        let n = runs.len();
+                        runs[n - 2] += 1;
+                    } else {
+                        runs.extend([1, byte as u64]);
+                    }
+                }
+                (id.to_string(), runs)
+            })
+            .collect();
+        value["terrain"][name] = serde_json::to_value(encoded).map_err(|e| e.to_string())?;
+    }
+    serde_json::to_string(&value).map_err(|e| e.to_string())
+}
+fn decode_chunks(
+    value: &serde_json::Value,
+    length: usize,
+) -> Result<std::collections::BTreeMap<u32, Vec<u8>>, String> {
+    let map = value.as_object().ok_or("Invalid compact terrain map")?;
+    if map.len() > 16384 {
+        return Err("Terrain chunk budget exceeded".into());
+    }
+    map.iter()
+        .map(|(key, value)| {
+            let id = key.parse::<u32>().map_err(|_| "Invalid terrain key")?;
+            if id >= mine_core::geometry::MAX_ROWS / 64 * mine_core::geometry::CHUNKS_ACROSS {
+                return Err("Invalid terrain key".into());
+            }
+            let runs = value.as_array().ok_or("Invalid terrain runs")?;
+            if runs.len() % 2 != 0 || runs.len() > length * 2 {
+                return Err("Invalid terrain runs".into());
+            }
+            let mut bytes = Vec::with_capacity(length);
+            for pair in runs.chunks_exact(2) {
+                let count = pair[0].as_u64().ok_or("Invalid terrain run length")?;
+                let byte = pair[1].as_u64().ok_or("Invalid terrain byte")?;
+                if count == 0
+                    || count > length as u64
+                    || byte > 255
+                    || bytes.len() + count as usize > length
+                {
+                    return Err("Invalid terrain run".into());
+                }
+                bytes.resize(bytes.len() + count as usize, byte as u8);
+            }
+            if bytes.len() != length {
+                return Err("Invalid terrain length".into());
+            }
+            Ok((id, bytes))
+        })
+        .collect()
 }
 pub fn save(path: &Path, game: &Game) -> Result<(), String> {
     game.validate()?;
     let temp = path.with_extension("tmp");
     let backup = path.with_extension("bak");
-    let data = serde_json::to_vec(game).map_err(|e| e.to_string())?;
+    let data = encode(game)?.into_bytes();
+    if data.len() > 32_000_000 {
+        return Err("Save exceeds 32 MB".into());
+    }
     {
         let mut f = File::create(&temp).map_err(|e| e.to_string())?;
         f.write_all(&data).map_err(|e| e.to_string())?;
@@ -122,6 +215,32 @@ mod tests {
         save(&p, &recovered).unwrap();
         assert!(load(&p).is_ok());
         assert!(load(&p.with_extension("bak")).is_ok());
+    }
+    #[test]
+    fn compact_terrain_roundtrip_preserves_masks_and_rejects_expansion() {
+        let mut game = Game::default();
+        for y in 0..128 {
+            game.terrain.excavate(256, y);
+            game.heights[256] = y + 1;
+        }
+        game.excavated = 128;
+        game.terrain.reveal(
+            game.seed,
+            game.profile,
+            256,
+            120,
+            16,
+            &mine_core::materials(),
+        );
+        let encoded = encode(&game).unwrap();
+        assert!(encoded.len() < serde_json::to_string(&game).unwrap().len() / 2);
+        let restored = decode(&encoded).unwrap();
+        assert_eq!(restored.terrain.chunks, game.terrain.chunks);
+        assert_eq!(restored.terrain.visible, game.terrain.visible);
+        assert_eq!(restored.terrain.revealed, game.terrain.revealed);
+        let mut broken: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        broken["terrain"]["chunks"]["4"] = serde_json::json!([999999999, 0]);
+        assert!(decode(&broken.to_string()).is_err());
     }
     #[test]
     fn unknown_versions_rejected() {

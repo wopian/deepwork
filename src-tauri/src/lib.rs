@@ -167,8 +167,7 @@ fn export_save(state: State<Runtime>) -> Result<String, String> {
     if let Some(raw) = state.legacy.lock().map_err(|e| e.to_string())?.as_ref() {
         return Ok(raw.clone());
     }
-    serde_json::to_string(&*state.game.lock().map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())
+    persistence::encode(&*state.game.lock().map_err(|e| e.to_string())?)
 }
 #[tauri::command]
 fn import_save(data: String, state: State<Runtime>) -> Result<Snapshot, String> {
@@ -217,7 +216,7 @@ fn reset_current(
     let mut legacy = state.legacy.lock().map_err(|e| e.to_string())?;
     let raw = match legacy.as_ref() {
         Some(raw) => raw.clone(),
-        None => serde_json::to_string(&*game).map_err(|e| e.to_string())?,
+        None => persistence::encode(&game)?,
     };
     let seed = fresh_identity();
     let mut candidate = Game::new(seed, 1);
