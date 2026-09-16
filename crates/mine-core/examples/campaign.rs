@@ -283,6 +283,7 @@ fn record(g: &Game, wall: u64, events: &mut BTreeMap<String, u64>) {
         ("retirement", g.site > 1),
         ("power", g.level("power") > 0),
         ("chemical", g.level("chemical") > 0),
+        ("electrolysis_built", g.level("electrolytic") > 0),
         ("precision", g.collection.contains("aluminium")),
         (
             "precision_controls",
@@ -358,7 +359,7 @@ fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
         } else {
             0
         };
-        std::fs::write(format!("target/campaign-{seed}.json"), serde_json::to_vec_pretty(&json!({"seed":seed,"visit":visit+1,"site":g.site,"depth":g.depth(),"next":g.pinned,"products":g.products,"trace":g.trace_feed,"levels":g.levels,"recipes":g.enabled_recipes,"paused_recipes":g.paused_recipes,"credits":g.credits,"ranks":g.ranks,"research":g.research,"invested":g.research_invested(),"shaft_blocker":g.purchase_blocker("shaft")})).unwrap()).unwrap();
+        std::fs::write(format!("target/campaign-{seed}.json"), serde_json::to_vec_pretty(&json!({"seed":seed,"visit":visit+1,"events":events,"site":g.site,"depth":g.depth(),"next":g.pinned,"products":g.products,"trace":g.trace_feed,"levels":g.levels,"recipes":g.enabled_recipes,"paused_recipes":g.paused_recipes,"credits":g.credits,"ranks":g.ranks,"research":g.research,"invested":g.research_invested(),"shaft_blocker":g.purchase_blocker("shaft")})).unwrap()).unwrap();
         eprintln!(
             "seed={seed} strategy={style} mode={mode} visit={} depth={} next={:?} credits={}",
             visit + 1,
@@ -450,7 +451,7 @@ fn main() {
     }
     println!(
         "{}",
-        serde_json::to_string_pretty(&json!({"save_version":mine_core::VERSION,"generator_version":mine_core::geometry::GENERATOR_VERSION,"days":days,"compute_seconds":started.elapsed().as_secs(),"runs":runs,"milestones":medians}))
+        serde_json::to_string_pretty(&json!({"save_version":mine_core::VERSION,"generator_version":mine_core::geometry::GENERATOR_VERSION,"days":days,"compute_seconds":started.elapsed().as_secs(),"milestone_definitions":{"furnace":"first iron product","electrolysis_built":"electrolysis hall purchased","precision":"first aluminium product","rare_earth":"first permanent magnet product","headquarters":"megaproject delivered"},"runs":runs,"milestones":medians}))
             .unwrap()
     );
     if runs.iter().any(|run| run["complete"] != true) {
