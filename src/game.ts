@@ -5,6 +5,8 @@ import { displayNumber } from "./numbers";
 import { preferences, purchaseSound } from "./preferences";
 export const materials = catalogue;
 export interface Game {
+  campaign_id: string;
+  requires_reset: boolean;
   enabled_recipes: string[];
   megaproject: boolean;
   site_discoveries: number;
@@ -162,6 +164,7 @@ export async function start() {
     const channel = new Channel<{ state: Game; reset: boolean }>();
     channel.onmessage = (update) => {
       const g = update.state;
+      if (state.value && state.value.campaign_id !== g.campaign_id) return;
       if (update.reset) terrainEpoch.value++;
       if (!update.reset && state.value?.site === g.site) {
         g.terrain.chunks = {
@@ -195,6 +198,7 @@ export async function act(kind: string, target = "", value = 0) {
   pending = true;
   try {
     state.value = await invoke<Game>("command", {
+      campaignId: state.value.campaign_id,
       action: { sequence: state.value.last_sequence + 1, kind, target, value },
     });
     error.value = "";
@@ -230,5 +234,24 @@ export async function importSave(file: File) {
     terrainEpoch.value++;
   } catch (e) {
     error.value = String(e);
+  }
+}
+
+export async function resetCampaign(confirmation: string) {
+  if (!state.value || pending) return false;
+  pending = true;
+  try {
+    state.value = await invoke<Game>("reset_campaign", {
+      confirmation,
+      campaignId: state.value.campaign_id,
+    });
+    terrainEpoch.value++;
+    error.value = "";
+    return true;
+  } catch (e) {
+    error.value = String(e);
+    return false;
+  } finally {
+    pending = false;
   }
 }

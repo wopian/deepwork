@@ -15,6 +15,7 @@ struct Runtime {
     _save_lock: fs::File,
     game: Mutex<Game>,
     suspended: AtomicBool,
+    legacy: Mutex<Option<String>>,
     path: PathBuf,
     channel: Mutex<Option<Channel<Update>>>,
 }
@@ -30,6 +31,7 @@ struct Snapshot {
     game: Game,
     quotes: std::collections::BTreeMap<String, String>,
     retirement_award: u64,
+    requires_reset: bool,
     upgrade_previews: std::collections::BTreeMap<String, mine_core::UpgradePreview>,
     purchase_blockers: std::collections::BTreeMap<String, String>,
 }
@@ -56,6 +58,7 @@ impl From<Game> for Snapshot {
             })
             .collect();
         Self {
+            requires_reset: game.legacy_pending,
             game,
             quotes,
             retirement_award,
@@ -66,12 +69,12 @@ impl From<Game> for Snapshot {
 }
 #[derive(Default)]
 struct Stream {
-    identity: Option<(u32, u64)>,
+    identity: Option<(String, u32, u64)>,
     chunks: std::collections::BTreeMap<u32, Vec<u8>>,
 }
 impl Stream {
     fn update(&mut self, g: &Game) -> Update {
-        let reset = self.identity != Some((g.site, g.seed))
+        let reset = self.identity != Some((g.campaign_id.clone(), g.site, g.seed))
             || self
                 .chunks
                 .keys()
@@ -83,7 +86,7 @@ impl Stream {
                 .chunks
                 .retain(|id, bytes| self.chunks.get(id) != Some(bytes));
         }
-        self.identity = Some((g.site, g.seed));
+        self.identity = Some((g.campaign_id.clone(), g.site, g.seed));
         self.chunks = g.terrain.chunks.clone();
         Update {
             state: state.into(),
@@ -110,7 +113,7 @@ fn transition_background(
     timestamp: u64,
 ) -> Result<Snapshot, String> {
     let mut game = state.game.lock().map_err(|e| e.to_string())?;
-    if state.suspended.load(Ordering::Relaxed) != background {
+    if !game.legacy_pending && state.suspended.load(Ordering::Relaxed) != background {
         let mut candidate = game.clone();
         if background {
             candidate.last_saved = timestamp;
@@ -128,10 +131,13 @@ fn set_background(background: bool, state: State<Runtime>) -> Result<Snapshot, S
     transition_background(&state, background, now())
 }
 #[tauri::command]
-fn command(action: Action, state: State<Runtime>) -> Result<Snapshot, String> {
+fn command(action: Action, campaign_id: String, state: State<Runtime>) -> Result<Snapshot, String> {
     let mut g = state.game.lock().map_err(|e| e.to_string())?;
     if state.suspended.load(Ordering::Relaxed) {
         return Err("Resume the game before issuing commands".into());
+    }
+    if g.legacy_pending || g.campaign_id != campaign_id {
+        return Err("Campaign changed; refresh before issuing commands".into());
     }
     let mut candidate = g.clone();
     candidate.action(action)?;
@@ -142,6 +148,9 @@ fn command(action: Action, state: State<Runtime>) -> Result<Snapshot, String> {
 }
 #[tauri::command]
 fn export_save(state: State<Runtime>) -> Result<String, String> {
+    if let Some(raw) = state.legacy.lock().map_err(|e| e.to_string())?.as_ref() {
+        return Ok(raw.clone());
+    }
     serde_json::to_string(&*state.game.lock().map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())
 }
@@ -151,11 +160,58 @@ fn import_save(data: String, state: State<Runtime>) -> Result<Snapshot, String> 
     if state.suspended.load(Ordering::Relaxed) {
         return Err("Resume the game before importing a save".into());
     }
+    if game.legacy_pending {
+        return Err("Archive the legacy campaign before importing".into());
+    }
     let mut candidate = persistence::decode(&data)?;
+    candidate.campaign_id = fresh_identity().to_string();
     candidate.advance_offline(now(), &materials());
     save(&state.path, &candidate)?;
     *game = candidate.clone();
     Ok(candidate.into())
+}
+fn fresh_identity() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64;
+    timestamp.wrapping_add(NEXT.fetch_add(1, Ordering::Relaxed))
+}
+#[tauri::command]
+fn reset_campaign(
+    confirmation: String,
+    campaign_id: String,
+    state: State<Runtime>,
+) -> Result<Snapshot, String> {
+    reset_current(&state, &confirmation, &campaign_id)
+}
+fn reset_current(
+    state: &Runtime,
+    confirmation: &str,
+    campaign_id: &str,
+) -> Result<Snapshot, String> {
+    if confirmation != "RESET" {
+        return Err("Type RESET to confirm".into());
+    }
+    let mut game = state.game.lock().map_err(|e| e.to_string())?;
+    if game.campaign_id != campaign_id {
+        return Err("Campaign changed; refresh first".into());
+    }
+    let mut legacy = state.legacy.lock().map_err(|e| e.to_string())?;
+    let raw = match legacy.as_ref() {
+        Some(raw) => raw.clone(),
+        None => serde_json::to_string(&*game).map_err(|e| e.to_string())?,
+    };
+    let seed = fresh_identity();
+    let mut candidate = Game::new(seed, 1);
+    candidate.last_saved = now();
+    persistence::archive(&state.path, &raw, &seed.to_string())?;
+    save(&state.path, &candidate)?;
+    *game = candidate;
+    *legacy = None;
+    state.suspended.store(false, Ordering::Relaxed);
+    Ok(game.clone().into())
 }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -181,15 +237,24 @@ pub fn run() {
             let save_lock =
                 persistence::lock(&dir.join("mine.lock")).map_err(std::io::Error::other)?;
             let path = dir.join("mine.json");
-            let mut game = recover(&path)
-                .map_err(std::io::Error::other)?
-                .unwrap_or_default();
-            game.advance_offline(now(), &materials());
-            save(&path, &game).map_err(std::io::Error::other)?;
+            let legacy = persistence::legacy_source(&path).map_err(std::io::Error::other)?;
+            let mut game = if legacy.is_some() {
+                Game::default()
+            } else {
+                recover(&path)
+                    .map_err(std::io::Error::other)?
+                    .unwrap_or_else(|| Game::new(fresh_identity(), 1))
+            };
+            game.legacy_pending = legacy.is_some();
+            if !game.legacy_pending {
+                game.advance_offline(now(), &materials());
+                save(&path, &game).map_err(std::io::Error::other)?;
+            }
             app.manage(Runtime {
                 _save_lock: save_lock,
                 game: Mutex::new(game),
                 suspended: AtomicBool::new(false),
+                legacy: Mutex::new(legacy),
                 path,
                 channel: Mutex::new(None),
             });
@@ -207,7 +272,7 @@ pub fn run() {
                     let state = handle.state::<Runtime>();
                     if let Ok(mut g) = state.game.lock() {
                         let current = now();
-                        if state.suspended.load(Ordering::Relaxed) {
+                        if g.legacy_pending || state.suspended.load(Ordering::Relaxed) {
                             previous = current;
                             next_tick = std::time::Instant::now();
                             continue;
@@ -250,7 +315,8 @@ pub fn run() {
             command,
             export_save,
             import_save,
-            set_background
+            set_background,
+            reset_campaign
         ])
         .build(tauri::generate_context!())
         .expect("Tauri startup failed")
@@ -276,7 +342,9 @@ pub fn run() {
                     if !state.suspended.load(Ordering::Relaxed) {
                         g.last_saved = now();
                     }
-                    let _ = save(&state.path, &g);
+                    if !g.legacy_pending {
+                        let _ = save(&state.path, &g);
+                    }
                 };
             }
         });
@@ -327,6 +395,7 @@ mod lifecycle_tests {
             _save_lock: persistence::lock(&directory.join("mine.lock")).unwrap(),
             game: Mutex::new(Game::default()),
             suspended: AtomicBool::new(false),
+            legacy: Mutex::new(None),
             path: directory.join("mine.json"),
             channel: Mutex::new(None),
         };
@@ -343,6 +412,50 @@ mod lifecycle_tests {
         let recovered = recover(&state.path).unwrap().unwrap();
         assert_eq!(recovered.last_saved, 120);
         assert_eq!(recovered.ticks, 200);
+        drop(state);
+        fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod reset_tests {
+    use super::*;
+    #[test]
+    fn reset_archives_and_failures_preserve_campaign() {
+        let directory = std::env::temp_dir().join(format!("deepwork-reset-{}", fresh_identity()));
+        fs::create_dir_all(&directory).unwrap();
+        let state = Runtime {
+            _save_lock: persistence::lock(&directory.join("mine.lock")).unwrap(),
+            game: Mutex::new(Game::default()),
+            suspended: AtomicBool::new(false),
+            legacy: Mutex::new(None),
+            path: directory.join("mine.json"),
+            channel: Mutex::new(None),
+        };
+        let id = state.game.lock().unwrap().campaign_id.clone();
+        state.game.lock().unwrap().research = 100;
+        assert!(reset_current(&state, "cancel", &id).is_err());
+        fs::write(directory.join("archives"), "blocked").unwrap();
+        assert!(reset_current(&state, "RESET", &id).is_err());
+        assert_eq!(state.game.lock().unwrap().research, 100);
+        fs::remove_file(directory.join("archives")).unwrap();
+        let fresh = reset_current(&state, "RESET", &id).unwrap();
+        assert_ne!(fresh.game.campaign_id, id);
+        assert_eq!(fresh.game.research, 0);
+        assert_eq!(fresh.game.workers, 3);
+        assert!(fresh.game.offline.is_none());
+        assert!(reset_current(&state, "RESET", &id).is_err());
+        let archive = fs::read_dir(directory.join("archives"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        assert_eq!(persistence::load(&archive).unwrap().research, 100);
+        assert_eq!(
+            recover(&state.path).unwrap().unwrap().campaign_id,
+            fresh.game.campaign_id
+        );
         drop(state);
         fs::remove_dir_all(directory).unwrap();
     }

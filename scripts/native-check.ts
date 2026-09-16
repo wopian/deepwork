@@ -81,6 +81,7 @@ try {
   )
     throw new Error("Native simulation did not advance");
   const purchased = await invoke("command", {
+    campaignId: advanced.campaign_id,
     action: {
       sequence: advanced.last_sequence + 1,
       kind: "buy",

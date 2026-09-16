@@ -35,7 +35,11 @@ pub fn decode(raw: &str) -> Result<Game, String> {
     if raw.len() > 32_000_000 {
         return Err("Save exceeds 32 MB".into());
     }
-    let mut g: Game = serde_json::from_str(raw).map_err(|e| e.to_string())?;
+    let header: serde_json::Value = serde_json::from_str(raw).map_err(|e| e.to_string())?;
+    if header.get("version").and_then(|v| v.as_u64()) != Some(mine_core::VERSION as u64) {
+        return Err("Unsupported save version; archive and start a fresh campaign".into());
+    }
+    let mut g: Game = serde_json::from_value(header).map_err(|e| e.to_string())?;
     g.migrate()?;
     Ok(g)
 }
@@ -125,4 +129,46 @@ mod tests {
         g.version = 999;
         assert!(decode(&serde_json::to_string(&g).unwrap()).is_err());
     }
+}
+
+/// Inspect the header before attempting to decode an incompatible world.
+pub fn legacy_source(path: &Path) -> Result<Option<String>, String> {
+    for candidate in [path.to_path_buf(), path.with_extension("bak")] {
+        if !candidate.exists() {
+            continue;
+        }
+        if fs::metadata(&candidate).map_err(|e| e.to_string())?.len() > 32_000_000 {
+            return Err("Save exceeds 32 MB".into());
+        }
+        let raw = fs::read_to_string(&candidate).map_err(|e| e.to_string())?;
+        if let Ok(header) = serde_json::from_str::<serde_json::Value>(&raw) {
+            if let Some(version) = header.get("version").and_then(|v| v.as_u64()) {
+                if version > mine_core::VERSION as u64 {
+                    return Err("Unsupported newer save version".into());
+                }
+                if version < mine_core::VERSION as u64 {
+                    return Ok(Some(raw));
+                }
+                if version == mine_core::VERSION as u64 {
+                    return Ok(None);
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+pub fn archive(path: &Path, raw: &str, id: &str) -> Result<(), String> {
+    let directory = path
+        .parent()
+        .ok_or("Missing save directory")?
+        .join("archives");
+    fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(directory.join(format!("campaign-{id}.json")))
+        .map_err(|e| e.to_string())?;
+    file.write_all(raw.as_bytes())
+        .and_then(|_| file.sync_all())
+        .map_err(|e| e.to_string())
 }

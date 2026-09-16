@@ -16,7 +16,16 @@ import {
   start,
   exportSave,
   importSave,
+  resetCampaign,
 } from "./game";
+const showReset = ref(false);
+const resetText = ref("");
+async function confirmReset() {
+  if (await resetCampaign(resetText.value)) {
+    showReset.value = false;
+    resetText.value = "";
+  }
+}
 const materialUpgrades = upgradeRequirements.filter(
   (u) => Object.keys(u.inputs).length,
 );
@@ -117,6 +126,18 @@ onMounted(start);
         <span> · {{ profiles[state?.profile ?? 0].name.toUpperCase() }}</span>
       </div>
     </header>
+    <div class="notice" v-if="state?.requires_reset" role="status">
+      Older campaign requires a fresh start. Export remains available in
+      Records; reset archives the original save.
+      <button
+        @click="
+          showReset = true;
+          resetText = '';
+        "
+      >
+        Start fresh
+      </button>
+    </div>
     <div class="notice" v-if="error" role="status">
       {{ error }}<button @click="error = ''" aria-label="Dismiss">×</button>
     </div>
@@ -682,6 +703,19 @@ onMounted(start);
         </svg>
       </div>
       <h2>Save management</h2>
+      <p v-if="state?.requires_reset">
+        This older campaign uses incompatible terrain. Export it, then start
+        fresh. Reset also archives it automatically.
+      </p>
+      <button
+        :disabled="!state"
+        @click="
+          showReset = true;
+          resetText = '';
+        "
+      >
+        Reset campaign
+      </button>
       <button :disabled="!state" @click="exportSave">Export save</button
       ><label class="import"
         >Import save<input
@@ -699,6 +733,35 @@ onMounted(start);
       <span>DEEPWORK <b> / </b> ONE PIXEL AT A TIME.</span
       ><span>LOCAL SAVE · RUST SIMULATION · NO CLOUD REQUIRED</span>
     </footer>
+    <div v-if="showReset" class="modal-backdrop">
+      <section
+        class="card modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reset-title"
+      >
+        <h2 id="reset-title">Reset campaign?</h2>
+        <p>
+          This resets terrain, workers, inventory, credits, research, collection
+          and records. Your current save will be archived. Audio, display and
+          accessibility settings stay.
+        </p>
+        <label
+          >Type RESET to confirm<input v-model="resetText" autocomplete="off"
+        /></label>
+        <button
+          @click="
+            showReset = false;
+            resetText = '';
+          "
+        >
+          Cancel
+        </button>
+        <button :disabled="resetText !== 'RESET'" @click="confirmReset">
+          Start fresh campaign
+        </button>
+      </section>
+    </div>
     <div v-if="showRetire" class="modal-backdrop">
       <section class="card modal">
         <h2>Retire this operation?</h2>

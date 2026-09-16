@@ -4,7 +4,7 @@ pub mod terrain;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 pub const WIDTH: u32 = 64;
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 /// Deterministic fractional throughput without storing idle production credit.
 /// `rate` is thousandths of one work unit per tick; no multiplication by full age.
 fn work_budget(rate: u64, tick: u64) -> u64 {
@@ -106,6 +106,9 @@ pub struct Record {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Game {
     pub version: u32,
+    pub campaign_id: String,
+    #[serde(skip)]
+    pub legacy_pending: bool,
     #[serde(with = "decimal")]
     pub seed: u64,
     pub site: u32,
@@ -257,6 +260,8 @@ impl Game {
     pub fn new(seed: u64, site: u32) -> Self {
         Self {
             version: VERSION,
+            campaign_id: format!("{seed:016x}-{site}"),
+            legacy_pending: false,
             seed,
             site,
             profile: 0,
@@ -1533,6 +1538,7 @@ impl Game {
                     return Err("Unknown site challenge".into());
                 }
                 let mut next = Game::new(self.seed.wrapping_add(7919 + a.value), self.site + 1);
+                next.campaign_id = self.campaign_id.clone();
                 next.challenge = a.target;
                 next.profile = a.value as usize;
                 next.milestones = self.milestones.clone();
@@ -1593,15 +1599,8 @@ impl Game {
         }
     }
     pub fn migrate(&mut self) -> Result<(), String> {
-        if self.version == 1 {
-            if self.profile >= sites().len()
-                || self.heights.len() != 64
-                || self.heights.iter().any(|h| *h > 100000)
-            {
-                return Err("Invalid legacy terrain".into());
-            }
-            self.terrain = terrain::Terrain::from_columns(&self.heights);
-            self.version = VERSION;
+        if self.version != VERSION {
+            return Err("This save requires a fresh campaign; export or archive it first".into());
         }
         for (index, contract) in self.contracts.iter().enumerate() {
             if contract.complete {

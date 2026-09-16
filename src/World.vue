@@ -21,6 +21,7 @@ const wasteParticles = new WasteParticles(600);
 let drawnKey = "";
 let lastWaste = 0;
 let lastSite = 0;
+let lastCampaign = "";
 let zoom = 1;
 let offsetY = 0;
 let dragY: number | null = null;
@@ -354,6 +355,15 @@ onMounted(async () => {
     const g = state.value;
     productionAudio(g?.stages.reduce((sum, s) => sum + s.rate, 0) ?? 0);
     if (g) {
+      if (lastCampaign !== g.campaign_id) {
+        lastCampaign = g.campaign_id;
+        offsetX = 0;
+        offsetY = 0;
+        follow = false;
+        followCrew = false;
+        wasteParticles.items.length = 0;
+        lastWaste = g.lifetime_waste;
+      }
       if (lastSite !== g.site) {
         lastSite = g.site;
         lastWaste = g.lifetime_waste;
