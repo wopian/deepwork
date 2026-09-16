@@ -664,7 +664,7 @@ impl Game {
                 if geometry::depth(y) >= depth_limit {
                     return None;
                 }
-                let surface = y < 192;
+                let surface = y < geometry::PIT_ROWS;
                 if !surface && !pit_complete {
                     return None;
                 }
@@ -677,7 +677,7 @@ impl Game {
                     let shaft = x.abs_diff(WIDTH / 2) < 4;
                     // Complete shaft clearance before descending to the next cutting face.
                     if shaft
-                        && y > 192
+                        && y > geometry::PIT_ROWS
                         && !(WIDTH / 2 - 3..=WIDTH / 2 + 3)
                             .all(|sx| self.terrain.contains(sx, y - 1))
                     {

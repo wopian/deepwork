@@ -6,7 +6,7 @@ import "pixi.js/unsafe-eval";
 import { state, materials, terrainEpoch, format } from "./game";
 import { WasteParticles } from "./waste";
 import { TerrainView } from "./terrain-view";
-import { CELL_PIXEL, RESOURCE_UNIT } from "./geometry";
+import { CELL_PIXEL, CELLS_PER_METRE, RESOURCE_UNIT } from "./geometry";
 import { routePosition, cargoPosition } from "./routes";
 import { preferences, productionAudio } from "./preferences";
 const host = ref<HTMLDivElement>();
@@ -455,7 +455,7 @@ onMounted(async () => {
             235 + x * CELL_PIXEL,
             208 + y * CELL_PIXEL,
           ])
-        : [[459, 208 + cargo.depth * 4 * CELL_PIXEL]];
+        : [[459, 208 + cargo.depth * CELLS_PER_METRE * CELL_PIXEL]];
       points.push([points[points.length - 1]![0], 185], [735, 185]);
       const leg = cargoPosition(
         cargo.legs ?? [],

@@ -215,7 +215,7 @@ impl Network {
                 depth: b
                     .legs
                     .first()
-                    .map(|l| l.from[1].max(0) as u32 / 4)
+                    .map(|l| crate::geometry::depth(l.from[1].max(0) as u32))
                     .unwrap_or(0),
                 path: vec![],
                 legs: b.legs.clone(),

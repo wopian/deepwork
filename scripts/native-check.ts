@@ -1,4 +1,5 @@
 import { chromium, type Browser, type Locator } from "playwright-core";
+import { CELLS_PER_METRE } from "../src/geometry";
 import {
   mkdtemp,
   mkdir,
@@ -242,7 +243,7 @@ try {
         heapBytes: metrics.find((m: any) => m.name === "JSHeapUsedSize")?.value,
         nativeKb: memory ? Number(memory[1]!.replaceAll(",", "")) : null,
         telemetry,
-        depthMetres: Math.max(...status.heights) / 4,
+        depthMetres: Math.max(...status.heights) / CELLS_PER_METRE,
         excavated: status.excavated,
         chunks: Object.keys(status.terrain.chunks).length,
         shipments: status.transport.segments.reduce(
