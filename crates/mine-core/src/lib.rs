@@ -503,6 +503,7 @@ impl Game {
             self.hauled.values().sum::<u64>()
                 + self.shipments.iter().map(|s| s.amount).sum::<u64>(),
         ));
+        let haul_budget = remaining;
         let mut ore_ids: Vec<_> = self
             .ore
             .iter()
@@ -751,7 +752,7 @@ impl Game {
         }
         for (i, n) in [
             mined * 1000,
-            haul_rate - remaining,
+            haul_budget - remaining,
             sorted,
             process_rate - left,
             self.sold_mass - sold_before,
@@ -1685,5 +1686,19 @@ mod specialisation_tests {
         assert!(g.hauled.get(&0).copied().unwrap_or(0) <= 2);
         let restored: Game = serde_json::from_str(&serde_json::to_string(&g).unwrap()).unwrap();
         assert_eq!(restored.specialisation.as_deref(), Some("reclamation"));
+    }
+}
+
+#[cfg(test)]
+mod throughput_tests {
+    use super::*;
+    #[test]
+    fn full_haul_buffer_reports_no_transfer() {
+        let mut g = Game::default();
+        g.hauled.insert(0, 20000);
+        g.ore.insert(0, 1000);
+        g.tick(&materials(), false);
+        assert_eq!(g.flow_window[1], 0);
+        assert!(g.shipments.is_empty());
     }
 }

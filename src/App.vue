@@ -169,6 +169,7 @@ onMounted(start);
             >
           </div>
           <World />
+          <p class="crew-roster" v-if="state"><span v-for="(count, role) in state.crew" :key="role">{{ count }} {{ role }}</span></p>
           <div class="policy">
             <span>EXCAVATION STRATEGY</span
             ><button

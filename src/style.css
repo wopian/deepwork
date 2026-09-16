@@ -698,3 +698,5 @@ nav {
 .specialisation-options { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .specialisation-options small { white-space: normal; }
 @media (max-width: 600px) { .specialisation-options { grid-template-columns: 1fr; } }
+
+.crew-roster { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 16px; margin: 0; color: var(--muted); font: 11px monospace; }

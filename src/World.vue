@@ -212,16 +212,29 @@ onMounted(async () => {
     for (const particle of wasteParticles.items) {
       rect(actors, particle.x, particle.y, 3, 3, 0x8c9ba5);
     }
-    for (let i = 0; i < Math.min(g?.workers ?? 9, 100); i++) {
-      let x = 240 + ((i * 43 + t * (i % 2 ? 0.5 : -0.35) + 44800) % 430);
-      const col = Math.max(0, Math.min(63, Math.floor((x - 235) / 7)));
-      let y =
-        205 +
-        (g?.heights[col] ?? Math.floor(12 * Math.sin((col / 64) * Math.PI))) *
-          7;
-      rect(actors, x, y - 10, 5, 5, 0xe8dfc8);
-      rect(actors, x - 1, y - 5, 7, 5, 0xe5a34d);
-      rect(actors, x + 5, y - 8, 5, 2, 0x8c9ba5);
+    const crew = g?.crew ?? { diggers: 6, haulers: 3 };
+    let shown = 0;
+    const workerBudget = innerWidth < 700 ? 100 : 250;
+    for (const [role, count] of Object.entries(crew)) {
+      for (let i = 0; i < count && shown < workerBudget; i++, shown++) {
+        let x = 250 + i * 8, y = 185;
+        if (role === 'diggers') {
+          const cell = g?.removed[Math.max(0, g.removed.length - 1 - i % Math.max(1,g.removed.length))];
+          if (cell) { x = 235 + cell.x * 7; y = 208 + cell.y * 7 + 7; }
+        } else if (role === 'haulers') {
+          const cargo = g?.shipments[i % Math.max(1,g.shipments.length)];
+          if (cargo?.path.length) {
+            const points: [number,number][] = cargo.path.map(([px,py]) => [235+px*7,208+py*7+7]);
+            [x,y] = routePosition(points, 1-cargo.remaining/cargo.duration);
+          }
+        } else {
+          x = ({operators:735, engineers:690, prospectors:225, reclaimers:980} as Record<string,number>)[role] ?? 100;
+          x += (i % 8) * 8;
+        }
+        rect(actors,x,y-7,4,3,0xe8dfc8);
+        rect(actors,x,y-4,5,4,role === 'diggers' ? 0xe5a34d : 0x8c9ba5);
+        if (role === 'diggers') rect(actors,x+4,y-5+(Math.floor(t/12+i)%2),3,1,0x8c9ba5);
+      }
     }
     for (const cargo of g?.shipments ?? []) {
       const progress = 1 - cargo.remaining / cargo.duration;
