@@ -14,7 +14,8 @@
     "test": "bun test",
     "tauri": "bun --bun node_modules/@tauri-apps/cli/tauri.js",
     "check:runtime": "bun scripts/check-runtime.ts",
-    "test:browser": "bun scripts/browser-check.ts"
+    "test:browser": "bun scripts/browser-check.ts",
+    "test:native": "bun scripts/native-check.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",

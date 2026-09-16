@@ -16,8 +16,37 @@ struct Runtime {
 }
 #[derive(Clone, serde::Serialize)]
 struct Update {
-    state: Game,
+    state: Snapshot,
     reset: bool,
+}
+/// UI prices and retirement rewards are derived by the authoritative core.
+#[derive(Clone, serde::Serialize)]
+struct Snapshot {
+    #[serde(flatten)]
+    game: Game,
+    quotes: std::collections::BTreeMap<String, u64>,
+    retirement_award: u64,
+}
+impl From<Game> for Snapshot {
+    fn from(game: Game) -> Self {
+        let quotes = mine_core::requirements()
+            .iter()
+            .map(|u| (u.id.clone(), game.cost(&u.id)))
+            .chain(
+                [
+                    "worker", "housing", "capacity", "recovery", "drill", "sorter",
+                ]
+                .into_iter()
+                .map(|id| (id.into(), game.cost(id))),
+            )
+            .collect();
+        let retirement_award = game.award();
+        Self {
+            game,
+            quotes,
+            retirement_award,
+        }
+    }
 }
 #[derive(Default)]
 struct Stream {
@@ -36,7 +65,10 @@ impl Stream {
         }
         self.identity = Some((g.site, g.seed));
         self.chunks = g.terrain.chunks.clone();
-        Update { state, reset }
+        Update {
+            state: state.into(),
+            reset,
+        }
     }
 }
 fn now() -> u64 {
@@ -46,19 +78,19 @@ fn now() -> u64 {
         .as_secs()
 }
 #[tauri::command]
-fn connect(channel: Channel<Update>, state: State<Runtime>) -> Result<Game, String> {
+fn connect(channel: Channel<Update>, state: State<Runtime>) -> Result<Snapshot, String> {
     *state.channel.lock().map_err(|e| e.to_string())? = Some(channel);
-    Ok(state.game.lock().map_err(|e| e.to_string())?.clone())
+    Ok(state.game.lock().map_err(|e| e.to_string())?.clone().into())
 }
 #[tauri::command]
-fn command(action: Action, state: State<Runtime>) -> Result<Game, String> {
+fn command(action: Action, state: State<Runtime>) -> Result<Snapshot, String> {
     let mut g = state.game.lock().map_err(|e| e.to_string())?;
     let mut candidate = g.clone();
     candidate.action(action)?;
     candidate.last_saved = now();
     save(&state.path, &candidate)?;
     *g = candidate;
-    Ok(g.clone())
+    Ok(g.clone().into())
 }
 #[tauri::command]
 fn export_save(state: State<Runtime>) -> Result<String, String> {
@@ -66,19 +98,24 @@ fn export_save(state: State<Runtime>) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn import_save(data: String, state: State<Runtime>) -> Result<Game, String> {
+fn import_save(data: String, state: State<Runtime>) -> Result<Snapshot, String> {
     let mut game = state.game.lock().map_err(|e| e.to_string())?;
     let mut candidate = persistence::decode(&data)?;
     candidate.advance_offline(now(), &materials());
     save(&state.path, &candidate)?;
     *game = candidate.clone();
-    Ok(candidate)
+    Ok(candidate.into())
 }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
+            // Integration tests use isolated saves; release builds ignore this override.
+            #[cfg(debug_assertions)]
+            let dir = std::env::var_os("DEEPWORK_TEST_DATA_DIR")
+                .map(PathBuf::from)
+                .unwrap_or(dir);
             fs::create_dir_all(&dir)?;
             let save_lock =
                 persistence::lock(&dir.join("mine.lock")).map_err(std::io::Error::other)?;
@@ -172,8 +209,8 @@ mod stream_tests {
         let first = stream.update(&game);
         assert!(first.reset);
         game.terrain.excavate(32, 0);
-        assert_eq!(stream.update(&game).state.terrain.chunks.len(), 1);
-        assert!(stream.update(&game).state.terrain.chunks.is_empty());
+        assert_eq!(stream.update(&game).state.game.terrain.chunks.len(), 1);
+        assert!(stream.update(&game).state.game.terrain.chunks.is_empty());
         game.site += 1;
         assert!(stream.update(&game).reset);
     }

@@ -47,6 +47,8 @@ export interface Game {
   lifetime_waste: number;
   excavated: number;
   discoveries: number[];
+  quotes: Record<string, number>;
+  retirement_award: number;
   site_objectives: string[];
   contracts: { product: string; amount: number; complete: boolean }[];
   records: {
@@ -121,18 +123,7 @@ export const upgrades = [
   ["reclaimer", "Tailings recovery", "Recover retained mineral content.", 100],
 ] as const;
 export function cost(id: string) {
-  const g = state.value;
-  if (!g) return 0;
-  const base = upgrades.find((u) => u[0] === id)?.[3] ?? 100;
-  const n =
-    id === "worker"
-      ? g.workers - 3
-      : id === "housing"
-        ? (g.housing - 8) / 4
-        : (g.levels[id] ?? 0);
-  return Math.ceil(
-    base * Math.pow(id === "worker" ? 1.15 : id === "housing" ? 1.12 : 1.18, n),
-  );
+  return state.value?.quotes[id] ?? 0;
 }
 export async function start() {
   if (!native) {

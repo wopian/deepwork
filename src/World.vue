@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { Application, Graphics, Text, Container } from "pixi.js";
+// Pixi shader/uniform polyfills preserve the native CSP without eval.
+import "pixi.js/unsafe-eval";
 import { state, materials } from "./game";
 import { WasteParticles } from "./waste";
 import profiles from "../content/sites.json";

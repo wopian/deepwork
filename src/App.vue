@@ -536,10 +536,7 @@ onMounted(start);
         <p>
           Research earned:
           {{
-            Math.floor(10 * Math.sqrt(depth / 300)) +
-            3 * (state?.site_discoveries ?? 0) +
-            5 *
-              (state?.site_objectives.length ?? 0)
+            state?.retirement_award ?? 0
           }}
         </p>
         <div class="site-options">
