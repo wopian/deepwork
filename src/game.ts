@@ -83,6 +83,7 @@ export interface Game {
     revision: number;
     status: string;
     active: number;
+    chambers: Record<number, number>;
     passages: {
       feet: [number, number];
       parent: number;

@@ -699,7 +699,7 @@ impl Game {
         self.quiet_pipeline(cat) && self.next_frontier(cat).is_none() && self.transport.mass() == 0
     }
     fn quiet_pipeline(&self, cat: &[Material]) -> bool {
-        if self.level("shaft") > 0 {
+        if self.level("shaft") > 0 && self.workings.blocked_at.is_none() {
             return false;
         }
         if self.transport.mass() > 0
@@ -725,6 +725,11 @@ impl Game {
         self.recipes_idle()
     }
     fn survey_pending(&self) -> bool {
+        if !self.workings.passages.is_empty() {
+            return self
+                .workings
+                .survey_pending(&self.terrain, self.level("survey") > 0);
+        }
         if self.level("survey") == 0 {
             return false;
         }
@@ -741,7 +746,7 @@ impl Game {
         })
     }
     fn stationary_pipeline(&self, cat: &[Material]) -> bool {
-        if self.level("shaft") > 0 {
+        if self.level("shaft") > 0 && self.workings.blocked_at.is_none() {
             return false;
         }
         self.ticks % 20 == 0
@@ -1528,6 +1533,11 @@ impl Game {
                 for segment in &mut self.transport.segments {
                     let speed = if segment.demand > 0 { power } else { 1000 };
                     segment.time_fraction = (segment.time_fraction + 50 * speed * skip) % 1000;
+                }
+                if !self.workings.passages.is_empty() {
+                    self.workings.survey_work = (self.workings.survey_work
+                        + (1 + self.crew.prospectors as u64 * 3) * skip)
+                        % 200;
                 }
                 self.ticks += skip;
                 left -= skip;

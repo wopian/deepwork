@@ -129,11 +129,18 @@ function draw() {
         );
       } else if (node.supported) {
         const color = (g?.levels.supports ?? 0) > 0 ? 0x6e7778 : 0xa67548;
-        if (node.column)
-          rect(structures, x - 1, y - 8 * CELL_PIXEL, 1, 8 * CELL_PIXEL, color);
+        const height =
+          (node.feet[1] - (workings.chambers?.[i] ?? node.feet[1] - 7) + 1) *
+          CELL_PIXEL;
+        const parentHeight =
+          (parent.feet[1] -
+            (workings.chambers?.[node.parent] ?? parent.feet[1] - 7) +
+            1) *
+          CELL_PIXEL;
+        if (node.column) rect(structures, x - 1, y - height, 1, height, color);
         structures
-          .moveTo(px, py - 8 * CELL_PIXEL)
-          .lineTo(x, y - 8 * CELL_PIXEL)
+          .moveTo(px, py - parentHeight)
+          .lineTo(x, y - height)
           .stroke({ width: 1, color });
       }
     }

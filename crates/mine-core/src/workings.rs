@@ -104,6 +104,8 @@ pub struct Search {
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Workings {
     pub passages: Vec<Passage>,
+    #[serde(default)]
+    pub chambers: BTreeMap<usize, u32>,
     pub signals: Vec<Signal>,
     pub surveyed: BTreeSet<u32>,
     pub exhausted: BTreeSet<u32>,
@@ -113,8 +115,28 @@ pub struct Workings {
     pub revision: u64,
     pub status: String,
     pub survey_work: u64,
+    pub blocked_at: Option<(u64, u64, u32)>,
+    #[serde(skip)]
+    floor_index: BTreeMap<u32, BTreeSet<u32>>,
+    #[serde(skip)]
+    node_index: BTreeMap<u32, usize>,
+    #[serde(skip)]
+    indexed: usize,
 }
 impl Workings {
+    fn index_passages(&mut self) {
+        while self.indexed < self.passages.len() {
+            let n = &self.passages[self.indexed];
+            self.node_index.insert(key(n.feet), self.indexed);
+            if !n.lift {
+                self.floor_index
+                    .entry(n.feet[0])
+                    .or_default()
+                    .insert(n.feet[1]);
+            }
+            self.indexed += 1;
+        }
+    }
     pub fn initialise(&mut self) {
         if self.passages.is_empty() {
             self.passages.push(Passage {
@@ -181,8 +203,12 @@ impl Workings {
         if measured || directed {
             self.revision += 1;
         }
+        let signals_before = self.signals.len();
         self.signals
             .retain(|s| !self.exhausted.contains(&key(s.centre)));
+        if self.signals.len() != signals_before {
+            self.revision += 1;
+        }
         found.sort_unstable();
         found.dedup();
         found
@@ -215,7 +241,12 @@ impl Workings {
         if a[0] != b[0] {
             return false;
         }
-        let Some(mut i) = self.passages.iter().position(|n| n.feet == a) else {
+        let Some(mut i) = self
+            .node_index
+            .get(&key(a))
+            .copied()
+            .or_else(|| self.passages.iter().position(|n| n.feet == a))
+        else {
             return false;
         };
         while i > 0 {
@@ -234,6 +265,42 @@ impl Workings {
         }
         false
     }
+    pub fn survey_pending(&self, terrain: &Terrain, upgraded: bool) -> bool {
+        if self
+            .signals
+            .iter()
+            .any(|s| self.exhausted.contains(&key(s.centre)))
+        {
+            return true;
+        }
+        if self.passages.is_empty() {
+            return false;
+        }
+        let at = self.passages[self.active].feet;
+        let r = if upgraded {
+            settings().upgraded_signal_radius
+        } else {
+            settings().signal_radius
+        };
+        for by in at[1].saturating_sub(r) / 32..=(at[1] + r).min(MAX_ROWS - 1) / 32 {
+            for bx in at[0].saturating_sub(r) / 32..=(at[0] + r).min(WIDTH - 1) / 32 {
+                let centre = [bx * 32 + 16, by * 32 + 16];
+                if centre[1] >= PIT_ROWS
+                    && distance(at, centre) <= r
+                    && !self.surveyed.contains(&key(centre))
+                {
+                    return true;
+                }
+            }
+        }
+        let r = settings().sample_radius;
+        (at[0].saturating_sub(r)..=(at[0] + r).min(WIDTH - 1)).any(|x| {
+            (at[1].saturating_sub(r)..=(at[1] + r).min(MAX_ROWS - 1)).any(|y| {
+                x.abs_diff(at[0]).pow(2) + y.abs_diff(at[1]).pow(2) <= r * r
+                    && !terrain.is_revealed(x, y)
+            })
+        })
+    }
     /// Bounded deterministic planning; no geology access, seed or catalogue arguments.
     pub fn advance(
         &mut self,
@@ -245,6 +312,12 @@ impl Workings {
         supports: u32,
     ) {
         self.initialise();
+        self.index_passages();
+        let stamp = (terrain.revision, self.revision, depth_limit);
+        if self.blocked_at == Some(stamp) {
+            return;
+        }
+        self.blocked_at = None;
         if let Some(s) = &mut self.section {
             if s.cells.iter().any(|p| !terrain.contains(p[0], p[1])) {
                 self.status = "Opening access / extracting vein".into();
@@ -256,6 +329,16 @@ impl Workings {
                 return;
             }
             let s = self.section.take().unwrap();
+            if s.to == self.passages[s.from].feet {
+                let roof = s.cells.iter().map(|p| p[1]).min().unwrap_or(s.to[1]);
+                self.chambers
+                    .entry(s.from)
+                    .and_modify(|y| *y = (*y).min(roof))
+                    .or_insert(roof);
+                self.active = s.from;
+                self.revision += 1;
+                return;
+            }
             let mut span = distance(self.passages[s.from].feet, s.to);
             let mut ancestor = s.from;
             while ancestor > 0
@@ -277,6 +360,7 @@ impl Workings {
                 supported: true,
             });
             self.active = self.passages.len() - 1;
+            self.index_passages();
             self.revision += 1;
         }
         if self.search.is_none() {
@@ -292,6 +376,7 @@ impl Workings {
                     if p[1] < PIT_ROWS
                         || p[1] >= depth_limit
                         || self.exhausted.contains(&k)
+                        || protected(&self.floor_index, p, &[])
                         || p[1] + 256 < deepest
                     {
                         continue;
@@ -347,8 +432,58 @@ impl Workings {
                     (n.feet[1] + 16).min(depth_limit.saturating_sub(1)),
                 ]
             });
+            // Reachable sampled ore becomes a local extraction area, not a new access shaft.
+            if policy != "depth"
+                && terrain
+                    .known_material(goal[0], goal[1])
+                    .is_some_and(|id| id > 1)
+            {
+                if let Some((anchor, node)) =
+                    self.passages
+                        .iter()
+                        .enumerate()
+                        .rev()
+                        .take(512)
+                        .find(|(_, n)| {
+                            n.supported
+                                && n.feet[0].abs_diff(goal[0]) <= 8
+                                && goal[1] <= n.feet[1]
+                                && n.feet[1] - goal[1] < 16
+                        })
+                {
+                    let mut cells = vec![];
+                    for x in node.feet[0].min(goal[0])..=node.feet[0].max(goal[0]) {
+                        let roof = if x == goal[0] {
+                            goal[1].min(node.feet[1].saturating_sub(7))
+                        } else {
+                            node.feet[1].saturating_sub(7)
+                        };
+                        for y in roof.max(PIT_ROWS)..=node.feet[1] {
+                            cells.push([x, y]);
+                        }
+                    }
+                    let safe = !cells.iter().any(|c| {
+                        crate::geometry::protects_ramp(c[0], c[1])
+                            || protected(&self.floor_index, *c, &[])
+                    });
+                    if safe && cells.iter().any(|p| !terrain.contains(p[0], p[1])) {
+                        self.active = anchor;
+                        self.section = Some(Section {
+                            from: anchor,
+                            to: node.feet,
+                            lift: false,
+                            cells,
+                            support_work: 0,
+                        });
+                        self.status = "Extracting sampled vein".into();
+                        self.revision += 1;
+                        return;
+                    }
+                }
+            }
             if goal[1] < PIT_ROWS || depth_limit <= deepest + 1 && candidates.is_empty() {
                 self.status = "Depth equipment required".into();
+                self.blocked_at = Some(stamp);
                 return;
             }
             let mut nearest: Vec<_> = self
@@ -441,14 +576,11 @@ impl Workings {
                     continue;
                 }
                 // Never cut an existing passage floor away; junctions are anchored at nodes.
-                if self.passages.iter().rev().take(256).any(|n| {
-                    !n.lift
-                        && !(lift && n.feet[0] == p[0])
-                        && n.feet != p
-                        && n.feet != q
-                        && (1..=settings().pillar_width)
-                            .any(|dy| cells.contains(&[n.feet[0], n.feet[1] + dy]))
-                }) {
+                if !lift
+                    && cells
+                        .iter()
+                        .any(|c| protected(&self.floor_index, *c, &[p, q]))
+                {
                     continue;
                 }
                 let solid = cells
@@ -508,26 +640,6 @@ impl Workings {
                 return;
             }
             let mut cells = cut_cells(start, end, mode);
-            // Widen only sampled ore above the passage. Keep floors and 2m pillars between chambers.
-            if !mode && policy != "depth" {
-                for x in start[0].min(end[0])..=start[0].max(end[0]) {
-                    let floor = interpolate(start, end, x);
-                    for y in floor.saturating_sub(15).max(PIT_ROWS)..floor.saturating_sub(7) {
-                        if terrain.known_material(x, y).is_some_and(|id| {
-                            id > 1 && (priorities.is_empty() || priorities.contains(&id))
-                        }) && self.passages.iter().all(|n| {
-                            distance(n.feet, [x, y]) >= settings().pillar_width
-                                && !(n.feet[0] == x
-                                    && y > n.feet[1]
-                                    && y <= n.feet[1] + settings().pillar_width)
-                        }) {
-                            for cy in y..floor.saturating_sub(7) {
-                                cells.push([x, cy]);
-                            }
-                        }
-                    }
-                }
-            }
             if distance(end, search.goal) < 24 {
                 self.exhausted.insert(key(search.goal));
             }
@@ -556,7 +668,12 @@ impl Workings {
         }
     }
     pub fn valid(&self) -> bool {
-        self.passages.len() <= 200_000
+        self.chambers.iter().all(|(i, y)| {
+            *i < self.passages.len()
+                && *y >= PIT_ROWS
+                && *y <= self.passages[*i].feet[1]
+                && self.passages[*i].feet[1] - *y < 16
+        }) && self.passages.len() <= 200_000
             && self.signals.len() <= 100_000
             && self.surveyed.len() <= 1_000_000
             && self.status.len() <= 128
@@ -598,6 +715,12 @@ impl Workings {
                     })
             })
     }
+}
+fn protected(floors: &BTreeMap<u32, BTreeSet<u32>>, p: Point, except: &[Point]) -> bool {
+    floors.get(&p[0]).is_some_and(|ys| {
+        ys.range(p[1].saturating_sub(settings().pillar_width)..p[1])
+            .any(|&y| !except.contains(&[p[0], y]))
+    })
 }
 fn interpolate(a: Point, b: Point, x: u32) -> u32 {
     if a[0] == b[0] {
@@ -653,6 +776,40 @@ mod tests {
             serde_json::to_value(a).unwrap(),
             serde_json::to_value(b).unwrap()
         );
+    }
+    #[test]
+    fn nearby_sampled_ore_is_extracted_without_building_another_shaft() {
+        let mut t = Terrain::from_columns(&vec![PIT_ROWS; WIDTH as usize]);
+        let mut w = Workings::default();
+        w.initialise();
+        for p in cut_cells([256, 191], [256, 223], true) {
+            t.excavate(p[0], p[1]);
+        }
+        w.passages.push(Passage {
+            feet: [256, 223],
+            parent: 0,
+            lift: true,
+            supported: true,
+            column: false,
+        });
+        w.active = 1;
+        t.reveal(42, 0, 260, 216, 0, &crate::materials());
+        let id = crate::geometry::chunk_id(260, 216);
+        let bit = crate::geometry::bit_index(260, 216);
+        t.visible.get_mut(&id).unwrap()[bit] = 3;
+        t.ore_frontiers
+            .entry(3)
+            .or_default()
+            .insert(key([260, 216]));
+        w.advance(&t, &[3], "vein", 1200, 1, 0);
+        assert_eq!(w.section.as_ref().unwrap().to, [256, 223]);
+        while let Some(k) = w.next_cell(&t) {
+            assert!(t.excavate(k % WIDTH, k / WIDTH));
+        }
+        w.advance(&t, &[3], "vein", 1200, 10, 1);
+        assert_eq!(w.passages.len(), 2);
+        assert!(w.chambers.contains_key(&1));
+        assert!(!t.contains(260, 224), "retain chamber floor");
     }
     #[test]
     fn reversed_slopes_cover_identical_cells() {
@@ -739,6 +896,55 @@ mod development_tests {
             }
             assert!(g.validate().is_ok(), "seed {seed}: {:?}", g.validate());
         }
+    }
+    #[test]
+    fn equipment_gate_idle_skip_preserves_survey_clock_and_state() {
+        let cat = crate::materials();
+        let mut a = fixture(49);
+        a.levels.remove("supports");
+        a.workings.initialise();
+        for i in 1..=63 {
+            let feet = [WIDTH / 2, PIT_ROWS - 1 + 16 * i];
+            let parent = a.workings.passages.len() - 1;
+            for p in cut_cells(a.workings.passages[parent].feet, feet, true) {
+                a.terrain.excavate(p[0], p[1]);
+            }
+            a.workings.passages.push(Passage {
+                feet,
+                parent,
+                lift: true,
+                supported: true,
+                column: false,
+            });
+        }
+        a.heights[WIDTH as usize / 2] = 1200;
+        a.workings.active = 63;
+        a.workings
+            .survey(&mut a.terrain, a.seed, a.profile, &cat, true, false);
+        a.workings
+            .exhausted
+            .extend(a.terrain.ore_frontiers.values().flatten().copied());
+        a.workings
+            .exhausted
+            .extend(a.workings.signals.iter().map(|s| key(s.centre)));
+        a.tick(&cat, true);
+        assert!(a.workings.blocked_at.is_some());
+        let mut b = a.clone();
+        a.last_saved = 100;
+        a.advance_offline(220, &cat);
+        for _ in 0..1200 {
+            b.tick(&cat, true);
+        }
+        assert_eq!(
+            serde_json::to_value(a.workings).unwrap(),
+            serde_json::to_value(b.workings).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(a.transport).unwrap(),
+            serde_json::to_value(b.transport).unwrap()
+        );
+        assert_eq!(a.ticks, b.ticks);
+        assert_eq!(a.dig_progress, b.dig_progress);
     }
     #[test]
     fn offline_surveys_plans_supports_and_cargo_match_fixed_steps_after_reload() {

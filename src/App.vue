@@ -6,6 +6,7 @@ import upgradeRequirements from "../content/upgrades.json";
 import profiles from "../content/sites.json";
 import recipes from "../content/recipes.json";
 import pacing from "../content/pacing.json";
+import mining from "../content/mining.json";
 import { preferences } from "./preferences";
 import {
   state,
@@ -399,7 +400,10 @@ onMounted(start);
               {{
                 Math.min(
                   100,
-                  Math.floor(state.workings.section.support_work / 10),
+                  Math.floor(
+                    (100 * state.workings.section.support_work) /
+                      mining.support_work,
+                  ),
                 )
               }}%
             </template>

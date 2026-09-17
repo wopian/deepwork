@@ -64,6 +64,7 @@ impl From<Game> for Snapshot {
             .collect();
         // Persistence retains search internals; rendering receives only public knowledge.
         game.workings.search = None;
+        game.workings.blocked_at = None;
         game.workings.surveyed.clear();
         game.workings.exhausted.clear();
         if let Some(section) = &mut game.workings.section {
