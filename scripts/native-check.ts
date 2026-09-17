@@ -157,7 +157,10 @@ try {
   )
     throw new Error("UI export lost authoritative state");
   await page.locator('input[type="file"]').setInputFiles(exportedPath);
-  await page.waitForTimeout(500);
+  await page.waitForFunction(async (previousIdentity) => {
+    const raw = await (window as any).__TAURI_INTERNALS__.invoke("export_save");
+    return JSON.parse(raw).campaign_id !== previousIdentity;
+  }, exported.campaign_id);
   const imported = JSON.parse(await invoke("export_save"));
   if (
     imported.workers !== exported.workers ||
@@ -382,6 +385,11 @@ try {
     path: join(output, "native-transport-touch.png"),
     fullPage: true,
   });
+  const transportCheckpoint = JSON.parse(await invoke("export_save"));
+  await writeFile(
+    join(output, "transport-before-reload.json"),
+    JSON.stringify(transportCheckpoint),
+  );
   await page.reload();
   await page.locator("canvas").waitFor();
   const transportRestored = JSON.parse(await invoke("export_save")).transport;
@@ -392,7 +400,30 @@ try {
     transportRestored.stations[0].level !==
       transportBefore.transport.stations[0].level + Number(canUpgradeBuffer)
   ) {
-    throw new Error("Reload lost touch-selected transport controls");
+    await writeFile(
+      join(output, "transport-after-reload.json"),
+      await invoke("export_save"),
+    );
+    throw new Error(
+      `Reload lost touch-selected transport controls: ${JSON.stringify({
+        expected: {
+          express: 1,
+          preferred: !transportBefore.transport.stations[0].preferred,
+          level:
+            transportBefore.transport.stations[0].level +
+            Number(canUpgradeBuffer),
+        },
+        before: {
+          express: transportCheckpoint.transport.express,
+          station: transportCheckpoint.transport.stations[0],
+          sequence: transportCheckpoint.last_sequence,
+        },
+        after: {
+          express: transportRestored.express,
+          station: transportRestored.stations[0],
+        },
+      })}`,
+    );
   }
   await portrait.send("Emulation.clearDeviceMetricsOverride");
   await portrait.send("Emulation.setTouchEmulationEnabled", { enabled: false });
