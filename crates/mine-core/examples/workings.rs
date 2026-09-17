@@ -28,6 +28,22 @@ fn main() {
     ] {
         g.levels.insert(k.into(), n);
     }
+    if args.get(5).is_some_and(|arg| arg == "starter") {
+        g.workers = 4;
+        g.housing = 8;
+        g.profile = args.get(6).and_then(|arg| arg.parse().ok()).unwrap_or(0);
+        g.levels.clear();
+        for (id, level) in [
+            ("shaft", 1),
+            ("drill", 2),
+            ("conveyor", 1),
+            ("furnace", 1),
+            ("steelworks", 1),
+            ("power", 1),
+        ] {
+            g.levels.insert(id.into(), level);
+        }
+    }
     // Valid benched pit and ramp, bypass only the already-tested surface phase.
     g.heights = (0..WIDTH)
         .map(|x| {
