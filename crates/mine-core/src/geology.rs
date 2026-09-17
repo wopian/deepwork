@@ -95,7 +95,9 @@ fn reserve_descriptor(seed: u64, index: usize, reserve: &Reserve) -> Deposit {
     let key = hash(seed ^ (index as u64 + 1).wrapping_mul(0xa0761d6478bd642f));
     Deposit {
         x: 192. + (key % 129) as f64,
-        y: (reserve.depth_metres * crate::geometry::CELLS_PER_METRE + 4) as f64,
+        y: (reserve.depth_metres * crate::geometry::CELLS_PER_METRE + 4) as f64
+            + ((key >> 32) % 33) as f64
+            - 16.,
         length: reserve.length,
         width: reserve.width,
         slope: ((key >> 16) % 5) as f64 / 32. - 0.0625,
@@ -212,8 +214,8 @@ mod tests {
         validate().unwrap();
         let cat = crate::materials();
         for seed in 42..72 {
-            for reserve in reserves() {
-                let top = reserve.depth_metres * crate::geometry::CELLS_PER_METRE;
+            for (index, reserve) in reserves().iter().enumerate() {
+                let top = reserve_descriptor(seed, index, reserve).y as u32 - 4;
                 let mined = (32..crate::geometry::WIDTH - 32)
                     .flat_map(|x| (top..top + 8).map(move |y| (x, y)))
                     .filter(|&(x, y)| sample(seed, (seed % 3) as usize, x, y, &cat) == reserve.feed)

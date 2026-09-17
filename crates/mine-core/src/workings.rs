@@ -6,6 +6,55 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
+#[derive(Deserialize)]
+pub struct Mining {
+    pub signal_radius: u32,
+    pub upgraded_signal_radius: u32,
+    pub sample_radius: u32,
+    pub signal_tile: u32,
+    pub section_length: u32,
+    pub clearance: u32,
+    pub chamber_height: u32,
+    pub pillar_width: u32,
+    pub search_budget: u32,
+    pub search_limit: u32,
+    pub search_radius: u32,
+    pub lift_work: u64,
+    pub passage_work: u64,
+    pub support_work: u64,
+}
+pub fn settings() -> &'static Mining {
+    static CONFIG: std::sync::OnceLock<Mining> = std::sync::OnceLock::new();
+    CONFIG.get_or_init(|| {
+        serde_json::from_str(include_str!("../../../content/mining.json"))
+            .expect("validated mining content")
+    })
+}
+pub fn validate_content() -> Result<(), String> {
+    let c = settings();
+    if !(16..=256).contains(&c.signal_radius)
+        || c.upgraded_signal_radius < c.signal_radius
+        || c.upgraded_signal_radius > 256
+        || !(4..=16).contains(&c.sample_radius)
+        || c.signal_tile != 32
+        || c.section_length != 16
+        || c.clearance != 8
+        || c.chamber_height != 16
+        || c.pillar_width != 8
+        || !(1..=256).contains(&c.search_budget)
+        || !(128..=8192).contains(&c.search_limit)
+        || !(32..=256).contains(&c.search_radius)
+        || c.lift_work == 0
+        || c.lift_work > 10000
+        || c.passage_work == 0
+        || c.passage_work > 10000
+        || c.support_work == 0
+        || c.support_work > 100000
+    {
+        return Err("Invalid underground planning content".into());
+    }
+    Ok(())
+}
 pub type Point = [u32; 2];
 fn key(p: Point) -> u32 {
     p[1] * WIDTH + p[0]
@@ -90,8 +139,12 @@ impl Workings {
             return vec![];
         }
         let at = self.passages[self.active].feet;
-        let radius = if upgraded || directed { 96 } else { 48 };
-        let mut found = terrain.reveal(seed, profile, at[0], at[1], 8, cat);
+        let radius = if upgraded || directed {
+            settings().upgraded_signal_radius
+        } else {
+            settings().signal_radius
+        };
+        let mut found = terrain.reveal(seed, profile, at[0], at[1], settings().sample_radius, cat);
         let mut measured = false;
         for by in (at[1].saturating_sub(radius) / 32)..=((at[1] + radius).min(MAX_ROWS - 1) / 32) {
             for bx in (at[0].saturating_sub(radius) / 32)..=((at[0] + radius).min(WIDTH - 1) / 32) {
@@ -181,7 +234,7 @@ impl Workings {
             }
             self.status = "Waiting for supports".into();
             s.support_work += 80 * engineers.max(1) as u64 * (1 + supports) as u64;
-            if s.support_work < 1000 {
+            if s.support_work < settings().support_work {
                 return;
             }
             let s = self.section.take().unwrap();
@@ -306,7 +359,7 @@ impl Workings {
         }
         let search = self.search.as_mut().unwrap();
         let mut reached = None;
-        for _ in 0..128 {
+        for _ in 0..settings().search_budget {
             let Some(Reverse((_, cost, k))) = search.open.pop() else {
                 break;
             };
@@ -345,7 +398,7 @@ impl Workings {
                     continue;
                 }
                 let q = [nx as u32, ny as u32];
-                if distance(q, search.origin) > 256 {
+                if distance(q, search.origin) > settings().search_radius {
                     continue;
                 }
                 let cells = cut_cells(p, q, lift);
@@ -363,7 +416,13 @@ impl Workings {
                     .iter()
                     .filter(|c| !terrain.contains(c[0], c[1]))
                     .count() as u64;
-                let step = solid + if lift { 52 } else { 8 } + distance(p, q) as u64;
+                let step = solid
+                    + if lift {
+                        settings().lift_work
+                    } else {
+                        settings().passage_work
+                    }
+                    + distance(p, q) as u64;
                 let nk = key(q);
                 let nc = cost + step;
                 if nc < search.costs.get(&nk).copied().unwrap_or(u64::MAX) {
@@ -374,7 +433,7 @@ impl Workings {
                         .push(Reverse((nc + estimate(q, search.goal), nc, nk)));
                 }
             }
-            if search.expanded >= 4096 {
+            if search.expanded >= settings().search_limit {
                 break;
             }
         }
@@ -396,7 +455,10 @@ impl Workings {
             ];
             for (p, lift) in path {
                 let delta = [p[0] as i64 - end[0] as i64, p[1] as i64 - end[1] as i64];
-                if lift != mode || delta != heading || distance(start, p) > 16 {
+                if lift != mode
+                    || delta != heading
+                    || distance(start, p) > settings().section_length
+                {
                     break;
                 }
                 end = p;
@@ -445,7 +507,7 @@ impl Workings {
             });
             self.search = None;
             self.revision += 1;
-        } else if search.open.is_empty() || search.expanded >= 4096 {
+        } else if search.open.is_empty() || search.expanded >= settings().search_limit {
             self.exhausted.insert(key(search.goal));
             self.search = None;
         }

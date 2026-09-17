@@ -1,0 +1,16 @@
+{
+  "signal_radius": 48,
+  "upgraded_signal_radius": 96,
+  "sample_radius": 8,
+  "signal_tile": 32,
+  "section_length": 16,
+  "clearance": 8,
+  "chamber_height": 16,
+  "pillar_width": 8,
+  "search_budget": 128,
+  "search_limit": 4096,
+  "search_radius": 256,
+  "lift_work": 52,
+  "passage_work": 8,
+  "support_work": 1000
+}
