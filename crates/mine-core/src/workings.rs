@@ -1077,6 +1077,65 @@ mod development_tests {
         g
     }
     #[test]
+    fn pit_edge_branch_can_resume_development_after_quartz_extraction() {
+        // Campaign seed 46, site 11: a shallow quartz drive ended beside the pit ramp.
+        let mut g = fixture(79246);
+        g.profile = 1;
+        g.workers = 12;
+        g.housing = 12;
+        g.levels.clear();
+        for (id, level) in [
+            ("shaft", 1),
+            ("drill", 2),
+            ("conveyor", 1),
+            ("furnace", 1),
+            ("steelworks", 1),
+            ("power", 1),
+            ("reclaimer", 1),
+        ] {
+            g.levels.insert(id.into(), level);
+        }
+        g.workings.initialise();
+        for feet in [[252, 192], [236, 192], [220, 192], [208, 192]] {
+            let parent = g.workings.passages.len() - 1;
+            for p in cut_cells(g.workings.passages[parent].feet, feet, false) {
+                if g.terrain.excavate(p[0], p[1]) {
+                    g.excavated += 1;
+                    g.disposed_mass += crate::geometry::CELL_MASS;
+                    g.heights[p[0] as usize] = g.heights[p[0] as usize].max(p[1] + 1);
+                }
+            }
+            g.workings.passages.push(Passage {
+                feet,
+                parent,
+                lift: false,
+                supported: true,
+                column: true,
+            });
+        }
+        g.workings.active = 4;
+        g.workings.exhausted.extend([98511, 98512, 106704]);
+        for by in 0..13 {
+            for bx in 0..16 {
+                g.workings
+                    .surveyed
+                    .insert(key([bx * 32 + 16, by * 32 + 16]));
+            }
+        }
+        let cat = crate::materials();
+        for k in g.terrain.frontier.iter().copied().collect::<Vec<_>>() {
+            let p = point(k);
+            g.terrain.reveal(g.seed, g.profile, p[0], p[1], 0, &cat);
+        }
+        assert_eq!(g.depth(), 48);
+        for _ in 0..30 {
+            g.second(&cat, true);
+        }
+        assert!(g.depth() > 60, "resume beyond the shallow pit-edge drive");
+        assert!(!crate::navigation::underground(&g.terrain, &g.heights, &g.workings).is_empty());
+        g.validate().unwrap();
+    }
+    #[test]
     fn thirty_seeds_preserve_ramp_and_develop_nonperiodic_workings() {
         let cat = crate::materials();
         for seed in 42..72 {
