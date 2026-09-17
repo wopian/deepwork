@@ -1401,7 +1401,16 @@ impl Game {
                 rate: self.flow_window[0] as f64 / UNITS as f64 / seconds,
                 buffer: self.ore.values().sum(),
                 capacity: cap,
-                blocker: if self.depth() >= depth_limit {
+                blocker: if ore_total + CELL_MASS > cap {
+                    "Hauling buffer full"
+                } else if self.workings.status == "Waiting for supports" {
+                    "Building local supports"
+                } else if self.workings.search.is_some() {
+                    "Planning surveyed access"
+                } else if self.workings.section.is_some() {
+                    // Deeper access may be gated while earlier surveyed rooms still work.
+                    "Working surveyed ground"
+                } else if self.depth() >= depth_limit {
                     "Shaft upgrade required"
                 } else if self.depth() >= 1500 && self.level("ventilation") == 0 {
                     "Ventilation required"
@@ -1409,12 +1418,6 @@ impl Game {
                     "Drainage required"
                 } else if self.depth() >= 300 && self.level("supports") == 0 {
                     "Supports required"
-                } else if self.workings.status == "Waiting for supports" {
-                    "Building local supports"
-                } else if self.workings.search.is_some() {
-                    "Planning surveyed access"
-                } else if ore_total + CELL_MASS > cap {
-                    "Hauling buffer full"
                 } else {
                     "Working"
                 }
