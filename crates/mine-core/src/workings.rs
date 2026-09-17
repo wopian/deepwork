@@ -74,6 +74,8 @@ pub struct Passage {
     pub parent: usize,
     pub lift: bool,
     pub supported: bool,
+    #[serde(default)]
+    pub column: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Signal {
@@ -120,6 +122,7 @@ impl Workings {
                 parent: 0,
                 lift: false,
                 supported: true,
+                column: true,
             });
             self.revision += 1;
         }
@@ -209,12 +212,27 @@ impl Workings {
         result
     }
     pub fn is_lift_edge(&self, a: Point, b: Point) -> bool {
-        self.passages.iter().enumerate().any(|(i, n)| {
-            i > 0
-                && n.lift
-                && ((n.feet == a && self.passages[n.parent].feet == b)
-                    || (n.feet == b && self.passages[n.parent].feet == a))
-        })
+        if a[0] != b[0] {
+            return false;
+        }
+        let Some(mut i) = self.passages.iter().position(|n| n.feet == a) else {
+            return false;
+        };
+        while i > 0 {
+            let n = &self.passages[i];
+            if !n.lift {
+                return false;
+            }
+            let parent = &self.passages[n.parent];
+            if parent.feet == b {
+                return true;
+            }
+            if parent.feet[0] != a[0] {
+                return false;
+            }
+            i = n.parent;
+        }
+        false
     }
     /// Bounded deterministic planning; no geology access, seed or catalogue arguments.
     pub fn advance(
@@ -238,7 +256,21 @@ impl Workings {
                 return;
             }
             let s = self.section.take().unwrap();
+            let mut span = distance(self.passages[s.from].feet, s.to);
+            let mut ancestor = s.from;
+            while ancestor > 0
+                && !self.passages[ancestor].column
+                && !self.passages[ancestor].lift
+                && span < settings().section_length
+            {
+                let node = &self.passages[ancestor];
+                span += distance(node.feet, self.passages[node.parent].feet);
+                ancestor = node.parent;
+            }
+            let column = !s.lift
+                && (span >= settings().section_length || self.passages[s.from].lift || s.from == 0);
             self.passages.push(Passage {
+                column,
                 feet: s.to,
                 parent: s.from,
                 lift: s.lift,
@@ -384,8 +416,8 @@ impl Workings {
                 (4, -1, false),
                 (4, 0, false),
                 (4, 1, false),
-                (0, 4, true),
-                (0, -4, true),
+                (0, 16, true),
+                (0, -16, true),
             ] {
                 let nx = p[0] as i32 + dx;
                 let ny = p[1] as i32 + dy;
@@ -402,13 +434,20 @@ impl Workings {
                     continue;
                 }
                 let cells = cut_cells(p, q, lift);
+                if cells
+                    .iter()
+                    .any(|c| crate::geometry::protects_ramp(c[0], c[1]))
+                {
+                    continue;
+                }
                 // Never cut an existing passage floor away; junctions are anchored at nodes.
                 if self.passages.iter().rev().take(256).any(|n| {
                     !n.lift
                         && !(lift && n.feet[0] == p[0])
                         && n.feet != p
                         && n.feet != q
-                        && cells.contains(&[n.feet[0], n.feet[1] + 1])
+                        && (1..=settings().pillar_width)
+                            .any(|dy| cells.contains(&[n.feet[0], n.feet[1] + dy]))
                 }) {
                     continue;
                 }
@@ -473,11 +512,15 @@ impl Workings {
             if !mode && policy != "depth" {
                 for x in start[0].min(end[0])..=start[0].max(end[0]) {
                     let floor = interpolate(start, end, x);
-                    for y in floor.saturating_sub(15)..floor.saturating_sub(7) {
+                    for y in floor.saturating_sub(15).max(PIT_ROWS)..floor.saturating_sub(7) {
                         if terrain.known_material(x, y).is_some_and(|id| {
                             id > 1 && (priorities.is_empty() || priorities.contains(&id))
-                        }) && self.passages.iter().all(|n| distance(n.feet, [x, y]) >= 8)
-                        {
+                        }) && self.passages.iter().all(|n| {
+                            distance(n.feet, [x, y]) >= settings().pillar_width
+                                && !(n.feet[0] == x
+                                    && y > n.feet[1]
+                                    && y <= n.feet[1] + settings().pillar_width)
+                        }) {
                             for cy in y..floor.saturating_sub(7) {
                                 cells.push([x, cy]);
                             }
@@ -629,5 +672,100 @@ mod tests {
         }
         assert!(cells.contains(&[216, 204]));
         assert!(!cells.contains(&[216, 205]));
+    }
+}
+
+#[cfg(test)]
+mod development_tests {
+    use super::*;
+    fn fixture(seed: u64) -> crate::Game {
+        let mut g = crate::Game::new(seed, 1);
+        g.workers = 16;
+        g.housing = 32;
+        g.policy = "vein".into();
+        g.priorities = vec![3, 4, 19];
+        for (id, n) in [
+            ("shaft", 3),
+            ("supports", 1),
+            ("drill", 3),
+            ("conveyor", 3),
+            ("sorter", 5),
+            ("power", 5),
+            ("capacity", 5),
+            ("survey", 1),
+        ] {
+            g.levels.insert(id.into(), n);
+        }
+        g.heights = (0..WIDTH)
+            .map(|x| {
+                if x < 16 {
+                    0
+                } else {
+                    (x - 15).min(PIT_ROWS).min(((WIDTH - 17 - x) / 24 + 1) * 24)
+                }
+            })
+            .collect();
+        g.terrain = Terrain::from_columns(&g.heights);
+        g.excavated = g.heights.iter().map(|h| *h as u64).sum();
+        g.disposed_mass = g.excavated * crate::geometry::CELL_MASS;
+        g
+    }
+    #[test]
+    fn thirty_seeds_preserve_ramp_and_develop_nonperiodic_workings() {
+        let cat = crate::materials();
+        for seed in 42..72 {
+            let mut g = fixture(seed);
+            for tick in 0..1200 {
+                g.tick(&cat, true);
+                if tick % 100 == 0 && !g.workings.passages.is_empty() {
+                    assert!(
+                        !crate::navigation::underground(&g.terrain, &g.heights, &g.workings)
+                            .is_empty(),
+                        "seed {seed}, tick {tick}"
+                    );
+                }
+            }
+            assert!(g.workings.passages.len() > 4, "seed {seed}");
+            assert!(g
+                .workings
+                .passages
+                .iter()
+                .any(|n| n.feet[1] % 96 != 7 && n.feet[0] != WIDTH / 2));
+            for x in 16..PIT_ROWS + 15 {
+                assert!(
+                    !g.terrain.contains(x, x - 15),
+                    "ramp floor seed {seed}, x {x}"
+                );
+            }
+            assert!(g.validate().is_ok(), "seed {seed}: {:?}", g.validate());
+        }
+    }
+    #[test]
+    fn offline_surveys_plans_supports_and_cargo_match_fixed_steps_after_reload() {
+        let cat = crate::materials();
+        let mut offline = fixture(49);
+        for _ in 0..130 {
+            offline.tick(&cat, true);
+        }
+        let mut stepped: crate::Game =
+            serde_json::from_str(&serde_json::to_string(&offline).unwrap()).unwrap();
+        stepped.migrate().unwrap();
+        offline.last_saved = 100;
+        offline.advance_offline(220, &cat);
+        for _ in 0..1200 {
+            stepped.tick(&cat, true);
+        }
+        assert_eq!(offline.terrain.chunks, stepped.terrain.chunks);
+        assert_eq!(offline.terrain.visible, stepped.terrain.visible);
+        assert_eq!(offline.credits, stepped.credits);
+        assert_eq!(offline.ore, stepped.ore);
+        assert_eq!(
+            serde_json::to_value(&offline.transport).unwrap(),
+            serde_json::to_value(&stepped.transport).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(&offline.workings).unwrap(),
+            serde_json::to_value(&stepped.workings).unwrap()
+        );
     }
 }

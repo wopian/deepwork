@@ -487,15 +487,26 @@ impl Network {
         self.routes.retain(|id, _| used.contains(id));
         initial - space
     }
+    pub fn sources_match(&self, ore: &BTreeMap<usize, u64>) -> bool {
+        routing_matches(&self.source, ore, &self.routes)
+    }
     pub fn valid(&self, materials: usize) -> bool {
-        self.routes.len() <= 8192
+        self.current_route < 1_000_000_000_000
+            && self.source.iter().all(|l| {
+                l.material < materials
+                    && l.amount > 0
+                    && l.amount <= 1_000_000_000_000
+                    && self.routes.contains_key(&l.route)
+            })
+            && self.routes.len() <= 8192
             && self.source.len() <= 32768
             && self
                 .routes
                 .values()
                 .all(|r| r.len() == 4 && r.iter().all(|legs| valid_legs(legs)))
             && self.stations.iter().all(|s| {
-                s.routing.len() <= 32768
+                routing_matches(&s.routing, &s.cargo, &self.routes)
+                    && s.routing.len() <= 32768
                     && s.routing.iter().all(|l| {
                         l.material < materials
                             && l.amount <= 1_000_000_000_000
@@ -530,6 +541,7 @@ impl Network {
                     && s.time_fraction < 1000
                     && s.batches.iter().all(|b| {
                         b.material < materials
+                            && self.routes.contains_key(&b.route)
                             && b.amount <= 1_000_000_000_000
                             && b.remaining_ms <= b.duration_ms
                             && b.duration_ms > 0
@@ -538,6 +550,27 @@ impl Network {
                     })
             })
     }
+}
+fn routing_matches(
+    lots: &[RoutedCargo],
+    cargo: &BTreeMap<usize, u64>,
+    routes: &BTreeMap<u64, Vec<Vec<Leg>>>,
+) -> bool {
+    let mut totals = BTreeMap::<usize, u64>::new();
+    for lot in lots {
+        if lot.amount == 0 || lot.amount > 1_000_000_000_000 || !routes.contains_key(&lot.route) {
+            return false;
+        }
+        let entry = totals.entry(lot.material).or_default();
+        let Some(next) = entry.checked_add(lot.amount) else {
+            return false;
+        };
+        *entry = next;
+    }
+    cargo
+        .iter()
+        .all(|(id, q)| totals.get(id).copied().unwrap_or(0) == *q)
+        && totals.keys().all(|id| cargo.contains_key(id))
 }
 fn valid_legs(legs: &[Leg]) -> bool {
     legs.len() <= 100_000

@@ -391,9 +391,18 @@ onMounted(start);
             </div>
           </details>
           <p class="crew-roster" v-if="state?.levels.supports">
-            Automatic supports ready to
-            {{ state.support_rows / CELLS_PER_METRE }} m. Construction progress
-            {{ Math.floor(state.support_work / 10) }}%.
+            {{
+              state.workings.status || "Supports follow commissioned passages."
+            }}
+            <template v-if="state.workings.section?.support_work">
+              · Local support construction
+              {{
+                Math.min(
+                  100,
+                  Math.floor(state.workings.section.support_work / 10),
+                )
+              }}%
+            </template>
           </p>
           <div class="policy">
             <span

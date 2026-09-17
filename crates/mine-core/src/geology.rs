@@ -100,9 +100,13 @@ fn reserve_descriptor(seed: u64, index: usize, reserve: &Reserve) -> Deposit {
             - 16.,
         length: reserve.length,
         width: reserve.width,
-        slope: ((key >> 16) % 5) as f64 / 32. - 0.0625,
-        shape: 1,
-        seed: key,
+        slope: ((key >> 16) % 15) as f64 / 20. - 0.35,
+        shape: if matches!(reserve.feed, 2 | 5 | 6) {
+            2
+        } else {
+            0
+        },
+        seed: key & !8,
     }
 }
 pub fn sample(seed: u64, profile: usize, x: u32, y: u32, catalogue: &[Material]) -> usize {
@@ -127,7 +131,7 @@ pub fn sample(seed: u64, profile: usize, x: u32, y: u32, catalogue: &[Material])
     // Finite, irregular lenses intersect commissioned drives before later gates.
     // Their world-space descriptors cross chunks; no recurring mineral stripes.
     for (index, reserve) in reserves().iter().enumerate() {
-        if y.abs_diff(reserve.depth_metres * crate::geometry::CELLS_PER_METRE + 4) > 48 {
+        if y.abs_diff(reserve.depth_metres * crate::geometry::CELLS_PER_METRE + 4) > 192 {
             continue;
         }
         if reserve_descriptor(seed, index, reserve).contains(x as f64, y as f64) {
@@ -215,13 +219,14 @@ mod tests {
         let cat = crate::materials();
         for seed in 42..72 {
             for (index, reserve) in reserves().iter().enumerate() {
-                let top = reserve_descriptor(seed, index, reserve).y as u32 - 4;
+                let top = (reserve_descriptor(seed, index, reserve).y as u32).saturating_sub(96);
                 let mined = (32..crate::geometry::WIDTH - 32)
-                    .flat_map(|x| (top..top + 8).map(move |y| (x, y)))
+                    .step_by(4)
+                    .flat_map(|x| (top..top + 192).step_by(4).map(move |y| (x, y)))
                     .filter(|&(x, y)| sample(seed, (seed % 3) as usize, x, y, &cat) == reserve.feed)
                     .count();
                 assert!(
-                    mined >= 1500,
+                    mined * 16 >= 1500,
                     "seed {seed}, feed {}, depth {}: {mined}",
                     reserve.feed,
                     reserve.depth_metres

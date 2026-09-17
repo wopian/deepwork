@@ -128,8 +128,9 @@ function draw() {
           0xe5a34d,
         );
       } else if (node.supported) {
-        const color = (g?.levels.supports ?? 0) > 0 ? 0x8c9ba5 : 0xa67548;
-        rect(structures, x - 1, y - 8 * CELL_PIXEL, 1, 8 * CELL_PIXEL, color);
+        const color = (g?.levels.supports ?? 0) > 0 ? 0x6e7778 : 0xa67548;
+        if (node.column)
+          rect(structures, x - 1, y - 8 * CELL_PIXEL, 1, 8 * CELL_PIXEL, color);
         structures
           .moveTo(px, py - 8 * CELL_PIXEL)
           .lineTo(x, y - 8 * CELL_PIXEL)

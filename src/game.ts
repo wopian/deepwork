@@ -88,6 +88,7 @@ export interface Game {
       parent: number;
       lift: boolean;
       supported: boolean;
+      column: boolean;
     }[];
     signals: { centre: [number, number]; radius: number; confidence: number }[];
     section: {
@@ -97,8 +98,6 @@ export interface Game {
       support_work: number;
     } | null;
   };
-  support_rows: number;
-  support_work: number;
   heights: number[];
   terrain: {
     chunks: Record<string, number[]>;
@@ -227,8 +226,11 @@ export async function start() {
       if (state.value && state.value.campaign_id !== g.campaign_id) return;
       if (update.reset) terrainEpoch.value++;
       if (!update.reset && state.value?.site === g.site) {
-        if (g.workings_offset>0) {
-          g.workings.passages=[...state.value.workings.passages.slice(0,g.workings_offset),...g.workings.passages];
+        if (g.workings_offset > 0) {
+          g.workings.passages = [
+            ...state.value.workings.passages.slice(0, g.workings_offset),
+            ...g.workings.passages,
+          ];
         }
         for (const key of ["chunks", "revealed", "visible"] as const) {
           g.terrain[key] = { ...state.value.terrain[key], ...g.terrain[key] };

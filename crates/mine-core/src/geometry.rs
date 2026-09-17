@@ -11,6 +11,10 @@ pub const UNITS: u64 = 64_000;
 pub const CELL_MASS: u64 = 1_000;
 pub const MAX_ROWS: u32 = 800_000;
 pub const GENERATOR_VERSION: u32 = 3;
+/// Ground carrying the surface access ramp must survive underground exploration.
+pub fn protects_ramp(x: u32, y: u32) -> bool {
+    x >= PIT_MARGIN && x < PIT_ROWS + PIT_MARGIN && y >= x - (PIT_MARGIN - 1) && y < PIT_ROWS
+}
 pub fn depth(row: u32) -> u32 {
     row / CELLS_PER_METRE
 }

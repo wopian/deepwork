@@ -179,6 +179,10 @@ pub struct Game {
     #[serde(skip)]
     haul_path: Vec<[u32; 2]>,
     #[serde(skip)]
+    haul_legs: Vec<logistics::Leg>,
+    #[serde(skip)]
+    haul_levels: BTreeMap<String, u32>,
+    #[serde(skip)]
     haul_route_key: Option<([u32; 2], bool)>,
     #[serde(default)]
     pub crew: logistics::Crew,
@@ -186,10 +190,6 @@ pub struct Game {
     pub crew_priority: String,
     #[serde(default)]
     pub cargo_policy: String,
-    #[serde(default)]
-    pub support_rows: u32,
-    #[serde(default)]
-    pub support_work: u64,
     pub products: BTreeMap<String, u64>,
     pub tailings: BTreeMap<usize, u64>,
     #[serde(default)]
@@ -330,12 +330,12 @@ impl Game {
             trace_fraction: BTreeMap::new(),
             transport: transport::Network::default(),
             haul_path: vec![],
+            haul_legs: vec![],
+            haul_levels: BTreeMap::new(),
             haul_route_key: None,
             crew: logistics::Crew::assign(3, &BTreeMap::new()),
             crew_priority: String::new(),
             cargo_policy: String::new(),
-            support_rows: 1200,
-            support_work: 0,
             products: BTreeMap::new(),
             tailings: BTreeMap::new(),
             recovery_fraction: BTreeMap::new(),
@@ -665,15 +665,6 @@ impl Game {
             if x < 16 + y || x >= WIDTH - margin {
                 return None;
             }
-            if y >= 1200 && (self.level("supports") == 0 || y >= self.support_rows) {
-                return None;
-            }
-            if y >= 2800 && self.level("pump") == 0 {
-                return None;
-            }
-            if y >= 6000 && self.level("ventilation") == 0 {
-                return None;
-            }
             // Bench completion outranks depth preference. Unknown rock never informs ore targeting.
             let score = if surface {
                 y as i64 * 1024 + x as i64
@@ -712,7 +703,6 @@ impl Game {
             return false;
         }
         if self.transport.mass() > 0
-            || (self.level("supports") > 0 && self.support_rows < self.support_target())
             || self
                 .ore
                 .values()
@@ -770,7 +760,6 @@ impl Game {
                 > 20 * UNITS + 5 * UNITS * self.level("capacity") as u64
                 || self.next_frontier(cat).is_none())
             && !self.survey_pending()
-            && !(self.level("supports") > 0 && self.support_rows < self.support_target())
             && self.depleted == 0
             && !(self.level("slagcrusher") > 0 && self.slag > 0)
             && !(self.level("reclaimer") > 0 && self.tailings.values().any(|&q| q > 0))
@@ -820,18 +809,6 @@ impl Game {
             })
         })
     }
-    fn support_target(&self) -> u32 {
-        (self.heights.iter().copied().max().unwrap_or(0).max(1200) + 1).min(terrain::MAX_ROWS)
-    }
-    fn construction(&mut self) {
-        let target = self.support_target();
-        if self.level("supports") > 0 && self.support_rows < target {
-            self.support_work +=
-                (80. * self.crew.engineers.max(1) as f64 * self.throughput("supports")) as u64;
-            self.support_rows = (self.support_rows + (self.support_work / 1000) as u32).min(target);
-            self.support_work %= 1000;
-        }
-    }
     pub fn second(&mut self, cat: &[Material], offline: bool) {
         for _ in 0..20 {
             self.tick(cat, offline);
@@ -852,7 +829,6 @@ impl Game {
             }
         }
         self.crew = logistics::Crew::prioritise(self.workers, &self.levels, &self.crew_priority);
-        self.construction();
         if self.level("shaft") > 0
             && self
                 .terrain
@@ -959,11 +935,12 @@ impl Game {
                     .unwrap_or(self.workings.active)]
                 .feet
             } else {
-                [cell.x, cell.y]
+                [16 + cell.x.saturating_sub(16) / 16 * 16, cell.y]
             };
             let key = (origin, self.level("shaft") > 0);
             if self.haul_route_key != Some(key) {
                 self.haul_route_key = Some(key);
+                self.haul_legs.clear();
                 self.haul_path =
                     if origin[1] >= geometry::PIT_ROWS && !self.workings.passages.is_empty() {
                         navigation::underground(&self.terrain, &self.heights, &self.workings)
@@ -982,12 +959,16 @@ impl Game {
         } else {
             1.
         } / sites()[self.profile].haul;
-        let (legs, _duration) = logistics::route_registered(
-            &self.haul_path,
-            &self.levels,
-            terrain_factor,
-            &self.workings,
-        );
+        if self.haul_legs.is_empty() || self.haul_levels != self.levels {
+            self.haul_legs = logistics::route_registered(
+                &self.haul_path,
+                &self.levels,
+                terrain_factor,
+                &self.workings,
+            )
+            .0;
+            self.haul_levels = self.levels.clone();
+        }
         let haul_rate = (UNITS as f64
             * pacing::get().haul_rate
             * self.crew.haulers as f64
@@ -1000,7 +981,7 @@ impl Game {
             * (1. + 0.05 * self.ranks.get("logistics").copied().unwrap_or(0) as f64)
             * (if self.level("conveyor") > 0 { 3. } else { 1. })) as u64;
         self.transport
-            .configure(&legs, haul_rate, self.level("capacity"));
+            .configure(&self.haul_legs, haul_rate, self.level("capacity"));
         for (id, q) in mined_cargo {
             self.transport.register_source(id, q);
         }
@@ -1423,11 +1404,10 @@ impl Game {
                     "Drainage required"
                 } else if self.depth() >= 300 && self.level("supports") == 0 {
                     "Supports required"
-                } else if self.level("supports") > 0
-                    && self.support_rows < self.support_target()
-                    && self.depth() >= 300
-                {
-                    "Building supports"
+                } else if self.workings.status == "Waiting for supports" {
+                    "Building local supports"
+                } else if self.workings.search.is_some() {
+                    "Planning surveyed access"
                 } else if ore_total + CELL_MASS > cap {
                     "Hauling buffer full"
                 } else {
@@ -2002,9 +1982,6 @@ impl Game {
                 .filter(|(_, q)| **q > 0)
                 .map(|(p, _)| p.clone()),
         );
-        if self.support_rows == 0 {
-            self.support_rows = self.support_target();
-        }
         self.terrain.rebuild()?;
         self.validate()
     }
@@ -2028,7 +2005,7 @@ impl Game {
         if !self.workings.valid() {
             return Err("Invalid underground workings".into());
         }
-        if !self.transport.valid(materials().len()) {
+        if !self.transport.valid(materials().len()) || !self.transport.sources_match(&self.ore) {
             return Err("Invalid transport network".into());
         }
         if !self.waste_profile.valid() {
@@ -2060,8 +2037,6 @@ impl Game {
             || self.profile >= sites().len()
             || self.heights.len() != WIDTH as usize
             || self.heights.iter().any(|h| *h > terrain::MAX_ROWS)
-            || self.support_rows > terrain::MAX_ROWS
-            || self.support_work >= 1000
             || self.dig_remainder >= 20
             || self.dig_progress >= 1000
             || self.workers < 3
@@ -2657,25 +2632,38 @@ mod wire_tests {
 mod construction_tests {
     use super::*;
     #[test]
-    fn engineers_build_supports_before_deeper_fronts_open() {
-        let cat = materials();
-        let mut g = Game::default();
-        g.levels.insert("supports".into(), 1);
-        g.levels.insert("shaft".into(), 1);
-        g.workers = 10;
-        g.housing = 12;
-        g.crew_priority = "engineering".into();
-        g.policy = "depth".into();
-        for y in 0..1200 {
-            g.terrain.excavate(256, y);
+    fn engineers_commission_local_sections_before_navigation_opens() {
+        let mut w = workings::Workings::default();
+        w.initialise();
+        let mut terrain = terrain::Terrain::from_columns(&vec![196; WIDTH as usize]);
+        w.section = Some(workings::Section {
+            from: 0,
+            to: [260, 192],
+            lift: false,
+            cells: workings::cut_cells([256, 191], [260, 192], false),
+            support_work: 0,
+        });
+        w.advance(&terrain, &[], "depth", 1200, 1, 0);
+        assert_eq!(w.passages.len(), 1);
+        assert_eq!(w.status, "Waiting for supports");
+        for _ in 0..12 {
+            w.advance(&terrain, &[], "depth", 1200, 1, 0);
         }
-        g.heights[256] = 1200;
-        assert_ne!(g.next_frontier(&cat), Some(1200 * WIDTH + 256));
-        for _ in 0..30 {
-            g.tick(&cat, true);
+        assert!(w.passages.len() > 1);
+        assert!(w.passages[1].supported);
+        // A rock cell in the clearance keeps the next section uncommissioned.
+        terrain = terrain::Terrain::default();
+        w.section = Some(workings::Section {
+            from: 1,
+            to: [264, 193],
+            lift: false,
+            cells: vec![[264, 193]],
+            support_work: 0,
+        });
+        for _ in 0..20 {
+            w.advance(&terrain, &[], "depth", 1200, 10, 10);
         }
-        assert!(g.support_rows > 1200);
-        assert!(g.crew.engineers > 1);
+        assert_eq!(w.passages.len(), 2);
     }
 }
 

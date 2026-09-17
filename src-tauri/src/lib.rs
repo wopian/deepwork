@@ -525,6 +525,7 @@ mod workings_stream_tests {
             parent: 0,
             lift: false,
             supported: true,
+            column: true,
         });
         let next = stream.update(&game);
         assert_eq!(next.state.workings_offset, 1);

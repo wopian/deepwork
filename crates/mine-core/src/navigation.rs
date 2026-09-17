@@ -99,7 +99,10 @@ pub fn underground(
             return vec![];
         }
     }
-    let mut result = path;
+    let mut result = vec![];
+    for p in path {
+        push(&mut result, p);
+    }
     result.extend(route(t, heights, [SHAFT, PIT - 1], true));
     result.dedup();
     if result.last() != Some(&[16, 0]) {
