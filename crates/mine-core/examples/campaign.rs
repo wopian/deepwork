@@ -29,6 +29,39 @@ fn act(g: &mut Game, kind: &str, target: &str, value: u64) -> bool {
     })
     .is_ok()
 }
+// Use public recipe/catalogue knowledge only. Terrain and hidden geology are never inspected.
+fn pinned_feeds(g: &Game) -> Vec<usize> {
+    let mut pending: Vec<String> = g
+        .pinned
+        .as_ref()
+        .and_then(|id| requirements().iter().find(|u| u.id == *id))
+        .map(|u| u.inputs.keys().cloned().collect())
+        .unwrap_or_default();
+    let cat = materials();
+    let mut visited = std::collections::BTreeSet::new();
+    let mut feeds = std::collections::BTreeSet::new();
+    while let Some(product) = pending.pop() {
+        if !visited.insert(product.clone()) {
+            continue;
+        }
+        if let Some(recipe) = recipes().iter().find(|r| r.output == product) {
+            pending.extend(recipe.inputs.keys().cloned());
+        } else {
+            let matches = |m: &&mine_core::Material| {
+                m.product == product || product == "alumina" && m.name == "Bauxite"
+            };
+            if let Some(material) = cat
+                .iter()
+                .filter(matches)
+                .find(|m| g.discoveries.contains(&m.id))
+                .or_else(|| cat.iter().find(matches))
+            {
+                feeds.insert(material.id);
+            }
+        }
+    }
+    feeds.into_iter().take(3).collect()
+}
 fn strategy(g: &mut Game, style: &str, attentive: bool) {
     if g.workers == 3 {
         act(g, "buy", "worker", 0);
@@ -257,10 +290,39 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
             }
         }
     }
-    let policy = match style {
-        "bulk" => "bulk",
-        "precision" => "vein",
-        _ => "depth",
+    let feeds = pinned_feeds(g);
+    for id in g.priorities.clone() {
+        if !feeds.contains(&id) {
+            act(g, "priority", "", id as u64);
+        }
+    }
+    for id in feeds {
+        if !g.priorities.contains(&id) {
+            act(g, "priority", "", id as u64);
+        }
+    }
+    let material_shortage = g
+        .pinned
+        .as_ref()
+        .and_then(|id| requirements().iter().find(|u| u.id == *id))
+        .is_some_and(|u| {
+            u.inputs
+                .iter()
+                .any(|(p, n)| g.products.get(p).copied().unwrap_or(0) < *n)
+        });
+    // Styles choose specialisation and headquarters investment. All competent
+    // strategies can develop retirement access or follow essential construction feed.
+    let policy = if g.level("shaft") > 0 && g.depth() < 300 && g.research_invested() < research_goal
+    {
+        "depth"
+    } else if g.level("shaft") > 0 && material_shortage && !g.priorities.is_empty() {
+        "vein"
+    } else {
+        match style {
+            "bulk" => "bulk",
+            "precision" => "vein",
+            _ => "depth",
+        }
     };
     let policy = if g.depth() + 4 >= 300 * (1 + g.level("shaft")) {
         "bulk"
@@ -478,6 +540,42 @@ fn main() {
 #[cfg(test)]
 mod strategy_tests {
     use super::*;
+    #[test]
+    fn construction_shortages_use_known_recipe_feeds_without_reading_geology() {
+        let mut g = Game::new(51, 2);
+        g.credits = 0;
+        g.heights[0] = 1192;
+        for id in ["conveyor", "furnace", "steelworks", "shaft"] {
+            g.levels.insert(id.into(), 1);
+        }
+        strategy(&mut g, "bulk", false);
+        assert_eq!(g.pinned.as_deref(), Some("supports"));
+        assert_eq!(g.policy, "vein");
+        assert_eq!(g.priorities, vec![3, 5, 6]);
+        assert!(
+            g.terrain.revealed.is_empty(),
+            "Planning priorities must not reveal ore"
+        );
+    }
+    #[test]
+    fn research_retirement_access_temporarily_overrides_extraction_style() {
+        let mut g = Game::new(42, 2);
+        g.credits = 0;
+        g.heights[0] = 800;
+        for id in BUILD_ORDER.iter().take_while(|id| **id != "power") {
+            g.levels.insert((*id).into(), 1);
+        }
+        g.products
+            .insert("steel".into(), 16 * mine_core::geometry::UNITS);
+        strategy(&mut g, "bulk", false);
+        assert_eq!(g.policy, "depth");
+        g.ranks.insert("excavation".into(), 3);
+        strategy(&mut g, "bulk", false);
+        assert_eq!(
+            g.policy, "bulk",
+            "Return to chosen style after funding research gate"
+        );
+    }
     #[test]
     fn early_contracts_reward_research_without_spending_endgame_reserves() {
         let mut g = Game::default();
