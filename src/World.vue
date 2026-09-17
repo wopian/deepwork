@@ -15,6 +15,7 @@ let world: Container;
 let terrain: Graphics;
 const fineTerrain = new TerrainView();
 let actors: Graphics;
+let structures: Graphics;
 let wasteLabel: Text;
 let t = 0;
 let telemetryTime = 0;
@@ -73,7 +74,8 @@ function draw() {
     g?.seed,
     g?.profile,
     g?.terrain.revision,
-    g?.support_rows,
+    g?.workings?.revision,
+    preferences.surveyOverlay,
     g?.housing,
     first,
     last,
@@ -85,6 +87,85 @@ function draw() {
   ].join(":");
   if (key === drawnKey) return;
   drawnKey = key;
+  structures.clear();
+  const workings = g?.workings;
+  if (workings) {
+    for (let i = 1; i < workings.passages.length; i++) {
+      const node = workings.passages[i]!;
+      const parent = workings.passages[node.parent]!;
+      if (
+        Math.max(node.feet[1], parent.feet[1]) < first ||
+        Math.min(node.feet[1], parent.feet[1]) - 16 > last
+      )
+        continue;
+      const x = 235 + node.feet[0] * CELL_PIXEL,
+        y = 208 + (node.feet[1] + 1) * CELL_PIXEL;
+      const px = 235 + parent.feet[0] * CELL_PIXEL,
+        py = 208 + (parent.feet[1] + 1) * CELL_PIXEL;
+      if (node.lift) {
+        rect(
+          structures,
+          x - 2 * CELL_PIXEL,
+          Math.min(y, py) - 7 * CELL_PIXEL,
+          1,
+          Math.abs(y - py) + 7 * CELL_PIXEL,
+          0x8c9ba5,
+        );
+        rect(
+          structures,
+          x + 2 * CELL_PIXEL,
+          Math.min(y, py) - 7 * CELL_PIXEL,
+          1,
+          Math.abs(y - py) + 7 * CELL_PIXEL,
+          0x8c9ba5,
+        );
+        rect(
+          structures,
+          x - 2 * CELL_PIXEL,
+          y - 1,
+          4 * CELL_PIXEL,
+          1,
+          0xe5a34d,
+        );
+      } else if (node.supported) {
+        const color = (g?.levels.supports ?? 0) > 0 ? 0x8c9ba5 : 0xa67548;
+        rect(structures, x - 1, y - 8 * CELL_PIXEL, 1, 8 * CELL_PIXEL, color);
+        structures
+          .moveTo(px, py - 8 * CELL_PIXEL)
+          .lineTo(x, y - 8 * CELL_PIXEL)
+          .stroke({ width: 1, color });
+      }
+    }
+    if (preferences.surveyOverlay) {
+      for (const signal of workings.signals) {
+        if (
+          signal.centre[1] + signal.radius < first ||
+          signal.centre[1] - signal.radius > last
+        )
+          continue;
+        const x = 235 + signal.centre[0] * CELL_PIXEL,
+          y = 208 + signal.centre[1] * CELL_PIXEL;
+        structures
+          .circle(x, y, signal.radius * CELL_PIXEL)
+          .fill({ color: 0xe5a34d, alpha: 0.1 })
+          .stroke({ color: 0xe5a34d, width: 1, alpha: 0.6 });
+        // One/two notches convey confidence independently of colour.
+        for (let n = 0; n < signal.confidence; n++)
+          rect(structures, x - 2 + n * 4, y - 2, 2, 4, 0xe8dfc8);
+      }
+      const section = workings.section;
+      if (section) {
+        const from = workings.passages[section.from]!.feet;
+        structures
+          .moveTo(235 + from[0] * CELL_PIXEL, 208 + from[1] * CELL_PIXEL)
+          .lineTo(
+            235 + section.to[0] * CELL_PIXEL,
+            208 + section.to[1] * CELL_PIXEL,
+          )
+          .stroke({ color: 0xe5a34d, width: 2, alpha: 0.65 });
+      }
+    }
+  }
   terrain.clear();
   rect(terrain, groundLeft, 190, W, (last + 5) * CELL_PIXEL, 0x806044);
   rect(terrain, groundLeft, 188, W, 8, 0x6b8f47);
@@ -228,7 +309,8 @@ onMounted(async () => {
   world = new Container();
   terrain = new Graphics();
   actors = new Graphics();
-  world.addChild(terrain, fineTerrain.layer, actors);
+  structures = new Graphics();
+  world.addChild(terrain, fineTerrain.layer, structures, actors);
   app.stage.addChild(world);
   wasteLabel = new Text({
     text: "",
@@ -332,26 +414,6 @@ onMounted(async () => {
     });
     for (const particle of wasteParticles.items) {
       rect(actors, particle.x, particle.y, 3, 3, 0x8c9ba5);
-    }
-    const access = g?.work_route ?? [];
-    for (let i = 1; i < access.length; i++) {
-      const a = access[i - 1]!,
-        b = access[i]!;
-      if (Math.max(a[1], b[1]) < 192) continue;
-      const ax = 235 + a[0] * CELL_PIXEL,
-        ay = 208 + a[1] * CELL_PIXEL;
-      const bx = 235 + b[0] * CELL_PIXEL,
-        by = 208 + b[1] * CELL_PIXEL;
-      if (a[0] === b[0]) {
-        rect(actors, ax - 2, Math.min(ay, by), 1, Math.abs(ay - by), 0x8c9ba5);
-        rect(actors, ax + 3, Math.min(ay, by), 1, Math.abs(ay - by), 0x8c9ba5);
-      } else if (a[1] === b[1]) {
-        rect(actors, Math.min(ax, bx), ay + 1, Math.abs(ax - bx), 1, 0xa67548);
-        for (let sx = Math.min(ax, bx); sx <= Math.max(ax, bx); sx += 16) {
-          rect(actors, sx, ay - 6, 1, 7, 0xa67548);
-          rect(actors, sx, ay - 6, 8, 1, 0xa67548);
-        }
-      }
     }
     const crew = g?.crew ?? { diggers: 6, haulers: 3 };
     let shown = 0;
@@ -574,6 +636,17 @@ function wheel(e: WheelEvent) {
       </button>
       <button
         @click="
+          preferences.surveyOverlay = !preferences.surveyOverlay;
+          drawnKey = '';
+          draw();
+        "
+        :aria-pressed="preferences.surveyOverlay"
+        title="Approximate signals: one notch = possible; two = promising. Sampled ore appears in terrain."
+      >
+        Survey / work plan
+      </button>
+      <button
+        @click="
           followCrew = !followCrew;
           follow = false;
         "
@@ -584,7 +657,9 @@ function wheel(e: WheelEvent) {
     </div>
     <div class="world-caption">
       {{ state ? "LIVE OPERATION" : "ILLUSTRATIVE PREVIEW" }}
-      <span>SCROLL TO ZOOM · DRAG TO EXPLORE</span>
+      <span>{{
+        state?.workings?.status || "SCROLL TO ZOOM · DRAG TO EXPLORE"
+      }}</span>
     </div>
   </div>
 </template>

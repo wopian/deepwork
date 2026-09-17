@@ -1,5 +1,6 @@
 import { reactive, watch } from "vue";
 const defaults = {
+  surveyOverlay: false,
   reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches,
   audio: false,
   ambience: true,

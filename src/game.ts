@@ -78,6 +78,25 @@ export interface Game {
   crew: Record<string, number>;
   crew_priority: string;
   cargo_policy: string;
+  workings_offset: number;
+  workings: {
+    revision: number;
+    status: string;
+    active: number;
+    passages: {
+      feet: [number, number];
+      parent: number;
+      lift: boolean;
+      supported: boolean;
+    }[];
+    signals: { centre: [number, number]; radius: number; confidence: number }[];
+    section: {
+      from: number;
+      to: [number, number];
+      lift: boolean;
+      support_work: number;
+    } | null;
+  };
   support_rows: number;
   support_work: number;
   heights: number[];
@@ -208,6 +227,9 @@ export async function start() {
       if (state.value && state.value.campaign_id !== g.campaign_id) return;
       if (update.reset) terrainEpoch.value++;
       if (!update.reset && state.value?.site === g.site) {
+        if (g.workings_offset>0) {
+          g.workings.passages=[...state.value.workings.passages.slice(0,g.workings_offset),...g.workings.passages];
+        }
         for (const key of ["chunks", "revealed", "visible"] as const) {
           g.terrain[key] = { ...state.value.terrain[key], ...g.terrain[key] };
         }

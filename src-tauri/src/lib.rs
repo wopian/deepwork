@@ -32,6 +32,7 @@ struct Snapshot {
     quotes: std::collections::BTreeMap<String, String>,
     retirement_award: u64,
     requires_reset: bool,
+    workings_offset: usize,
     shipments: Vec<mine_core::transport::VisualCargo>,
     work_route: Vec<[u32; 2]>,
     raw_stock_capacity: u64,
@@ -40,7 +41,7 @@ struct Snapshot {
     purchase_blockers: std::collections::BTreeMap<String, String>,
 }
 impl From<Game> for Snapshot {
-    fn from(game: Game) -> Self {
+    fn from(mut game: Game) -> Self {
         let quotes = mine_core::requirements()
             .iter()
             .map(|u| (u.id.clone(), game.cost(&u.id).to_string()))
@@ -61,8 +62,21 @@ impl From<Game> for Snapshot {
                     .map(|reason| (u.id.clone(), reason))
             })
             .collect();
+        // Persistence retains search internals; rendering receives only public knowledge.
+        game.workings.search = None;
+        game.workings.surveyed.clear();
+        game.workings.exhausted.clear();
+        if let Some(section) = &mut game.workings.section {
+            section.cells.clear();
+        }
+        game.transport.routes.clear();
+        game.transport.source.clear();
+        for station in &mut game.transport.stations {
+            station.routing.clear();
+        }
         Self {
             requires_reset: game.legacy_pending,
+            workings_offset: 0,
             shipments: game.transport.visual(),
             work_route: game.work_route().to_vec(),
             raw_stock_capacity: game.raw_stock_capacity(),
@@ -77,6 +91,7 @@ impl From<Game> for Snapshot {
 }
 #[derive(Default)]
 struct Stream {
+    passages: usize,
     identity: Option<(String, u32, u64)>,
     chunks: std::collections::BTreeMap<u32, Vec<u8>>,
     visible: std::collections::BTreeMap<u32, Vec<u8>>,
@@ -108,8 +123,17 @@ impl Stream {
         self.chunks = g.terrain.chunks.clone();
         self.visible = g.terrain.visible.clone();
         self.revealed = g.terrain.revealed.clone();
+        let offset = if reset {
+            0
+        } else {
+            self.passages.min(g.workings.passages.len())
+        };
+        self.passages = g.workings.passages.len();
+        state.workings.passages.drain(..offset);
+        let mut snapshot: Snapshot = state.into();
+        snapshot.workings_offset = offset;
         Update {
-            state: state.into(),
+            state: snapshot,
             reset,
         }
     }
@@ -479,5 +503,46 @@ mod reset_tests {
         );
         drop(state);
         fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod workings_stream_tests {
+    use super::*;
+    #[test]
+    fn passage_deltas_preserve_global_parent_indices() {
+        let mut game = Game::default();
+        game.workings.initialise();
+        let mut stream = Stream::default();
+        let first = stream.update(&game);
+        assert!(first.reset);
+        assert_eq!(first.state.game.workings.passages.len(), 1);
+        let idle = stream.update(&game);
+        assert_eq!(idle.state.workings_offset, 1);
+        assert!(idle.state.game.workings.passages.is_empty());
+        game.workings.passages.push(mine_core::workings::Passage {
+            feet: [260, 192],
+            parent: 0,
+            lift: false,
+            supported: true,
+        });
+        let next = stream.update(&game);
+        assert_eq!(next.state.workings_offset, 1);
+        assert_eq!(next.state.game.workings.passages[0].parent, 0);
+    }
+    #[test]
+    fn renderer_has_signals_but_no_search_or_private_survey_history() {
+        let mut game = Game::default();
+        game.workings.initialise();
+        game.workings.surveyed.insert(42);
+        game.workings.signals.push(mine_core::workings::Signal {
+            centre: [240, 240],
+            radius: 23,
+            confidence: 1,
+        });
+        let snapshot: Snapshot = game.into();
+        let json = serde_json::to_value(snapshot).unwrap();
+        assert_eq!(json["workings"]["surveyed"], serde_json::json!([]));
+        assert_eq!(json["workings"]["signals"][0].as_object().unwrap().len(), 3);
     }
 }
