@@ -365,6 +365,30 @@ impl Workings {
         }
         if self.search.is_none() {
             let deepest = self.passages.iter().map(|n| n.feet[1]).max().unwrap();
+            let access_blocked = depth_limit <= deepest + 17;
+            let development = policy == "depth" && !access_blocked;
+            let nearest_distance = |p: Point| {
+                if access_blocked {
+                    // Reuse older surveyed workings when the next equipment gate stops
+                    // access development. The derived spatial index bounds this lookup.
+                    self.node_index
+                        .range(
+                            key([0, p[1].saturating_sub(256)])
+                                ..=key([WIDTH - 1, p[1].saturating_add(256)]),
+                        )
+                        .map(|(_, &i)| distance(self.passages[i].feet, p))
+                        .min()
+                        .unwrap_or(u32::MAX)
+                } else {
+                    self.passages
+                        .iter()
+                        .rev()
+                        .take(128)
+                        .map(|n| distance(n.feet, p))
+                        .min()
+                        .unwrap_or(u32::MAX)
+                }
+            };
             let mut candidates: Vec<(i64, Point)> = vec![];
             // Targets come only from locally sampled frontier cells.
             for (&id, faces) in &terrain.ore_frontiers {
@@ -377,18 +401,11 @@ impl Workings {
                         || p[1] >= depth_limit
                         || self.exhausted.contains(&k)
                         || protected(&self.floor_index, p, &[])
-                        || p[1] + 256 < deepest
+                        || !access_blocked && p[1] + 256 < deepest
                     {
                         continue;
                     }
-                    let near = self
-                        .passages
-                        .iter()
-                        .rev()
-                        .take(128)
-                        .map(|n| distance(n.feet, p))
-                        .min()
-                        .unwrap_or(u32::MAX);
+                    let near = nearest_distance(p);
                     if near > 256 {
                         continue;
                     }
@@ -403,23 +420,16 @@ impl Workings {
             for s in &self.signals {
                 if s.centre[1] >= depth_limit
                     || self.exhausted.contains(&key(s.centre))
-                    || s.centre[1] + 256 < deepest
+                    || !access_blocked && s.centre[1] + 256 < deepest
                 {
                     continue;
                 }
-                let near = self
-                    .passages
-                    .iter()
-                    .rev()
-                    .take(128)
-                    .map(|n| distance(n.feet, s.centre))
-                    .min()
-                    .unwrap_or(u32::MAX);
+                let near = nearest_distance(s.centre);
                 if near <= 256 {
                     candidates.push((near as i64 - 12 * s.confidence as i64, s.centre));
                 }
             }
-            if policy == "depth" {
+            if development {
                 // Develop access toward deeper surveyed ground. Nearby shallow ore remains
                 // available when the foreman switches back to an extraction policy.
                 candidates.retain(|(_, p)| p[1] > deepest + 4);
@@ -436,23 +446,27 @@ impl Workings {
                 ]
             });
             // Reachable sampled ore becomes a local extraction area, not a new access shaft.
-            if policy != "depth"
+            if !development
                 && terrain
                     .known_material(goal[0], goal[1])
                     .is_some_and(|id| id > 1)
             {
-                if let Some((anchor, node)) =
-                    self.passages
-                        .iter()
-                        .enumerate()
-                        .rev()
-                        .take(512)
-                        .find(|(_, n)| {
-                            n.supported
-                                && n.feet[0].abs_diff(goal[0]) <= 8
-                                && goal[1] <= n.feet[1]
-                                && n.feet[1] - goal[1] < 16
-                        })
+                if let Some((anchor, node)) = self
+                    .passages
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .take(if access_blocked {
+                        self.passages.len()
+                    } else {
+                        512
+                    })
+                    .find(|(_, n)| {
+                        n.supported
+                            && n.feet[0].abs_diff(goal[0]) <= 8
+                            && goal[1] <= n.feet[1]
+                            && n.feet[1] - goal[1] < 16
+                    })
                 {
                     let mut cells = vec![];
                     for x in node.feet[0].min(goal[0])..=node.feet[0].max(goal[0]) {
@@ -885,6 +899,42 @@ mod tests {
         assert_eq!(w.passages.len(), 2);
         assert!(w.chambers.contains_key(&1));
         assert!(!t.contains(260, 224), "retain chamber floor");
+    }
+    #[test]
+    fn equipment_gate_recovers_sampled_ore_from_older_workings() {
+        let mut t = Terrain::from_columns(&vec![PIT_ROWS; WIDTH as usize]);
+        let mut w = Workings::default();
+        w.initialise();
+        for i in 1..=80 {
+            let feet = [256, 191 + i * 16];
+            let parent = w.passages.len() - 1;
+            for p in cut_cells(w.passages[parent].feet, feet, true) {
+                t.excavate(p[0], p[1]);
+            }
+            w.passages.push(Passage {
+                feet,
+                parent,
+                lift: true,
+                supported: true,
+                column: false,
+            });
+        }
+        w.active = w.passages.len() - 1;
+        t.reveal(42, 0, 260, 216, 0, &crate::materials());
+        let id = crate::geometry::chunk_id(260, 216);
+        let bit = crate::geometry::bit_index(260, 216);
+        t.visible.get_mut(&id).unwrap()[bit] = 3;
+        t.ore_frontiers
+            .entry(3)
+            .or_default()
+            .insert(key([260, 216]));
+        w.advance(&t, &[3], "depth", 1472, 1, 0);
+        let section = w
+            .section
+            .as_ref()
+            .expect("Revisit earlier sampled ore at equipment gate");
+        assert_eq!(section.to, [256, 223]);
+        assert!(section.cells.contains(&[260, 216]));
     }
     #[test]
     fn reversed_slopes_cover_identical_cells() {
