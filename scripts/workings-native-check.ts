@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 const out = resolve(process.argv[2] ?? "test-results/workings");
 const duration = Number(process.argv[3] ?? 30);
+const inputLocked = process.argv.includes("--locked-input");
 await mkdir(out, { recursive: true });
 const data = await mkdtemp(join(tmpdir(), "deepwork-workings-"));
 const exe = join(data, "deepwork.exe");
@@ -80,6 +81,41 @@ try {
     .getByRole("button", { name: "Survey / work plan", exact: true })
     .click();
   await page.waitForTimeout(2000);
+  if (inputLocked) {
+    await page.evaluate(() => {
+      const marker = document.getElementById("automation-marker");
+      if (marker)
+        marker.textContent =
+          "AUTOMATED PERFORMANCE TEST · TEMPORARY SAVE · CONTROLS LOCKED DURING MEASUREMENT";
+      const shield = document.createElement("div");
+      shield.style.cssText = "position:fixed;inset:0;z-index:99998;cursor:wait";
+      document.body.append(shield);
+      const events = [
+        "pointerdown",
+        "pointerup",
+        "click",
+        "keydown",
+        "keyup",
+        "wheel",
+        "touchstart",
+        "touchend",
+      ];
+      const block = (event: Event) => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      };
+      for (const event of events)
+        window.addEventListener(event, block, {
+          capture: true,
+          passive: false,
+        });
+      (window as any).__deepworkUnlockPerformanceInput = () => {
+        for (const event of events)
+          window.removeEventListener(event, block, true);
+        shield.remove();
+      };
+    });
+  }
   const samples = [];
   for (let n = 0; n < duration; n++) {
     if (n % 5 === 0)
@@ -102,9 +138,10 @@ try {
     }
     await page.waitForTimeout(1000);
   }
-  await page.evaluate(() =>
-    document.getElementById("automation-marker")?.remove(),
-  );
+  await page.evaluate(() => {
+    (window as any).__deepworkUnlockPerformanceInput?.();
+    document.getElementById("automation-marker")?.remove();
+  });
   await page.screenshot({
     path: join(out, "underground-desktop.png"),
     fullPage: true,
@@ -171,6 +208,7 @@ try {
       {
         passed: true,
         duration,
+        inputLocked,
         saveBytes: Buffer.byteLength(save),
         fixtureWorkers: fixtureState.workers,
         gameplayCommands: g.last_sequence - fixtureState.last_sequence,
