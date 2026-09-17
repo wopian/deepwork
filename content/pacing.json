@@ -110,7 +110,7 @@
   "base_power": 1,
   "power_per_level": 5,
   "tactics_depth": 40,
-  "specialisation_depth": 200,
+  "specialisation_depth": 300,
   "headquarters_starting": {
     "excavation": [
       {

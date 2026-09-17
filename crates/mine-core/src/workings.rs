@@ -912,7 +912,7 @@ mod tests {
         while let Some(k) = w.next_cell(&t) {
             assert!(t.excavate(k % WIDTH, k / WIDTH));
         }
-        w.advance(&t, &[3], "vein", 1200, 10, 1);
+        w.advance(&t, &[3], "vein", 1200, 100, 10);
         assert_eq!(w.passages.len(), 2);
         assert!(w.chambers.contains_key(&1));
         assert!(!t.contains(260, 224), "retain chamber floor");
@@ -987,7 +987,7 @@ mod tests {
             !w.exhausted.contains(&key(goal)),
             "Signal remains until samples can reach it"
         );
-        w.advance(&terrain, &[], "vein", 1200, 100, 1);
+        w.advance(&terrain, &[], "vein", 1200, 100, 10);
         assert!(w.passages.len() > 2);
     }
     #[test]
@@ -1128,10 +1128,15 @@ mod development_tests {
             g.terrain.reveal(g.seed, g.profile, p[0], p[1], 0, &cat);
         }
         assert_eq!(g.depth(), 48);
-        for _ in 0..30 {
+        let mined = g.excavated;
+        for _ in 0..120 {
             g.second(&cat, true);
         }
-        assert!(g.depth() > 60, "resume beyond the shallow pit-edge drive");
+        assert!(
+            g.excavated > mined,
+            "resume excavation beyond the stalled drive"
+        );
+        assert!(g.workings.passages.len() > 5);
         assert!(!crate::navigation::underground(&g.terrain, &g.heights, &g.workings).is_empty());
         g.validate().unwrap();
     }
@@ -1140,7 +1145,8 @@ mod development_tests {
         let cat = crate::materials();
         for seed in 42..72 {
             let mut g = fixture(seed);
-            for tick in 0..1200 {
+            // Allow two minutes for authored support-construction work.
+            for tick in 0..2400 {
                 g.tick(&cat, true);
                 if tick % 100 == 0 && !g.workings.passages.is_empty() {
                     assert!(

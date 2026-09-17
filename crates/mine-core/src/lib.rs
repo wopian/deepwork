@@ -2667,7 +2667,7 @@ mod construction_tests {
         w.advance(&terrain, &[], "depth", 1200, 1, 0);
         assert_eq!(w.passages.len(), 1);
         assert_eq!(w.status, "Waiting for supports");
-        for _ in 0..12 {
+        for _ in 1..workings::settings().support_work.div_ceil(80) {
             w.advance(&terrain, &[], "depth", 1200, 1, 0);
         }
         assert!(w.passages.len() > 1);
