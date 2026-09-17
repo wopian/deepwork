@@ -639,25 +639,9 @@ impl Workings {
                 if distance(q, search.origin) > settings().search_radius {
                     continue;
                 }
-                let cells = cut_cells(p, q, lift);
-                if cells
-                    .iter()
-                    .any(|c| crate::geometry::protects_ramp(c[0], c[1]))
-                {
+                let Some(solid) = cut_cost(terrain, &self.floor_index, p, q, lift) else {
                     continue;
-                }
-                // Never cut an existing passage floor away; junctions are anchored at nodes.
-                if !lift
-                    && cells
-                        .iter()
-                        .any(|c| protected(&self.floor_index, *c, &[p, q]))
-                {
-                    continue;
-                }
-                let solid = cells
-                    .iter()
-                    .filter(|c| !terrain.contains(c[0], c[1]))
-                    .count() as u64;
+                };
                 let step = solid
                     + if lift {
                         settings().lift_work
@@ -790,6 +774,47 @@ impl Workings {
             })
     }
 }
+/// Same cells and safety rules as a committed cut, without allocating cells
+/// or repeating chunk/floor lookups for every fine pixel during path search.
+fn cut_cost(
+    terrain: &Terrain,
+    floors: &BTreeMap<u32, BTreeSet<u32>>,
+    a: Point,
+    b: Point,
+    lift: bool,
+) -> Option<u64> {
+    let (left, right) = if lift {
+        (a[0].saturating_sub(3), (a[0] + 3).min(WIDTH - 1))
+    } else {
+        (a[0].min(b[0]), a[0].max(b[0]))
+    };
+    let mut solid = 0;
+    for x in left..=right {
+        let (first, last) = if lift {
+            (a[1].min(b[1]).saturating_sub(7), a[1].max(b[1]))
+        } else {
+            let feet = interpolate(a, b, x);
+            (feet.saturating_sub(7), feet)
+        };
+        if x >= crate::geometry::PIT_MARGIN
+            && x < PIT_ROWS + crate::geometry::PIT_MARGIN
+            && last >= x - (crate::geometry::PIT_MARGIN - 1)
+            && first.max(x - (crate::geometry::PIT_MARGIN - 1)) < PIT_ROWS
+        {
+            return None;
+        }
+        if !lift
+            && floors.get(&x).is_some_and(|ys| {
+                ys.range(first.saturating_sub(settings().pillar_width)..last)
+                    .any(|&y| [x, y] != a && [x, y] != b)
+            })
+        {
+            return None;
+        }
+        solid += (last - first + 1 - terrain.excavated_in_column(x, first, last)) as u64;
+    }
+    Some(solid)
+}
 fn protected(floors: &BTreeMap<u32, BTreeSet<u32>>, p: Point, except: &[Point]) -> bool {
     floors.get(&p[0]).is_some_and(|ys| {
         ys.range(p[1].saturating_sub(settings().pillar_width)..p[1])
@@ -826,6 +851,69 @@ pub fn cut_cells(a: Point, b: Point, lift: bool) -> Vec<Point> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn column_search_cost_matches_pixel_cuts_across_chunks_ramps_and_supports() {
+        for pattern in 0..3 {
+            let mut terrain = Terrain::default();
+            for id in 0..64 {
+                terrain.chunks.insert(
+                    id,
+                    (0..512)
+                        .map(|byte| match pattern {
+                            0 => 0,
+                            1 => 255,
+                            _ => ((id * 17 + byte * 29) as u8) ^ 0x5a,
+                        })
+                        .collect(),
+                );
+            }
+            for supports in [false, true] {
+                let mut floors = BTreeMap::new();
+                if supports {
+                    for x in (8..WIDTH - 8).step_by(5) {
+                        floors.insert(
+                            x,
+                            [184, 191, 192, 200, 248, 256, 300, 512]
+                                .into_iter()
+                                .collect(),
+                        );
+                    }
+                }
+                for x in [
+                    8, 16, 31, 63, 64, 65, 128, 191, 192, 207, 208, 255, 256, 257, 500,
+                ] {
+                    for y in [191, 192, 193, 207, 223, 255, 256, 257, 300, 511, 512, 1023] {
+                        let a = [x, y];
+                        for (dx, dy, lift) in [
+                            (-4, -1, false),
+                            (-4, 0, false),
+                            (-4, 1, false),
+                            (4, -1, false),
+                            (4, 0, false),
+                            (4, 1, false),
+                            (0, 16, true),
+                            (0, -16, true),
+                        ] {
+                            let b = [(x as i32 + dx) as u32, (y as i32 + dy) as u32];
+                            let cells = cut_cells(a, b, lift);
+                            let unsafe_cut = cells
+                                .iter()
+                                .any(|p| crate::geometry::protects_ramp(p[0], p[1]))
+                                || !lift && cells.iter().any(|p| protected(&floors, *p, &[a, b]));
+                            let reference = (!unsafe_cut).then(|| {
+                                cells
+                                    .iter()
+                                    .filter(|p| !terrain.contains(p[0], p[1]))
+                                    .count() as u64
+                            });
+                            assert_eq!(cut_cost(&terrain, &floors, a, b, lift), reference,
+                                "pattern {pattern}, supports {supports}, {a:?} -> {b:?}, lift {lift}");
+                        }
+                    }
+                }
+            }
+        }
+    }
     #[test]
     fn planning_is_knowledge_limited_and_resumes_identically() {
         let mut a = Workings::default();

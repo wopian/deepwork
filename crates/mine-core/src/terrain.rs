@@ -64,6 +64,26 @@ impl Terrain {
             self.index_frontier(key);
         }
     }
+    /// Count an inclusive vertical cut with one map lookup per intersected chunk.
+    pub(crate) fn excavated_in_column(&self, x: u32, first: u32, last: u32) -> u32 {
+        if x >= WIDTH || first > last || first >= MAX_ROWS {
+            return 0;
+        }
+        let last = last.min(MAX_ROWS - 1);
+        let mut y = first;
+        let mut count = 0;
+        while y <= last {
+            let end = last.min((y / 64 + 1) * 64 - 1);
+            if let Some(bytes) = self.chunks.get(&chunk_id(x, y)) {
+                for row in y..=end {
+                    let bit = bit_index(x, row);
+                    count += u32::from(bytes[bit / 8] & (1 << (bit % 8)) != 0);
+                }
+            }
+            y = end + 1;
+        }
+        count
+    }
     pub fn contains(&self, x: u32, y: u32) -> bool {
         if x >= WIDTH || y >= MAX_ROWS {
             return false;
