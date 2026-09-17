@@ -462,6 +462,47 @@ impl Workings {
                             cells.push([x, y]);
                         }
                     }
+                    // Batch nearby samples into one bounded work area and one support task.
+                    let mut roofs = BTreeMap::new();
+                    for x in node.feet[0].saturating_sub(8)..=(node.feet[0] + 8).min(WIDTH - 1) {
+                        if let Some(y) = (node.feet[1].saturating_sub(15).max(PIT_ROWS)
+                            ..=node.feet[1])
+                            .find(|&y| {
+                                terrain.known_material(x, y).is_some_and(|id| id > 1)
+                                    && !terrain.contains(x, y)
+                            })
+                        {
+                            roofs.insert(x, y.min(node.feet[1].saturating_sub(7)));
+                        }
+                    }
+                    let left = roofs
+                        .keys()
+                        .next()
+                        .copied()
+                        .unwrap_or(goal[0])
+                        .min(node.feet[0]);
+                    let right = roofs
+                        .keys()
+                        .next_back()
+                        .copied()
+                        .unwrap_or(goal[0])
+                        .max(node.feet[0]);
+                    let mut area = vec![];
+                    for x in left..=right {
+                        let roof = roofs
+                            .get(&x)
+                            .copied()
+                            .unwrap_or(node.feet[1].saturating_sub(7));
+                        for y in roof.max(PIT_ROWS)..=node.feet[1] {
+                            area.push([x, y]);
+                        }
+                    }
+                    if !area.iter().any(|c| {
+                        crate::geometry::protects_ramp(c[0], c[1])
+                            || protected(&self.floor_index, *c, &[])
+                    }) {
+                        cells = area;
+                    }
                     let safe = !cells.iter().any(|c| {
                         crate::geometry::protects_ramp(c[0], c[1])
                             || protected(&self.floor_index, *c, &[])
