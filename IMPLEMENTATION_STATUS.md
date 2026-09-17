@@ -18,7 +18,7 @@ Dynamic underground mining is implemented and packaged for Windows. New geometry
 ## Current verification
 
 - **95 Rust core tests and 11 native tests pass.** Coverage includes 30-seed nonperiodic development and protected ramps, directional slope parity, local chambers, earlier-reserve recovery, hidden-information boundaries, cargo ownership, save/load and exact offline equality.
-- **7 campaign-strategy tests and 15 Bun tests pass.** Vue/TypeScript checks and frontend production build pass under Bun **1.4.0**. No dependencies were installed from WSL.
+- **7 campaign-strategy tests and 19 Bun tests pass.** Vue/TypeScript checks and frontend production build pass under Bun **1.4.0**. No dependencies were installed from WSL.
 - Windows NSIS packaging succeeds. Isolated native checks pass live production, purchases, reload, import/export, malformed imports, archive/reset, cancellation, stale commands and preference preservation. Touch emulation exercises transport controls.
 - Native underground preview passes fixture import, save/reload, portrait layout and touch survey-overlay control, with no uncaught page errors. The packaged test application runs with development runtimes removed from its PATH.
 
@@ -29,6 +29,8 @@ Final campaign and fixed-workload stress reports are being collected. Do not int
 A 30-minute interactive Windows endurance run on source `43a9fd4` measured 57–58 FPS, 85.5 MiB peak JavaScript heap (34.4 MiB at the final sample), 96 peak resident chunks, and 250 representative sprites for 1,000 simulated workers. The mine grew from 185 to 896 passage sections and 122 to 193 metres. Save/reload and portrait touch checks passed, with no page errors. Thirty-five gameplay commands changed transport controls during the run; it is interactive endurance evidence, not an unchanged-scenario benchmark.
 
 An isolated 20,000-tick fixture benchmark measured approximately 3× lower total simulation time after column-based search evaluation, with the complete saved state exactly equal to the earlier implementation. Pixel-reference tests also cover chunk boundaries, ramps, slopes and support exclusions.
+
+Paired comparison reports match seeds and strategies, reject mixed save/generator versions, and suppress milestone medians when any paired observation is missing. Three-seed attentive and continuous comparisons are diagnostics, not 30-seed acceptance. Calendar milestone reductions do not establish sustained throughput advantage.
 
 Campaign strategies now respond to required feed shortages using public recipe quantities and revealed samples. They survey deeper when required feed has not been sampled, follow sampled shortages, and prioritise retirement access at research gates. Bulk, precision and reclamation retain distinct specialisation and research choices. No hidden geology or free resources are used by the harness.
 
@@ -58,6 +60,8 @@ cargo run -p mine-core --release --example balance -- depth 0
 bun.exe scripts/check-early-pacing.ts early-0.json early-1.json early-2.json
 cmd.exe /d /c "cargo run -p mine-core --release --example campaign -- 30 56 scheduled 12 > campaign-report.json"
 bun.exe run check:campaign campaign-report.json
+bun.exe scripts/compare-campaigns.ts campaign-report.json attentive-report.json
+bun.exe scripts/compare-campaigns.ts campaign-report.json continuous-report.json
 bun.exe run tauri build --bundles nsis
 bun.exe scripts/native-check.ts test-results/native 0 release
 cargo run -p mine-core --release --example workings -- 1800 42 vein target/workings-fixture.json
