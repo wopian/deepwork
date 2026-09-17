@@ -16,6 +16,8 @@ pub struct Station {
     pub incoming: u64,
     pub outgoing: u64,
     pub quote: String,
+    #[serde(default)]
+    pub routing: Vec<RoutedCargo>,
 }
 impl Station {
     pub fn stored(&self) -> u64 {
@@ -23,7 +25,52 @@ impl Station {
     }
 }
 #[derive(Clone, Serialize, Deserialize)]
+pub struct RoutedCargo {
+    pub material: usize,
+    pub amount: u64,
+    pub route: u64,
+}
+fn put(lots: &mut Vec<RoutedCargo>, material: usize, amount: u64, route: u64) {
+    if amount == 0 {
+        return;
+    }
+    if let Some(lot) = lots
+        .iter_mut()
+        .find(|lot| lot.material == material && lot.route == route)
+    {
+        lot.amount += amount;
+    } else {
+        lots.push(RoutedCargo {
+            material,
+            amount,
+            route,
+        });
+    }
+}
+fn take(lots: &mut Vec<RoutedCargo>, material: usize, mut amount: u64) -> Vec<RoutedCargo> {
+    let mut result = vec![];
+    for lot in lots.iter_mut().filter(|l| l.material == material) {
+        let n = lot.amount.min(amount);
+        lot.amount -= n;
+        amount -= n;
+        if n > 0 {
+            result.push(RoutedCargo {
+                material,
+                amount: n,
+                route: lot.route,
+            });
+        }
+        if amount == 0 {
+            break;
+        }
+    }
+    lots.retain(|l| l.amount > 0);
+    result
+}
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Batch {
+    #[serde(default)]
+    pub route: u64,
     pub material: usize,
     pub amount: u64,
     pub remaining_ms: u32,
@@ -47,6 +94,12 @@ pub struct Segment {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Network {
+    #[serde(default)]
+    pub routes: BTreeMap<u64, Vec<Vec<Leg>>>,
+    #[serde(default)]
+    pub source: Vec<RoutedCargo>,
+    #[serde(default)]
+    pub current_route: u64,
     pub stations: Vec<Station>,
     pub segments: Vec<Segment>,
     pub express: usize,
@@ -83,6 +136,7 @@ impl Default for Network {
             incoming: 0,
             outgoing: 0,
             quote: "60".into(),
+            routing: vec![],
         })
         .collect();
         let segments = [
@@ -107,6 +161,9 @@ impl Default for Network {
         })
         .collect();
         Self {
+            routes: BTreeMap::new(),
+            source: vec![],
+            current_route: 0,
             stations,
             segments,
             express: 0,
@@ -187,6 +244,14 @@ impl Network {
             segment.capacity =
                 (crate::pacing::get().transit_units + global_capacity as u64 * 5) * UNITS;
         }
+        let itinerary: Vec<_> = self.segments.iter().map(|s| s.legs.clone()).collect();
+        if self.routes.get(&self.current_route) != Some(&itinerary) {
+            self.current_route += 1;
+            self.routes.insert(self.current_route, itinerary);
+        }
+    }
+    pub fn register_source(&mut self, material: usize, amount: u64) {
+        put(&mut self.source, material, amount, self.current_route);
     }
     pub fn mass(&self) -> u64 {
         self.stations.iter().map(Station::stored).sum::<u64>()
@@ -234,6 +299,30 @@ impl Network {
         boost: bool,
         power_permille: u64,
     ) -> u64 {
+        for (&id, &q) in ore.iter() {
+            let tracked: u64 = self
+                .source
+                .iter()
+                .filter(|l| l.material == id)
+                .map(|l| l.amount)
+                .sum();
+            if q > tracked {
+                put(&mut self.source, id, q - tracked, self.current_route);
+            }
+        }
+        for station in &mut self.stations {
+            for (&id, &q) in &station.cargo {
+                let tracked: u64 = station
+                    .routing
+                    .iter()
+                    .filter(|l| l.material == id)
+                    .map(|l| l.amount)
+                    .sum();
+                if q > tracked {
+                    put(&mut station.routing, id, q - tracked, self.current_route);
+                }
+            }
+        }
         if tick % 20 == 1 {
             for s in &mut self.stations {
                 s.incoming = 0;
@@ -244,12 +333,14 @@ impl Network {
         let last = self.stations.len() - 1;
         let mut room = output_cap.saturating_sub(output.values().sum());
         let mut dispatched = 0;
-        for (&id, q) in &mut self.stations[last].cargo {
+        let destination = &mut self.stations[last];
+        for (&id, q) in &mut destination.cargo {
             let n = (*q).min(room);
             *q -= n;
             *output.entry(id).or_default() += n;
             room -= n;
             dispatched += n;
+            take(&mut destination.routing, id, n);
         }
         self.stations[last].outgoing += dispatched;
         for index in (0..self.segments.len()).rev() {
@@ -276,6 +367,7 @@ impl Network {
                     space -= n;
                     *station.cargo.entry(batch.material).or_default() += n;
                     station.incoming += n;
+                    put(&mut station.routing, batch.material, n, batch.route);
                     segment.blocked |= batch.amount > 0;
                     if batch.amount > 0 {
                         segment.blocker = format!("{} full", station.name);
@@ -305,6 +397,9 @@ impl Network {
             *q -= n;
             space -= n;
             *self.stations[0].cargo.entry(id).or_default() += n;
+            for lot in take(&mut self.source, id, n) {
+                put(&mut self.stations[0].routing, id, lot.amount, lot.route);
+            }
         }
         self.stations[0].incoming += initial - space;
         for index in (0..self.segments.len()).rev() {
@@ -331,27 +426,41 @@ impl Network {
                 if n == 0 {
                     continue;
                 }
-                // Coalesce same-material departures within a 100ms service slot.
-                if let Some(batch) = segment.batches.last_mut().filter(|b| {
-                    b.material == id
-                        && b.duration_ms == segment.duration_ms
-                        && b.remaining_ms / 100 == segment.duration_ms / 100
-                }) {
-                    batch.amount += n;
-                } else if segment.batches.len() < 512 {
-                    segment.batches.push(Batch {
-                        material: id,
-                        amount: n,
-                        remaining_ms: segment.duration_ms,
-                        duration_ms: segment.duration_ms,
-                        legs: segment.legs.clone(),
-                    });
-                } else {
-                    break;
+                let lots = take(&mut station.routing, id, n);
+                let mut loaded = 0;
+                for lot in lots {
+                    let legs = self
+                        .routes
+                        .get(&lot.route)
+                        .and_then(|r| r.get(index))
+                        .cloned()
+                        .unwrap_or_else(|| segment.legs.clone());
+                    let duration = 2000 + legs.iter().map(|l| l.milliseconds).sum::<u32>();
+                    if let Some(batch) = segment.batches.last_mut().filter(|b| {
+                        b.material == id
+                            && b.route == lot.route
+                            && b.duration_ms == duration
+                            && b.remaining_ms / 100 == duration / 100
+                    }) {
+                        batch.amount += lot.amount;
+                    } else if segment.batches.len() < 512 {
+                        segment.batches.push(Batch {
+                            route: lot.route,
+                            material: id,
+                            amount: lot.amount,
+                            remaining_ms: duration,
+                            duration_ms: duration,
+                            legs,
+                        });
+                    } else {
+                        put(&mut station.routing, id, lot.amount, lot.route);
+                        continue;
+                    }
+                    loaded += lot.amount;
                 }
-                *station.cargo.get_mut(&id).unwrap() -= n;
-                station.outgoing += n;
-                budget -= n;
+                *station.cargo.get_mut(&id).unwrap() -= loaded;
+                station.outgoing += loaded;
+                budget -= loaded;
             }
             segment.utilisation = if initial_budget > 0 {
                 (initial_budget - budget) as f64 / initial_budget as f64
@@ -363,10 +472,37 @@ impl Network {
                 segment.blocker = "Vehicle capacity full".into();
             }
         }
+        let mut used = std::collections::BTreeSet::from([self.current_route]);
+        used.extend(self.source.iter().map(|l| l.route));
+        used.extend(
+            self.stations
+                .iter()
+                .flat_map(|s| s.routing.iter().map(|l| l.route)),
+        );
+        used.extend(
+            self.segments
+                .iter()
+                .flat_map(|s| s.batches.iter().map(|b| b.route)),
+        );
+        self.routes.retain(|id, _| used.contains(id));
         initial - space
     }
     pub fn valid(&self, materials: usize) -> bool {
-        self.stations.len() == 5
+        self.routes.len() <= 8192
+            && self.source.len() <= 32768
+            && self
+                .routes
+                .values()
+                .all(|r| r.len() == 4 && r.iter().all(|legs| valid_legs(legs)))
+            && self.stations.iter().all(|s| {
+                s.routing.len() <= 32768
+                    && s.routing.iter().all(|l| {
+                        l.material < materials
+                            && l.amount <= 1_000_000_000_000
+                            && self.routes.contains_key(&l.route)
+                    })
+            })
+            && self.stations.len() == 5
             && self.segments.len() == 4
             && self.express < 4
             && self.stations.iter().enumerate().all(|(index, s)| {
@@ -421,6 +557,52 @@ fn valid_legs(legs: &[Leg]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cargo_keeps_its_branch_after_active_route_changes() {
+        let mut n = Network::default();
+        let old = Leg {
+            from: [100, 200],
+            to: [120, 200],
+            mode: "carrying".into(),
+            milliseconds: 200,
+        };
+        n.configure(&[old.clone()], UNITS, 0);
+        let original = n.current_route;
+        let mut ore = BTreeMap::from([(3, UNITS)]);
+        let mut out = BTreeMap::new();
+        n.tick(1, &mut ore, &mut out, 100 * UNITS, &[], false, false, 1000);
+        n.configure(
+            &[Leg {
+                from: [300, 300],
+                to: [256, 300],
+                mode: "minecart".into(),
+                milliseconds: 500,
+            }],
+            UNITS,
+            0,
+        );
+        assert_ne!(n.current_route, original);
+        let saved = serde_json::to_string(&n).unwrap();
+        let mut n: Network = serde_json::from_str(&saved).unwrap();
+        for tick in 2..500 {
+            n.tick(
+                tick,
+                &mut ore,
+                &mut out,
+                100 * UNITS,
+                &[],
+                false,
+                false,
+                1000,
+            );
+            for batch in n.segments.iter().flat_map(|s| &s.batches) {
+                assert_eq!(batch.route, original);
+            }
+        }
+        assert_eq!(out[&3], UNITS);
+        assert_eq!(n.mass(), 0);
+        assert!(!n.routes.contains_key(&original));
+    }
     #[test]
     fn imported_quotes_are_safe_for_integer_display_and_affordability() {
         let mut network = Network::default();
@@ -500,6 +682,7 @@ mod tests {
         n.express = 2;
         for s in &mut n.segments {
             s.batches.push(Batch {
+                route: 0,
                 material: 0,
                 amount: UNITS,
                 remaining_ms: 1000,

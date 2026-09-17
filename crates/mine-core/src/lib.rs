@@ -910,6 +910,7 @@ impl Game {
         let cap = 20 * UNITS + 5 * UNITS * self.level("capacity") as u64;
         let ore_total: u64 = self.ore.values().sum();
         let mut mined = 0;
+        let mut mined_cargo = BTreeMap::<usize, u64>::new();
         let dig_rate = self.dig_rate(offline);
         let work = dig_rate + self.dig_remainder;
         self.dig_progress += work / 20;
@@ -938,6 +939,7 @@ impl Game {
                 self.removed.drain(..256);
             }
             *self.ore.entry(id).or_default() += CELL_MASS;
+            *mined_cargo.entry(id).or_default() += CELL_MASS;
             self.terrain.reveal(self.seed, self.profile, x, y, 1, cat);
             self.excavated += 1;
             mined += 1;
@@ -948,7 +950,17 @@ impl Game {
         let (transport, _) = logistics::mode(&self.levels);
 
         if let Some(cell) = self.removed.last() {
-            let origin = [cell.x, cell.y];
+            let origin = if cell.y >= geometry::PIT_ROWS && !self.workings.passages.is_empty() {
+                self.workings.passages[self
+                    .workings
+                    .section
+                    .as_ref()
+                    .map(|s| s.from)
+                    .unwrap_or(self.workings.active)]
+                .feet
+            } else {
+                [cell.x, cell.y]
+            };
             let key = (origin, self.level("shaft") > 0);
             if self.haul_route_key != Some(key) {
                 self.haul_route_key = Some(key);
@@ -989,6 +1001,9 @@ impl Game {
             * (if self.level("conveyor") > 0 { 3. } else { 1. })) as u64;
         self.transport
             .configure(&legs, haul_rate, self.level("capacity"));
+        for (id, q) in mined_cargo {
+            self.transport.register_source(id, q);
+        }
         let power = (self.power_factor(offline) * 1000.) as u64;
         let mut inaccessible = BTreeMap::new();
         let source = if self.haul_path.is_empty() {
@@ -2523,6 +2538,7 @@ mod throughput_tests {
         g.ore.insert(0, 1000 * 64);
         g.transport.stations[0].cargo.insert(0, 4 * UNITS);
         g.transport.segments[0].batches.push(transport::Batch {
+            route: 0,
             material: 0,
             amount: 20 * UNITS,
             remaining_ms: 10000,
@@ -2595,6 +2611,7 @@ mod offline_idle_tests {
         g.heights = vec![400; WIDTH as usize];
         g.terrain = terrain::Terrain::from_columns(&g.heights);
         g.transport.segments[0].batches.push(transport::Batch {
+            route: 0,
             material: 0,
             amount: 1000,
             remaining_ms: 30000,
@@ -2824,6 +2841,7 @@ mod offline_event_tests {
                     a.levels.insert("furnace".into(), 1);
                 }
                 a.transport.segments[0].batches.push(transport::Batch {
+                    route: 0,
                     material: 3,
                     amount: 1000,
                     remaining_ms: 31000,
