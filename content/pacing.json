@@ -5,7 +5,7 @@
     "drill": 100,
     "conveyor": 215,
     "sorter": 100,
-    "furnace": 350,
+    "furnace": 340,
     "shaft": 140,
     "steelworks": 160,
     "power": 900,
@@ -110,7 +110,7 @@
   "base_power": 1,
   "power_per_level": 5,
   "tactics_depth": 40,
-  "specialisation_depth": 300,
+  "specialisation_depth": 200,
   "headquarters_starting": {
     "excavation": [
       {
