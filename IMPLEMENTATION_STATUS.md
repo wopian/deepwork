@@ -18,7 +18,7 @@ Dynamic underground mining is implemented and packaged for Windows. New geometry
 ## Current verification
 
 - **93 Rust core tests and 11 native tests pass.** Coverage includes 30-seed nonperiodic development and protected ramps, directional slope parity, local chambers, earlier-reserve recovery, hidden-information boundaries, cargo ownership, save/load and exact offline equality.
-- **3 campaign-strategy tests and 12 Bun tests pass.** Vue/TypeScript checks and frontend production build pass under Bun **1.4.0**. No dependencies were installed from WSL.
+- **3 campaign-strategy tests and 15 Bun tests pass.** Vue/TypeScript checks and frontend production build pass under Bun **1.4.0**. No dependencies were installed from WSL.
 - Windows NSIS packaging succeeds. Isolated native checks pass live production, purchases, reload, import/export, malformed imports, archive/reset, cancellation, stale commands and preference preservation. Touch emulation exercises transport controls.
 - Native underground preview passes fixture import, save/reload, portrait layout and touch survey-overlay control, with no uncaught page errors. The packaged test application runs with development runtimes removed from its PATH.
 
@@ -48,6 +48,8 @@ bun.exe run build
 cargo test --workspace --release --lib --locked
 cargo test -p mine-core --release --example campaign --locked
 cargo run -p mine-core --release --example balance -- depth 0
+# Capture profiles 0, 1 and 2 separately, then assess their JSON reports:
+bun.exe scripts/check-early-pacing.ts early-0.json early-1.json early-2.json
 cmd.exe /d /c "cargo run -p mine-core --release --example campaign -- 30 56 scheduled 12 > campaign-report.json"
 bun.exe run check:campaign campaign-report.json
 bun.exe run tauri build --bundles nsis
