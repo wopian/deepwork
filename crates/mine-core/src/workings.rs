@@ -420,8 +420,11 @@ impl Workings {
                 }
             }
             if policy == "depth" {
+                // Develop access toward deeper surveyed ground. Nearby shallow ore remains
+                // available when the foreman switches back to an extraction policy.
+                candidates.retain(|(_, p)| p[1] > deepest + 4);
                 for (score, p) in &mut candidates {
-                    *score -= (p[1].saturating_sub(deepest)) as i64;
+                    *score -= (p[1] - deepest) as i64;
                 }
             }
             candidates.sort_unstable();
@@ -817,6 +820,37 @@ mod tests {
             serde_json::to_value(a).unwrap(),
             serde_json::to_value(b).unwrap()
         );
+    }
+    #[test]
+    fn depth_policy_develops_access_instead_of_chasing_shallow_signals() {
+        let mut terrain = Terrain::from_columns(&vec![PIT_ROWS; WIDTH as usize]);
+        let mut workings = Workings::default();
+        workings.initialise();
+        for p in cut_cells([256, 191], [256, 223], true) {
+            terrain.excavate(p[0], p[1]);
+        }
+        workings.passages.push(Passage {
+            feet: [256, 223],
+            parent: 0,
+            lift: true,
+            supported: true,
+            column: false,
+        });
+        workings.active = 1;
+        workings.signals.push(Signal {
+            centre: [272, 208],
+            radius: 23,
+            confidence: 2,
+        });
+        let mut vein = workings.clone();
+        vein.advance(&terrain, &[], "vein", 1200, 1, 0);
+        assert!(
+            vein.search.as_ref().is_some_and(|s| s.goal == [272, 208])
+                || vein.exhausted.contains(&key([272, 208]))
+                || vein.section.as_ref().is_some_and(|s| s.to[1] <= 223)
+        );
+        workings.advance(&terrain, &[], "depth", 1200, 1, 0);
+        assert_eq!(workings.section.as_ref().unwrap().to, [256, 239]);
     }
     #[test]
     fn nearby_sampled_ore_is_extracted_without_building_another_shaft() {

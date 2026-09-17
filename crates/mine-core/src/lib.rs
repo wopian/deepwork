@@ -1648,7 +1648,12 @@ impl Game {
                 if !["bulk", "vein", "depth"].contains(&a.target.as_str()) {
                     return Err("Invalid policy".into());
                 }
-                self.policy = a.target;
+                if self.policy != a.target {
+                    self.policy = a.target;
+                    self.workings.search = None;
+                    self.workings.blocked_at = None;
+                    self.workings.revision += 1;
+                }
             }
             "buffer" => {
                 let index: usize = a.target.parse().map_err(|_| "Unknown station")?;
@@ -1702,6 +1707,9 @@ impl Game {
                 } else {
                     return Err("Three priorities maximum".into());
                 }
+                self.workings.search = None;
+                self.workings.blocked_at = None;
+                self.workings.revision += 1;
             }
             "blueprint" => {
                 if self.ranks.get("logistics").copied().unwrap_or(0) < 3 {
@@ -3135,6 +3143,31 @@ mod retired_start_tests {
 #[cfg(test)]
 mod tactics_unlock_tests {
     use super::*;
+    #[test]
+    fn changed_policy_reopens_planning_but_repeated_policy_preserves_search() {
+        let mut g = Game::new(42, 2);
+        g.workings.blocked_at = Some((10, 20, 1200));
+        let revision = g.workings.revision;
+        g.action(Action {
+            sequence: 1,
+            kind: "policy".into(),
+            target: "depth".into(),
+            value: 0,
+        })
+        .unwrap();
+        assert!(g.workings.blocked_at.is_none());
+        assert_eq!(g.workings.revision, revision + 1);
+        g.workings.blocked_at = Some((11, 21, 1200));
+        g.action(Action {
+            sequence: 2,
+            kind: "policy".into(),
+            target: "depth".into(),
+            value: 0,
+        })
+        .unwrap();
+        assert_eq!(g.workings.blocked_at, Some((11, 21, 1200)));
+        assert_eq!(g.workings.revision, revision + 1);
+    }
     #[test]
     fn tactics_follow_depth_and_remain_available_on_later_sites() {
         let mut g = Game::default();
