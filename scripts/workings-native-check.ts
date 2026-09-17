@@ -46,6 +46,14 @@ try {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.locator("canvas").waitFor();
+  await page.evaluate(() => {
+    const marker = document.createElement("div");
+    marker.id = "automation-marker";
+    marker.textContent = "AUTOMATED TEST · TEMPORARY SAVE";
+    marker.style.cssText =
+      "position:fixed;top:0;right:0;z-index:99999;padding:6px 12px;background:#E5A34D;color:#101820;font:12px monospace;pointer-events:none";
+    document.body.append(marker);
+  });
   await page.setViewportSize({ width: 1440, height: 1000 });
   const fixtureState = JSON.parse(
     await readFile("target/workings-fixture.json", "utf8"),
@@ -93,6 +101,9 @@ try {
     }
     await page.waitForTimeout(1000);
   }
+  await page.evaluate(() =>
+    document.getElementById("automation-marker")?.remove(),
+  );
   await page.screenshot({
     path: join(out, "underground-desktop.png"),
     fullPage: true,
@@ -163,6 +174,14 @@ try {
         fixtureWorkers: fixtureState.workers,
         touchSurvey: true,
         passages: g.workings.passages.length,
+        scenarioChanges: [
+          "policy",
+          "specialisation",
+          "workers",
+          "housing",
+        ].filter(
+          (key) => JSON.stringify(g[key]) !== JSON.stringify(fixtureState[key]),
+        ),
         samples,
         errors,
       },
