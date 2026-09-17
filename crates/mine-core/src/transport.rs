@@ -100,6 +100,8 @@ pub struct Network {
     pub source: Vec<RoutedCargo>,
     #[serde(default)]
     pub current_route: u64,
+    #[serde(skip)]
+    configured_legs: Option<Vec<Leg>>,
     pub stations: Vec<Station>,
     pub segments: Vec<Segment>,
     pub express: usize,
@@ -164,6 +166,7 @@ impl Default for Network {
             routes: BTreeMap::new(),
             source: vec![],
             current_route: 0,
+            configured_legs: None,
             stations,
             segments,
             express: 0,
@@ -185,8 +188,18 @@ impl Network {
             .to_string();
         }
         for segment in &mut self.segments {
-            segment.legs.clear();
             segment.rate = rate;
+            segment.capacity =
+                (crate::pacing::get().transit_units + global_capacity as u64 * 5) * UNITS;
+        }
+        if self.configured_legs.as_deref() == Some(legs)
+            && self.routes.contains_key(&self.current_route)
+        {
+            return;
+        }
+        self.configured_legs = Some(legs.to_vec());
+        for segment in &mut self.segments {
+            segment.legs.clear();
             segment.demand = 0;
         }
         let underground = legs
@@ -299,7 +312,7 @@ impl Network {
         boost: bool,
         power_permille: u64,
     ) -> u64 {
-        for (&id, &q) in ore.iter() {
+        for (&id, &q) in ore.iter().filter(|(_, q)| **q > 0) {
             let tracked: u64 = self
                 .source
                 .iter()
@@ -311,7 +324,7 @@ impl Network {
             }
         }
         for station in &mut self.stations {
-            for (&id, &q) in &station.cargo {
+            for (&id, &q) in station.cargo.iter().filter(|(_, q)| **q > 0) {
                 let tracked: u64 = station
                     .routing
                     .iter()
@@ -433,8 +446,7 @@ impl Network {
                         .routes
                         .get(&lot.route)
                         .and_then(|r| r.get(index))
-                        .cloned()
-                        .unwrap_or_else(|| segment.legs.clone());
+                        .unwrap_or(&segment.legs);
                     let duration = 2000 + legs.iter().map(|l| l.milliseconds).sum::<u32>();
                     if let Some(batch) = segment.batches.last_mut().filter(|b| {
                         b.material == id
@@ -450,7 +462,7 @@ impl Network {
                             amount: lot.amount,
                             remaining_ms: duration,
                             duration_ms: duration,
-                            legs,
+                            legs: legs.clone(),
                         });
                     } else {
                         put(&mut station.routing, id, lot.amount, lot.route);
@@ -590,6 +602,57 @@ fn valid_legs(legs: &[Leg]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cached_configuration_matches_rebuilding_through_upgrades_and_reload() {
+        let mut cached = Network::default();
+        let mut rebuilt = cached.clone();
+        let mut ore_a = BTreeMap::from([(3, 20 * UNITS), (4, 10 * UNITS)]);
+        let mut ore_b = ore_a.clone();
+        let mut out_a = BTreeMap::new();
+        let mut out_b = BTreeMap::new();
+        for tick in 1..=240 {
+            let legs = [Leg {
+                from: [100 + tick / 80 * 16, 200],
+                to: [256, 200],
+                mode: "conveyor".into(),
+                milliseconds: 3000,
+            }];
+            if tick == 100 {
+                cached.stations[1].level = 2;
+                rebuilt.stations[1].level = 2;
+            }
+            if tick == 150 {
+                cached = serde_json::from_str(&serde_json::to_string(&cached).unwrap()).unwrap();
+            }
+            rebuilt.configured_legs = None;
+            let rate = UNITS * (1 + tick as u64 / 60);
+            let capacity = (tick / 60) as u32;
+            cached.configure(&legs, rate, capacity);
+            rebuilt.configure(&legs, rate, capacity);
+            for (network, ore, out) in [
+                (&mut cached, &mut ore_a, &mut out_a),
+                (&mut rebuilt, &mut ore_b, &mut out_b),
+            ] {
+                network.tick(
+                    tick as u64,
+                    ore,
+                    out,
+                    100 * UNITS,
+                    &[4],
+                    true,
+                    tick > 180,
+                    750,
+                );
+            }
+            assert_eq!(
+                serde_json::to_value(&cached).unwrap(),
+                serde_json::to_value(&rebuilt).unwrap(),
+                "tick {tick}"
+            );
+            assert_eq!(ore_a, ore_b);
+            assert_eq!(out_a, out_b);
+        }
+    }
     #[test]
     fn import_rejects_unknown_routes_and_unlabelled_station_material() {
         let mut n = Network::default();
