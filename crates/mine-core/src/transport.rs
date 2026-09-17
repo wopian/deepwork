@@ -591,6 +591,28 @@ fn valid_legs(legs: &[Leg]) -> bool {
 mod tests {
     use super::*;
     #[test]
+    fn import_rejects_unknown_routes_and_unlabelled_station_material() {
+        let mut n = Network::default();
+        n.configure(&[], UNITS, 0);
+        n.tick(
+            1,
+            &mut BTreeMap::from([(3, 1000)]),
+            &mut BTreeMap::new(),
+            UNITS,
+            &[],
+            false,
+            false,
+            1000,
+        );
+        assert!(n.valid(56));
+        let route = n.segments[0].batches[0].route;
+        n.segments[0].batches[0].route = u64::MAX;
+        assert!(!n.valid(56));
+        n.segments[0].batches[0].route = route;
+        n.stations[0].cargo.insert(3, 1000);
+        assert!(!n.valid(56));
+    }
+    #[test]
     fn cargo_keeps_its_branch_after_active_route_changes() {
         let mut n = Network::default();
         let old = Leg {
