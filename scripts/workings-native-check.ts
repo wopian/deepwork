@@ -47,16 +47,24 @@ try {
   page.on("pageerror", (e) => errors.push(e.message));
   await page.locator("canvas").waitFor();
   await page.setViewportSize({ width: 1440, height: 1000 });
-  const fixture = await readFile("target/workings-fixture.json", "utf8");
+  const fixtureState = JSON.parse(
+    await readFile("target/workings-fixture.json", "utf8"),
+  );
+  if (duration >= 1800) {
+    for (const upgrade of await Bun.file("content/upgrades.json").json())
+      fixtureState.levels[upgrade.id] = 50;
+    fixtureState.workers = 1000;
+    fixtureState.housing = 1004;
+    fixtureState.credits = "1000000000";
+  }
+  const fixture = JSON.stringify(fixtureState);
   // Import through the same file UI used by players, preserving campaign stream identity.
   await page.getByRole("button", { name: "Records", exact: true }).click();
-  await page
-    .locator('input[type="file"]')
-    .setInputFiles({
-      name: "workings.json",
-      mimeType: "application/json",
-      buffer: Buffer.from(fixture),
-    });
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "workings.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(fixture),
+  });
   await page.waitForTimeout(2000);
   await page.getByRole("button", { name: "Operations", exact: true }).click();
   await page.getByRole("button", { name: "Follow crew", exact: true }).click();
@@ -68,13 +76,21 @@ try {
   for (let n = 0; n < duration; n++) {
     if (n % 5 === 0)
       samples.push(
-        await page
-          .locator("[data-fps]")
-          .evaluate((el) => ({
-            ...(el as HTMLElement).dataset,
-            heap: (performance as any).memory?.usedJSHeapSize,
-          })),
+        await page.locator("[data-fps]").evaluate((el) => ({
+          ...(el as HTMLElement).dataset,
+          heap: (performance as any).memory?.usedJSHeapSize,
+          visibility: document.visibilityState,
+          width: innerWidth,
+          sampledAt: Date.now(),
+        })),
       );
+    if (n % 60 === 0) {
+      await writeFile(
+        join(out, "progress.json"),
+        JSON.stringify({ seconds: n, samples, errors }),
+      );
+      console.log(`Native workings stress: ${n}/${duration} seconds`);
+    }
     await page.waitForTimeout(1000);
   }
   await page.screenshot({
@@ -83,6 +99,34 @@ try {
   });
   await page.setViewportSize({ width: 430, height: 932 });
   await page.waitForTimeout(1500);
+  const touch = await context.newCDPSession(page);
+  await touch.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+  const overlay = page.getByRole("button", {
+    name: "Survey / work plan",
+    exact: true,
+  });
+  const pressed = await overlay.getAttribute("aria-pressed");
+  await overlay.scrollIntoViewIfNeeded();
+  const box = (await overlay.boundingBox())!;
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }],
+  });
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
+  await page.waitForTimeout(200);
+  if ((await overlay.getAttribute("aria-pressed")) === pressed)
+    throw new Error("Touch did not toggle survey overlay");
+  await touch.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+  await touch.detach();
+  if (
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth + 2,
+    )
+  )
+    throw new Error("Portrait overflow");
   await page.screenshot({
     path: join(out, "underground-portrait.png"),
     fullPage: true,
@@ -116,6 +160,8 @@ try {
         passed: true,
         duration,
         saveBytes: Buffer.byteLength(save),
+        fixtureWorkers: fixtureState.workers,
+        touchSurvey: true,
         passages: g.workings.passages.length,
         samples,
         errors,
