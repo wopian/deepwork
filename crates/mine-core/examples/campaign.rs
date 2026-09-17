@@ -360,6 +360,21 @@ fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
             0
         };
         std::fs::write(format!("target/campaign-{seed}.json"), serde_json::to_vec_pretty(&json!({"seed":seed,"visit":visit+1,"events":events,"site":g.site,"depth":g.depth(),"next":g.pinned,"products":g.products,"trace":g.trace_feed,"levels":g.levels,"recipes":g.enabled_recipes,"paused_recipes":g.paused_recipes,"credits":g.credits,"ranks":g.ranks,"research":g.research,"invested":g.research_invested(),"shaft_blocker":g.purchase_blocker("shaft")})).unwrap()).unwrap();
+        if std::env::var_os("DEEPWORK_CAMPAIGN_DIAGNOSTIC").is_some() {
+            let _ = std::fs::write(
+                format!("target/campaign-debug-{seed}.json"),
+                serde_json::to_vec(&g).unwrap(),
+            );
+            eprintln!(
+                "status={} nodes={} blockers={:?}",
+                g.workings.status,
+                g.workings.passages.len(),
+                g.stages
+                    .iter()
+                    .map(|s| s.blocker.as_str())
+                    .collect::<Vec<_>>()
+            );
+        }
         eprintln!(
             "seed={seed} strategy={style} mode={mode} visit={} depth={} next={:?} credits={}",
             visit + 1,
