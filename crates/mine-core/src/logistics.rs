@@ -89,6 +89,22 @@ pub fn route(
     levels: &BTreeMap<String, u32>,
     terrain_factor: f64,
 ) -> (Vec<Leg>, u32) {
+    route_impl(path, levels, terrain_factor, None)
+}
+pub fn route_registered(
+    path: &[[u32; 2]],
+    levels: &BTreeMap<String, u32>,
+    terrain_factor: f64,
+    workings: &crate::workings::Workings,
+) -> (Vec<Leg>, u32) {
+    route_impl(path, levels, terrain_factor, Some(workings))
+}
+fn route_impl(
+    path: &[[u32; 2]],
+    levels: &BTreeMap<String, u32>,
+    terrain_factor: f64,
+    workings: Option<&crate::workings::Workings>,
+) -> (Vec<Leg>, u32) {
     if path.is_empty() {
         return (vec![], 2);
     }
@@ -102,13 +118,24 @@ pub fn route(
         let (from, to) = (pair[0], pair[1]);
         let vertical = from[0] == to[0];
         let surface = from[1] < 0 && to[1] < 0;
-        let (kind, building, speed) = if vertical && level("shaft") > 0 {
+        let commissioned = workings
+            .map(|w| {
+                from[1] >= 0
+                    && to[1] >= 0
+                    && w.is_lift_edge(
+                        [from[0] as u32, from[1] as u32],
+                        [to[0] as u32, to[1] as u32],
+                    )
+            })
+            .unwrap_or(vertical);
+        let rail_grade = from[1].abs_diff(to[1]) * 12 <= from[0].abs_diff(to[0]);
+        let (kind, building, speed) = if commissioned && level("shaft") > 0 {
             ("lift", "shaft", 30.)
         } else if surface && level("conveyor") > 0 {
             ("conveyor", "conveyor", 35.)
-        } else if !vertical && !surface && level("train") > 0 {
+        } else if !vertical && !surface && rail_grade && level("train") > 0 {
             ("train", "train", 100.)
-        } else if !vertical && !surface && level("minecart") > 0 {
+        } else if !vertical && !surface && rail_grade && level("minecart") > 0 {
             ("minecart", "minecart", 55.)
         } else if !vertical && level("conveyor") > 0 {
             ("conveyor", "conveyor", 35.)

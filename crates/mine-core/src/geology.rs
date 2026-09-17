@@ -80,7 +80,6 @@ pub fn validate() -> Result<(), String> {
         if r.feed >= cat.len()
             || r.depth_metres < 48
             || r.depth_metres > 10000
-            || r.depth_metres % 24 != 0
             || cat[r.feed].tier > tier(r.depth_metres as i64)
             || !r.length.is_finite()
             || !(64.0..=200.0).contains(&r.length)

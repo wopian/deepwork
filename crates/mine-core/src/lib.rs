@@ -7,11 +7,12 @@ pub mod pacing;
 pub mod terrain;
 pub mod transport;
 pub mod waste;
+pub mod workings;
 pub use geometry::WIDTH;
 use geometry::{CELL_MASS, UNITS};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-pub const VERSION: u32 = 6;
+pub const VERSION: u32 = 7;
 /// Deterministic fractional throughput without storing idle production credit.
 /// `rate` is thousandths of one work unit per tick; no multiplication by full age.
 fn work_budget(rate: u64, tick: u64) -> u64 {
@@ -158,6 +159,8 @@ pub struct Game {
     pub heights: Vec<u32>,
     #[serde(default)]
     pub terrain: terrain::Terrain,
+    #[serde(default)]
+    pub workings: workings::Workings,
     pub removed: Vec<Cell>,
     pub ore: BTreeMap<usize, u64>,
     pub hauled: BTreeMap<usize, u64>,
@@ -316,6 +319,7 @@ impl Game {
             pinned: Some("furnace".into()),
             heights: vec![0; WIDTH as usize],
             terrain: terrain::Terrain::default(),
+            workings: workings::Workings::default(),
             removed: vec![],
             ore: BTreeMap::new(),
             hauled: BTreeMap::new(),
@@ -645,104 +649,54 @@ impl Game {
         let pit_complete = self
             .terrain
             .contains(geometry::PIT_LAST_X, geometry::PIT_ROWS - 1);
-        let ore_faces = self
-            .priorities
-            .iter()
-            .filter(|_| self.policy == "vein")
-            .filter_map(|id| self.terrain.ore_frontiers.get(id))
-            .flat_map(|faces| faces.iter());
-        let mut candidates = self
-            .terrain
-            .access_frontier
-            .iter()
-            .chain(ore_faces)
-            .filter_map(|&key| {
-                if !self.terrain.frontier.contains(&key) {
-                    return None;
-                }
-                let (x, y) = (key % WIDTH, key / WIDTH);
-                if geometry::depth(y) >= depth_limit {
-                    return None;
-                }
-                let surface = y < geometry::PIT_ROWS;
-                if !surface && !pit_complete {
-                    return None;
-                }
-                if surface {
-                    let margin = 16 + (y / 24) * 24;
-                    if x < 16 + y || x >= WIDTH - margin {
-                        return None;
+        if pit_complete && self.level("shaft") > 0 {
+            return self.workings.next_cell(&self.terrain);
+        }
+        let mut candidates = self.terrain.access_frontier.iter().filter_map(|&key| {
+            if !self.terrain.frontier.contains(&key) {
+                return None;
+            }
+            let (x, y) = (key % WIDTH, key / WIDTH);
+            if geometry::depth(y) >= depth_limit || y >= geometry::PIT_ROWS {
+                return None;
+            }
+            let surface = true;
+            let margin = 16 + (y / 24) * 24;
+            if x < 16 + y || x >= WIDTH - margin {
+                return None;
+            }
+            if y >= 1200 && (self.level("supports") == 0 || y >= self.support_rows) {
+                return None;
+            }
+            if y >= 2800 && self.level("pump") == 0 {
+                return None;
+            }
+            if y >= 6000 && self.level("ventilation") == 0 {
+                return None;
+            }
+            // Bench completion outranks depth preference. Unknown rock never informs ore targeting.
+            let score = if surface {
+                y as i64 * 1024 + x as i64
+            } else {
+                match self.policy.as_str() {
+                    "depth" => -(y as i64) * 8 + x.abs_diff(WIDTH / 2) as i64,
+                    "vein" => {
+                        y as i64
+                            - if self
+                                .terrain
+                                .known_material(x, y)
+                                .is_some_and(|id| self.priorities.contains(&id))
+                            {
+                                160
+                            } else {
+                                0
+                            }
                     }
-                } else {
-                    let shaft = x.abs_diff(WIDTH / 2) < 4;
-                    // Complete shaft clearance before descending to the next cutting face.
-                    if shaft
-                        && y > geometry::PIT_ROWS
-                        && !(WIDTH / 2 - 3..=WIDTH / 2 + 3)
-                            .all(|sx| self.terrain.contains(sx, y - 1))
-                    {
-                        return None;
-                    }
-                    let drive = y % 96 < 8 && (32..WIDTH - 32).contains(&x);
-                    let stope = self.policy == "vein"
-                        && y % 96 >= 80
-                        && x % 64 < 48
-                        && self
-                            .terrain
-                            .known_material(x, y)
-                            .is_some_and(|id| self.priorities.contains(&id));
-                    if stope && !self.terrain.contains(x, (y / 96 + 1) * 96 + 7) {
-                        return None;
-                    }
-                    if !shaft && !drive && !stope {
-                        return None;
-                    }
-                    if !shaft && drive {
-                        let inner = if x < WIDTH / 2 { x + 1 } else { x - 1 };
-                        let top = y / 96 * 96;
-                        // Excavate the lift landing before opening either tunnel portal.
-                        if !(top..top + 8).all(|row| self.terrain.contains(WIDTH / 2, row)) {
-                            return None;
-                        }
-                        if inner.abs_diff(WIDTH / 2) >= 4
-                            && !(top..top + 8).all(|row| self.terrain.contains(inner, row))
-                        {
-                            return None;
-                        }
-                    }
+                    _ => y as i64,
                 }
-                if y >= 1200 && (self.level("supports") == 0 || y >= self.support_rows) {
-                    return None;
-                }
-                if y >= 2800 && self.level("pump") == 0 {
-                    return None;
-                }
-                if y >= 6000 && self.level("ventilation") == 0 {
-                    return None;
-                }
-                // Bench completion outranks depth preference. Unknown rock never informs ore targeting.
-                let score = if surface {
-                    y as i64 * 1024 + x as i64
-                } else {
-                    match self.policy.as_str() {
-                        "depth" => -(y as i64) * 8 + x.abs_diff(WIDTH / 2) as i64,
-                        "vein" => {
-                            y as i64
-                                - if self
-                                    .terrain
-                                    .known_material(x, y)
-                                    .is_some_and(|id| self.priorities.contains(&id))
-                                {
-                                    160
-                                } else {
-                                    0
-                                }
-                        }
-                        _ => y as i64,
-                    }
-                };
-                Some((score, key))
-            });
+            };
+            Some((score, key))
+        });
         if !pit_complete || self.policy == "bulk" {
             candidates.next().map(|(_, key)| key)
         } else {
@@ -754,6 +708,9 @@ impl Game {
         self.quiet_pipeline(cat) && self.next_frontier(cat).is_none() && self.transport.mass() == 0
     }
     fn quiet_pipeline(&self, cat: &[Material]) -> bool {
+        if self.level("shaft") > 0 {
+            return false;
+        }
         if self.transport.mass() > 0
             || (self.level("supports") > 0 && self.support_rows < self.support_target())
             || self
@@ -794,6 +751,9 @@ impl Game {
         })
     }
     fn stationary_pipeline(&self, cat: &[Material]) -> bool {
+        if self.level("shaft") > 0 {
+            return false;
+        }
         self.ticks % 20 == 0
             && self.flow_window.iter().all(|&q| q == 0)
             && self
@@ -893,13 +853,55 @@ impl Game {
         }
         self.crew = logistics::Crew::prioritise(self.workers, &self.levels, &self.crew_priority);
         self.construction();
-        if self.ticks % 1200 == 0 && self.level("survey") > 0 {
+        if self.level("shaft") > 0
+            && self
+                .terrain
+                .contains(geometry::PIT_LAST_X, geometry::PIT_ROWS - 1)
+        {
+            self.workings.initialise();
+            self.workings.survey_work += 1 + self.crew.prospectors as u64 * 3;
+            if self.workings.survey_work >= 200 || self.workings.surveyed.is_empty() {
+                self.workings.survey_work %= 200;
+                let upgraded = self.level("survey") > 0;
+                let found = self.workings.survey(
+                    &mut self.terrain,
+                    self.seed,
+                    self.profile,
+                    cat,
+                    upgraded,
+                    false,
+                );
+                for id in found {
+                    if self.discoveries.insert(id) {
+                        self.site_discoveries += 1;
+                    }
+                }
+            }
+            let limit = (300 * (1 + self.level("shaft"))).min(if self.level("supports") == 0 {
+                300
+            } else if self.level("pump") == 0 {
+                700
+            } else if self.level("ventilation") == 0 {
+                1500
+            } else {
+                200000
+            }) * geometry::CELLS_PER_METRE;
+            self.workings.advance(
+                &self.terrain,
+                &self.priorities,
+                &self.policy,
+                limit,
+                self.crew.engineers,
+                self.level("supports"),
+            );
+        }
+        if self.workings.passages.is_empty() && self.ticks % 1200 == 0 && self.level("survey") > 0 {
             let (x, y) = self
                 .removed
                 .last()
                 .map(|c| (c.x, c.y))
                 .unwrap_or((WIDTH / 2, 0));
-            for id in self.terrain.reveal(self.seed, self.profile, x, y, 16, &cat) {
+            for id in self.terrain.reveal(self.seed, self.profile, x, y, 16, cat) {
                 if self.discoveries.insert(id) {
                     self.site_discoveries += 1;
                 }
@@ -950,12 +952,17 @@ impl Game {
             let key = (origin, self.level("shaft") > 0);
             if self.haul_route_key != Some(key) {
                 self.haul_route_key = Some(key);
-                self.haul_path = navigation::route(
-                    &self.terrain,
-                    &self.heights,
-                    origin,
-                    self.level("shaft") > 0,
-                );
+                self.haul_path =
+                    if origin[1] >= geometry::PIT_ROWS && !self.workings.passages.is_empty() {
+                        navigation::underground(&self.terrain, &self.heights, &self.workings)
+                    } else {
+                        navigation::route(
+                            &self.terrain,
+                            &self.heights,
+                            origin,
+                            self.level("shaft") > 0,
+                        )
+                    };
             }
         }
         let terrain_factor = if self.challenge == "long_haul" {
@@ -963,7 +970,12 @@ impl Game {
         } else {
             1.
         } / sites()[self.profile].haul;
-        let (legs, _duration) = logistics::route(&self.haul_path, &self.levels, terrain_factor);
+        let (legs, _duration) = logistics::route_registered(
+            &self.haul_path,
+            &self.levels,
+            terrain_factor,
+            &self.workings,
+        );
         let haul_rate = (UNITS as f64
             * pacing::get().haul_rate
             * self.crew.haulers as f64
@@ -1792,7 +1804,18 @@ impl Game {
                         .last()
                         .map(|c| (c.x, c.y))
                         .unwrap_or((WIDTH / 2, 0));
-                    let found = self.terrain.reveal(self.seed, self.profile, x, y, 64, &cat);
+                    let found = if self.workings.passages.is_empty() {
+                        self.terrain.reveal(self.seed, self.profile, x, y, 8, &cat)
+                    } else {
+                        self.workings.survey(
+                            &mut self.terrain,
+                            self.seed,
+                            self.profile,
+                            &cat,
+                            true,
+                            true,
+                        )
+                    };
                     let id = found.into_iter().find(|id| *id > 1).unwrap_or(1);
                     if self.discoveries.insert(id) {
                         self.site_discoveries += 1;
@@ -1986,6 +2009,9 @@ impl Game {
             || self.raw_stock.values().sum::<u64>() > self.raw_stock_capacity()
         {
             return Err("Invalid reserved feed stock".into());
+        }
+        if !self.workings.valid() {
+            return Err("Invalid underground workings".into());
         }
         if !self.transport.valid(materials().len()) {
             return Err("Invalid transport network".into());

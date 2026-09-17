@@ -39,7 +39,7 @@ impl Terrain {
         if y < crate::geometry::PIT_ROWS {
             x >= 16 + y && x < WIDTH - (16 + (y / 24) * 24)
         } else {
-            x.abs_diff(WIDTH / 2) < 4 || (y % 96 < 8 && (32..WIDTH - 32).contains(&x))
+            false
         }
     }
     fn index_frontier(&mut self, key: u32) {
@@ -50,7 +50,7 @@ impl Terrain {
             self.access_frontier.insert(key);
         } else {
             let (x, y) = (key % WIDTH, key / WIDTH);
-            if y >= crate::geometry::PIT_ROWS && y % 96 >= 80 && x % 64 < 48 {
+            if y >= crate::geometry::PIT_ROWS {
                 if let Some(id) = self.known_material(x, y) {
                     self.ore_frontiers.entry(id).or_default().insert(key);
                 }
