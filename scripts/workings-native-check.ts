@@ -173,6 +173,7 @@ try {
         duration,
         saveBytes: Buffer.byteLength(save),
         fixtureWorkers: fixtureState.workers,
+        gameplayCommands: g.last_sequence - fixtureState.last_sequence,
         touchSurvey: true,
         passages: g.workings.passages.length,
         scenarioChanges: [
@@ -180,9 +181,26 @@ try {
           "specialisation",
           "workers",
           "housing",
+          "levels",
+          "priorities",
+          "reserve",
+          "pinned",
+          "crew_priority",
+          "cargo_policy",
+          "enabled_recipes",
+          "paused_recipes",
         ].filter(
           (key) => JSON.stringify(g[key]) !== JSON.stringify(fixtureState[key]),
         ),
+        transportControlsChanged:
+          g.transport.express !== fixtureState.transport.express ||
+          g.transport.stations.some((station: any, index: number) => {
+            const initial = fixtureState.transport.stations[index];
+            return (
+              station.level !== initial.level ||
+              station.preferred !== initial.preferred
+            );
+          }),
         samples,
         errors,
       },
