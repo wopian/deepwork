@@ -62,6 +62,9 @@ fn key(p: Point) -> u32 {
 fn point(k: u32) -> Point {
     [k % WIDTH, k / WIDTH]
 }
+fn area(p: Point) -> u32 {
+    (p[1] / 4) * (WIDTH / 4) + p[0] / 4
+}
 fn estimate(a: Point, b: Point) -> u64 {
     a[0].abs_diff(b[0]) as u64 * 5 + a[1].abs_diff(b[1]) as u64 * 12
 }
@@ -109,6 +112,10 @@ pub struct Workings {
     pub signals: Vec<Signal>,
     pub surveyed: BTreeSet<u32>,
     pub exhausted: BTreeSet<u32>,
+    #[serde(default)]
+    pub deferred: BTreeSet<u32>,
+    #[serde(default)]
+    pub deferred_at: (u64, usize),
     pub section: Option<Section>,
     pub search: Option<Search>,
     pub active: usize,
@@ -313,6 +320,11 @@ impl Workings {
     ) {
         self.initialise();
         self.index_passages();
+        let geometry_stamp = (terrain.revision, self.passages.len());
+        if self.deferred_at != geometry_stamp {
+            self.deferred.clear();
+            self.deferred_at = geometry_stamp;
+        }
         let stamp = (terrain.revision, self.revision, depth_limit);
         if self.blocked_at == Some(stamp) {
             return;
@@ -399,7 +411,7 @@ impl Workings {
                     let p = point(k);
                     if p[1] < PIT_ROWS
                         || p[1] >= depth_limit
-                        || self.exhausted.contains(&k)
+                        || self.deferred.contains(&area(p))
                         || protected(&self.floor_index, p, &[])
                         || !access_blocked && p[1] + 256 < deepest
                     {
@@ -420,6 +432,7 @@ impl Workings {
             for s in &self.signals {
                 if s.centre[1] >= depth_limit
                     || self.exhausted.contains(&key(s.centre))
+                    || self.deferred.contains(&area(s.centre))
                     || !access_blocked && s.centre[1] + 256 < deepest
                 {
                     continue;
@@ -693,22 +706,20 @@ impl Workings {
                 end = p;
             }
             if end == start {
-                self.exhausted.insert(key(search.goal));
+                self.deferred.insert(area(search.goal));
                 self.search = None;
                 return;
             }
             let mut cells = cut_cells(start, end, mode);
-            if distance(end, search.goal) < 24 {
-                self.exhausted.insert(key(search.goal));
-            }
             cells.sort_unstable();
             cells.dedup();
-            if cells.iter().all(|p| terrain.contains(p[0], p[1]))
-                || self.passages.iter().any(|n| n.feet == end)
-            {
-                self.exhausted.insert(key(search.goal));
+            if self.passages.iter().any(|n| n.feet == end) {
+                self.deferred.insert(area(search.goal));
                 self.search = None;
                 return;
+            }
+            if distance(end, search.goal) <= settings().sample_radius {
+                self.exhausted.insert(key(search.goal));
             }
             self.active = from;
             self.section = Some(Section {
@@ -721,7 +732,7 @@ impl Workings {
             self.search = None;
             self.revision += 1;
         } else if search.open.is_empty() || search.expanded >= settings().search_limit {
-            self.exhausted.insert(key(search.goal));
+            self.deferred.insert(area(search.goal));
             self.search = None;
         }
     }
@@ -733,6 +744,11 @@ impl Workings {
                 && self.passages[*i].feet[1] - *y < 16
         }) && self.passages.len() <= 200_000
             && self.signals.len() <= 100_000
+            && self.deferred.len() <= 100_000
+            && self
+                .deferred
+                .iter()
+                .all(|k| *k < MAX_ROWS / 4 * (WIDTH / 4))
             && self.surveyed.len() <= 1_000_000
             && self.status.len() <= 128
             && self.signals.iter().all(|s| {
@@ -861,6 +877,7 @@ mod tests {
         assert!(
             vein.search.as_ref().is_some_and(|s| s.goal == [272, 208])
                 || vein.exhausted.contains(&key([272, 208]))
+                || vein.deferred.contains(&area([272, 208]))
                 || vein.section.as_ref().is_some_and(|s| s.to[1] <= 223)
         );
         workings.advance(&terrain, &[], "depth", 1200, 1, 0);
@@ -935,6 +952,73 @@ mod tests {
             .expect("Revisit earlier sampled ore at equipment gate");
         assert_eq!(section.to, [256, 223]);
         assert!(section.cells.contains(&[260, 216]));
+    }
+    #[test]
+    fn clear_approaches_are_supported_without_abandoning_unsampled_signals() {
+        let mut terrain = Terrain::from_columns(&vec![PIT_ROWS; WIDTH as usize]);
+        let mut w = Workings::default();
+        w.initialise();
+        for p in cut_cells([256, 191], [256, 223], true) {
+            terrain.excavate(p[0], p[1]);
+        }
+        w.passages.push(Passage {
+            feet: [256, 223],
+            parent: 0,
+            lift: true,
+            supported: true,
+            column: false,
+        });
+        w.active = 1;
+        let goal = [272, 208];
+        w.signals.push(Signal {
+            centre: goal,
+            radius: 23,
+            confidence: 2,
+        });
+        for _ in 0..100 {
+            w.advance(&terrain, &[], "vein", 1200, 1, 0);
+            if w.section.is_some() {
+                break;
+            }
+        }
+        let section = w.section.as_ref().expect("Commission the clear approach");
+        assert!(section.cells.iter().all(|p| terrain.contains(p[0], p[1])));
+        assert!(
+            !w.exhausted.contains(&key(goal)),
+            "Signal remains until samples can reach it"
+        );
+        w.advance(&terrain, &[], "vein", 1200, 100, 1);
+        assert!(w.passages.len() > 2);
+    }
+    #[test]
+    fn failed_areas_resume_after_geometry_changes_and_survive_reload() {
+        let mut terrain = Terrain::from_columns(&vec![PIT_ROWS; WIDTH as usize]);
+        let mut w = Workings::default();
+        w.initialise();
+        w.signals.push(Signal {
+            centre: [4, 192],
+            radius: 23,
+            confidence: 2,
+        });
+        for _ in 0..100 {
+            w.advance(&terrain, &[], "vein", 1200, 1, 0);
+            if w.deferred.contains(&area([4, 192])) {
+                break;
+            }
+        }
+        assert!(w.deferred.contains(&area([4, 192])));
+        assert!(!w.exhausted.contains(&key([4, 192])));
+        let mut restored: Workings =
+            serde_json::from_str(&serde_json::to_string(&w).unwrap()).unwrap();
+        restored.advance(&terrain, &[], "vein", 1200, 1, 0);
+        w.advance(&terrain, &[], "vein", 1200, 1, 0);
+        assert_eq!(
+            serde_json::to_value(&w).unwrap(),
+            serde_json::to_value(restored).unwrap()
+        );
+        terrain.excavate(256, 192);
+        w.advance(&terrain, &[], "depth", 1200, 1, 0);
+        assert!(!w.deferred.contains(&area([4, 192])));
     }
     #[test]
     fn reversed_slopes_cover_identical_cells() {

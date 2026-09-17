@@ -66,6 +66,8 @@ impl From<Game> for Snapshot {
         game.workings.search = None;
         game.workings.blocked_at = None;
         game.workings.surveyed.clear();
+        game.workings.deferred.clear();
+        game.workings.deferred_at = (0, 0);
         game.workings.exhausted.clear();
         if let Some(section) = &mut game.workings.section {
             section.cells.clear();
