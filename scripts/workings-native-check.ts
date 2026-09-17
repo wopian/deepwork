@@ -88,6 +88,7 @@ try {
           ...(el as HTMLElement).dataset,
           heap: (performance as any).memory?.usedJSHeapSize,
           visibility: document.visibilityState,
+          focused: document.hasFocus(),
           width: innerWidth,
           sampledAt: Date.now(),
         })),
