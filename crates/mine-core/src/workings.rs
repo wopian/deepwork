@@ -615,6 +615,9 @@ impl Workings {
                 reached = Some(k);
                 break;
             }
+            let bottom = depth_limit.min(MAX_ROWS - 8).saturating_sub(1);
+            let descend = bottom.saturating_sub(p[1]).min(16) as i32;
+            let ascend = p[1].saturating_sub(PIT_ROWS - 1).min(16) as i32;
             for (dx, dy, lift) in [
                 (-4, -1, false),
                 (-4, 0, false),
@@ -622,9 +625,12 @@ impl Workings {
                 (4, -1, false),
                 (4, 0, false),
                 (4, 1, false),
-                (0, 16, true),
-                (0, -16, true),
+                (0, descend, true),
+                (0, -ascend, true),
             ] {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
                 let nx = p[0] as i32 + dx;
                 let ny = p[1] as i32 + dy;
                 if nx < 8
@@ -644,7 +650,9 @@ impl Workings {
                 };
                 let step = solid
                     + if lift {
-                        settings().lift_work
+                        // A short terminal extension reuses the existing lift service.
+                        (settings().lift_work * distance(p, q) as u64)
+                            .div_ceil(settings().section_length as u64)
                     } else {
                         settings().passage_work
                     }
@@ -938,6 +946,37 @@ mod tests {
             serde_json::to_value(a).unwrap(),
             serde_json::to_value(b).unwrap()
         );
+    }
+    #[test]
+    fn lift_closes_short_gaps_at_equipment_limit_without_horizontal_detours() {
+        for gap in [1, 7, 8, 15] {
+            let mut workings = Workings::default();
+            workings.initialise();
+            let bottom = [WIDTH / 2, 1199 - gap];
+            workings.passages.push(Passage {
+                feet: bottom,
+                parent: 0,
+                lift: true,
+                supported: true,
+                column: false,
+            });
+            workings.active = 1;
+            let mut terrain = Terrain::from_columns(&vec![PIT_ROWS; WIDTH as usize]);
+            for p in cut_cells(workings.passages[0].feet, bottom, true) {
+                terrain.excavate(p[0], p[1]);
+            }
+            for _ in 0..100 {
+                workings.advance(&terrain, &[], "depth", 1200, 1, 0);
+                if workings.section.is_some() {
+                    break;
+                }
+            }
+            let section = workings.section.as_ref().expect("reach equipment boundary");
+            assert!(section.lift, "gap {gap} should continue its existing lift");
+            assert_eq!(section.from, 1);
+            assert_eq!(section.to, [WIDTH / 2, 1199]);
+            assert!(section.cells.iter().all(|p| p[1] < 1200));
+        }
     }
     #[test]
     fn depth_policy_develops_access_instead_of_chasing_shallow_signals() {
