@@ -539,6 +539,8 @@ mod workings_stream_tests {
         let mut game = Game::default();
         game.workings.initialise();
         game.workings.surveyed.insert(42);
+        game.workings.deferred.insert(43);
+        game.workings.deferred_at = (100, 200);
         game.workings.signals.push(mine_core::workings::Signal {
             centre: [240, 240],
             radius: 23,
@@ -547,6 +549,8 @@ mod workings_stream_tests {
         let snapshot: Snapshot = game.into();
         let json = serde_json::to_value(snapshot).unwrap();
         assert_eq!(json["workings"]["surveyed"], serde_json::json!([]));
+        assert_eq!(json["workings"]["deferred"], serde_json::json!([]));
+        assert_eq!(json["workings"]["deferred_at"], serde_json::json!([0, 0]));
         assert_eq!(json["workings"]["signals"][0].as_object().unwrap().len(), 3);
     }
 }
