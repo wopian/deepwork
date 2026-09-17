@@ -7,8 +7,9 @@ Dynamic underground mining is implemented and packaged for Windows. New geometry
 - Knowledge-limited automatic planning replaces periodic horizontal drives. Bounded deterministic searches weigh solid excavation, passage/lift construction, travel and existing haul distance.
 - Local prospecting produces approximate signal areas and confidence. Exact mineral samples and exposed faces supply vein targets; the planner cannot query hidden geology.
 - Mixed lifts and declines connect to existing supported access. Declines respect a 1:4 gradient; rails use gentler sections. Cuts preserve the pit access ramp, floor webs and support pillars.
+- Failed one-metre work areas are deferred until geometry changes; known ore is not permanently abandoned after a failed approach. Already-cleared approaches are commissioned, and signals remain active until exact sampling can reach them. A reproduced shallow pit-edge campaign stall now has a permanent regression test.
 - Nearby sampled ore becomes bounded extraction chambers. Chambers share existing access and receive local support; they do not create a duplicate shaft for every cell.
-- Depth policy prioritises deeper surveyed access. At equipment limits, crews can return to earlier surveyed reserves. Policy and cargo-priority changes invalidate stale planning without cancelling committed work.
+- Depth policy prioritises deeper surveyed access. At equipment limits, crews can return to earlier surveyed reserves. Policy and mineral-priority changes invalidate stale planning without cancelling committed work.
 - Curved, branching starter reserves replace regular horizontal reserve bands. Their depths vary by seed and are independent of storage-chunk boundaries.
 - Immutable cargo itineraries survive loading, partial unloading, branch changes and save/load. Quantity/route-label disagreement is rejected during import. Branches still share the five-station/four-segment service chain.
 - Survey/work-plan overlay, local support columns, chamber roof beams and real lift positions replace cosmetic periodic supports. Signals include non-colour confidence marks. Display snapshots omit private search state and hidden survey history.
@@ -16,7 +17,7 @@ Dynamic underground mining is implemented and packaged for Windows. New geometry
 
 ## Current verification
 
-- **89 Rust core tests and 11 native tests pass.** Coverage includes 30-seed nonperiodic development and protected ramps, directional slope parity, local chambers, earlier-reserve recovery, hidden-information boundaries, cargo ownership, save/load and exact offline equality.
+- **93 Rust core tests and 11 native tests pass.** Coverage includes 30-seed nonperiodic development and protected ramps, directional slope parity, local chambers, earlier-reserve recovery, hidden-information boundaries, cargo ownership, save/load and exact offline equality.
 - **3 campaign-strategy tests and 12 Bun tests pass.** Vue/TypeScript checks and frontend production build pass under Bun **1.4.0**. No dependencies were installed from WSL.
 - Windows NSIS packaging succeeds. Isolated native checks pass live production, purchases, reload, import/export, malformed imports, archive/reset, cancellation, stale commands and preference preservation. Touch emulation exercises transport controls.
 - Native underground preview passes fixture import, save/reload, portrait layout and touch survey-overlay control, with no uncaught page errors. The packaged test application runs with development runtimes removed from its PATH.
@@ -25,7 +26,7 @@ Dynamic underground mining is implemented and packaged for Windows. New geometry
 
 Final campaign and stress reports are being collected. Do not interpret earlier version-6 headquarters results as current acceptance.
 
-Three continuous first-site geological profiles currently measure median worker purchase at startup, conveyor **4:56**, first iron **11:48**, tactics **19:51**, shaft **29:42**, and specialisation **43:48**. The first five medians meet their windows; specialisation is **1:12 earlier** than the 45-minute lower target. These are deterministic strategy measurements, not human playtests.
+Three continuous first-site geological profiles currently measure median worker purchase at startup, conveyor **4:56**, first iron **11:48**, tactics **19:51**, shaft **29:42**, and specialisation **46:34**. All six medians and all three individual profile observations meet their windows. Support construction requires 24,000 work per section (15 seconds at the baseline crew rate); engineers and support upgrades increase that rate. These are deterministic strategy measurements, not human playtests.
 
 ## Remaining full-plan acceptance
 
@@ -47,7 +48,7 @@ bun.exe run build
 cargo test --workspace --release --lib --locked
 cargo test -p mine-core --release --example campaign --locked
 cargo run -p mine-core --release --example balance -- depth 0
-cmd.exe /d /c "cargo run -p mine-core --release --example campaign -- 30 56 scheduled 8 > campaign-report.json"
+cmd.exe /d /c "cargo run -p mine-core --release --example campaign -- 30 56 scheduled 12 > campaign-report.json"
 bun.exe run check:campaign campaign-report.json
 bun.exe run tauri build --bundles nsis
 bun.exe scripts/native-check.ts test-results/native 0 release
@@ -58,3 +59,5 @@ bun.exe scripts/workings-native-check.ts test-results/workings 1800
 Campaign arguments are seed count, observation days, scheduled/attentive/continuous mode, CPU worker count and optional starting seed. Use separate report directories for concurrent campaigns. Windows locks running executables; copy harness executables before rebuilding their source target.
 
 The underground fixture accelerates equipment and starts after a valid benched pit. Its stress run imports 1,000 workers with representative sprites and maximum local equipment. Reported renderer memory excludes some WebView/GPU allocations. Persistent terrain and passage history grow with exploration; moving visuals and resident chunk textures have separate bounded budgets.
+
+Replay an expanded diagnostic game save with `cargo run -p mine-core --release --example replay -- stalled-save.json 120 replayed-save.json`. Optional `starter PROFILE` arguments on the workings fixture use early equipment for reserve/access regression reproduction.
