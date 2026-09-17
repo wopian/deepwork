@@ -352,7 +352,7 @@ impl Workings {
                 // Never cut an existing passage floor away; junctions are anchored at nodes.
                 if self.passages.iter().rev().take(256).any(|n| {
                     !n.lift
-                        && !(lift && n.feet[0]==p[0])
+                        && !(lift && n.feet[0] == p[0])
                         && n.feet != p
                         && n.feet != q
                         && cells.contains(&[n.feet[0], n.feet[1] + 1])
@@ -428,6 +428,13 @@ impl Workings {
             }
             cells.sort_unstable();
             cells.dedup();
+            if cells.iter().all(|p| terrain.contains(p[0], p[1]))
+                || self.passages.iter().any(|n| n.feet == end)
+            {
+                self.exhausted.insert(key(search.goal));
+                self.search = None;
+                return;
+            }
             self.active = from;
             self.section = Some(Section {
                 from,
@@ -491,9 +498,10 @@ fn interpolate(a: Point, b: Point, x: u32) -> u32 {
     if a[0] == b[0] {
         return b[1];
     }
-    (a[1] as i64
-        + (b[1] as i64 - a[1] as i64) * (x as i64 - a[0] as i64) / (b[0] as i64 - a[0] as i64))
-        as u32
+    let (left, right) = if a[0] < b[0] { (a, b) } else { (b, a) };
+    (left[1] as i64
+        + ((right[1] as i64 - left[1] as i64) * (x as i64 - left[0] as i64))
+            .div_euclid((right[0] - left[0]) as i64)) as u32
 }
 pub fn cut_cells(a: Point, b: Point, lift: bool) -> Vec<Point> {
     let mut cells = vec![];
@@ -540,6 +548,16 @@ mod tests {
             serde_json::to_value(a).unwrap(),
             serde_json::to_value(b).unwrap()
         );
+    }
+    #[test]
+    fn reversed_slopes_cover_identical_cells() {
+        for (a, b) in [
+            ([160, 464], [152, 466]),
+            ([256, 191], [272, 195]),
+            ([272, 199], [256, 195]),
+        ] {
+            assert_eq!(cut_cells(a, b, false), cut_cells(b, a, false));
+        }
     }
     #[test]
     fn sections_respect_clearance_and_gradient() {
