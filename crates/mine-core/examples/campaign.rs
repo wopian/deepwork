@@ -31,21 +31,41 @@ fn act(g: &mut Game, kind: &str, target: &str, value: u64) -> bool {
 }
 // Use public recipe/catalogue knowledge only. Terrain and hidden geology are never inspected.
 fn pinned_feeds(g: &Game) -> Vec<usize> {
-    let mut pending: Vec<String> = g
+    let requirement = g
         .pinned
         .as_ref()
-        .and_then(|id| requirements().iter().find(|u| u.id == *id))
-        .map(|u| u.inputs.keys().cloned().collect())
+        .and_then(|id| requirements().iter().find(|u| u.id == *id));
+    let mut pending: Vec<(String, u64)> = requirement
+        .map(|u| u.inputs.iter().map(|(p, n)| (p.clone(), *n)).collect())
         .unwrap_or_default();
     let cat = materials();
     let mut visited = std::collections::BTreeSet::new();
     let mut feeds = std::collections::BTreeSet::new();
-    while let Some(product) = pending.pop() {
-        if !visited.insert(product.clone()) {
+    while let Some((product, target)) = pending.pop() {
+        let available = g.products.get(&product).copied().unwrap_or(0);
+        if available >= target || !visited.insert(product.clone()) {
             continue;
         }
         if let Some(recipe) = recipes().iter().find(|r| r.output == product) {
-            pending.extend(recipe.inputs.keys().cloned());
+            let batches = (target - available).div_ceil(recipe.inputs.values().sum());
+            for (input, quantity) in &recipe.inputs {
+                let committed = requirement
+                    .and_then(|u| u.inputs.get(input))
+                    .copied()
+                    .unwrap_or(0)
+                    .max(
+                        if input == "iron"
+                            && g.pinned.is_some()
+                            && g.level("shaft") > 0
+                            && g.level("shaft") < 50
+                        {
+                            8 * mine_core::geometry::UNITS
+                        } else {
+                            0
+                        },
+                    );
+                pending.push((input.clone(), batches * quantity + committed));
+            }
         } else {
             let matches = |m: &&mine_core::Material| {
                 m.product == product || product == "alumina" && m.name == "Bauxite"
@@ -62,6 +82,7 @@ fn pinned_feeds(g: &Game) -> Vec<usize> {
     }
     feeds.into_iter().take(3).collect()
 }
+
 fn strategy(g: &mut Game, style: &str, attentive: bool) {
     if g.workers == 3 {
         act(g, "buy", "worker", 0);
@@ -301,6 +322,21 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
             act(g, "priority", "", id as u64);
         }
     }
+    let sampled_required_feed = g.priorities.iter().any(|id| {
+        g.terrain
+            .ore_frontiers
+            .get(id)
+            .is_some_and(|faces| !faces.is_empty())
+    });
+    let equipment_limit = (300 * (1 + g.level("shaft"))).min(if g.level("supports") == 0 {
+        300
+    } else if g.level("pump") == 0 {
+        700
+    } else if g.level("ventilation") == 0 {
+        1500
+    } else {
+        200000
+    });
     let material_shortage = g
         .pinned
         .as_ref()
@@ -316,7 +352,11 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
     {
         "depth"
     } else if g.level("shaft") > 0 && material_shortage && !g.priorities.is_empty() {
-        "vein"
+        if sampled_required_feed || g.depth() + 4 >= equipment_limit {
+            "vein"
+        } else {
+            "depth"
+        }
     } else {
         match style {
             "bulk" => "bulk",
@@ -556,6 +596,41 @@ mod strategy_tests {
             g.terrain.revealed.is_empty(),
             "Planning priorities must not reveal ore"
         );
+    }
+    #[test]
+    fn missing_feed_prompts_deeper_survey_until_an_exposed_sample_exists() {
+        let mut g = Game::new(51, 2);
+        g.credits = 0;
+        g.heights[0] = 800;
+        for id in ["conveyor", "furnace", "steelworks", "shaft"] {
+            g.levels.insert(id.into(), 1);
+        }
+        strategy(&mut g, "bulk", false);
+        assert_eq!(g.policy, "depth");
+        // Supply the knowledge index an exposed sampled iron face would create.
+        g.terrain
+            .ore_frontiers
+            .entry(3)
+            .or_default()
+            .insert(800 * mine_core::geometry::WIDTH + 256);
+        strategy(&mut g, "bulk", false);
+        assert_eq!(g.policy, "vein");
+    }
+    #[test]
+    fn stocked_fuels_do_not_compete_with_missing_construction_iron() {
+        let mut g = Game::new(51, 2);
+        g.pinned = Some("supports".into());
+        g.levels.insert("shaft".into(), 1);
+        for (product, units) in [("iron", 6), ("coke", 16), ("lime", 16)] {
+            g.products
+                .insert(product.into(), units * mine_core::geometry::UNITS);
+        }
+        assert_eq!(pinned_feeds(&g), vec![3]);
+        g.products
+            .insert("iron".into(), 10 * mine_core::geometry::UNITS);
+        assert!(pinned_feeds(&g).is_empty());
+        g.products.insert("coke".into(), 0);
+        assert_eq!(pinned_feeds(&g), vec![5]);
     }
     #[test]
     fn research_retirement_access_temporarily_overrides_extraction_style() {
