@@ -1,85 +1,47 @@
-# Implementation status — natural mines milestone
+# Implementation status — dynamic underground workings
 
-Core milestone is playable on Windows. The 30-seed scheduled campaign passes authored progression windows. Full-plan acceptance still has gaps listed below.
+Dynamic underground mining is implemented and packaged for Windows. New geometry uses save version **7** and generator version **3**. Older saves remain exportable archives; new campaigns use the new layout. Previous fixed-drive campaign measurements do not validate this version.
 
-## Implemented
+## Implemented in this milestone
 
-- Windows-native Bun 1.4.0, Vue 3, Vite, PixiJS 8 and Tauri 2; Rust owns simulation and geology.
-- Save version 6 / generator version 2. Older terrain stays exportable and requires a fresh campaign. Typed `RESET` archives before replacing the checkpoint, preserves preferences, changes campaign identity and rejects stale commands. Failed archives/imports preserve the active campaign; malformed numeric buffer quotes are rejected.
-- 512-cell terrain width, 0.25 metres per cell, 64×64 two-dimensional chunks. Each fine cell holds 1,000 quanta; one material unit holds 64,000. Shared conversions and bounded lossless RLE saves preserve scale and accounting.
-- Seeded world-space veins, lenses, seams, branches, host inclusions and tapered margins. Deposits cross chunks independently of generation order. Finite reserve lenses intersect reachable workings before equipment gates.
-- Neutral unrevealed ground, persistent local reveal masks, excavation exposure and local prospecting. Vein targeting reads revealed information only. Rust supplies visible chunk data.
-- A 48-metre benched pit, access ramp, commissioned lift, cleared tunnel portals and bounded chambers with pillars. Routes enforce floor clearance and lift access. Indexed work faces and cached routes avoid repeatedly scanning unchanged terrain.
-- Five finite station buffers and four transport segments with partial unloading, bounded coalesced batches, congestion, local upgrades, fair cargo preference and selected-segment freight boosts. Saves retain contents and travel progress. Interface shows station flow, vehicle occupancy, cycle time, loading rate, power demand and blockers.
-- Finite reserve-feed storage, construction reserves and exact fractional recovery. Precision controls use simplified 275 silicon : 25 copper : 1 gallium inputs, preserving recipe mass while reducing finite-copper demand.
-- Persistent waste history with shifting discharge pads, sloped shoulders, lateral expansion, bounded profile resolution, particle collision and settlement after removal. Economic contents remain independent of visual cleanup.
-- Dirty chunk textures, viewport cache eviction, representative crews, bounded moving visuals, camera controls, portrait layout and accessibility/audio/display preferences. Reduced motion clears airborne waste immediately.
-- Authored pacing, headquarters starting equipment, recipe controls, contracts, retirement and deterministic bulk/precision/reclamation campaign strategies. Strategy waits for first aluminium output before retiring the first electrolysis site.
+- Knowledge-limited automatic planning replaces periodic horizontal drives. Bounded deterministic searches weigh solid excavation, passage/lift construction, travel and existing haul distance.
+- Local prospecting produces approximate signal areas and confidence. Exact mineral samples and exposed faces supply vein targets; the planner cannot query hidden geology.
+- Mixed lifts and declines connect to existing supported access. Declines respect a 1:4 gradient; rails use gentler sections. Cuts preserve the pit access ramp, floor webs and support pillars.
+- Nearby sampled ore becomes bounded extraction chambers. Chambers share existing access and receive local support; they do not create a duplicate shaft for every cell.
+- Depth policy prioritises deeper surveyed access. At equipment limits, crews can return to earlier surveyed reserves. Policy and cargo-priority changes invalidate stale planning without cancelling committed work.
+- Curved, branching starter reserves replace regular horizontal reserve bands. Their depths vary by seed and are independent of storage-chunk boundaries.
+- Immutable cargo itineraries survive loading, partial unloading, branch changes and save/load. Quantity/route-label disagreement is rejected during import. Branches still share the five-station/four-segment service chain.
+- Survey/work-plan overlay, local support columns, chamber roof beams and real lift positions replace cosmetic periodic supports. Signals include non-colour confidence marks. Display snapshots omit private search state and hidden survey history.
+- Append-only passage IPC, indexed floors, cached routes, coalesced chambers and compacted collinear route points bound repeated work. Exact offline skips preserve survey phase and equipment-blocked state.
 
-## Verification
+## Current verification
 
-- **79 Rust core tests, 9 native tests, 3 campaign-strategy tests and 12 Bun tests pass.** Coverage includes generation order, 30-seed reserve access, local visibility, navigation, mass conservation, transport ownership/fairness, selected boosts, exact offline parity, save bounds and reset/import failures.
-- Vue/TypeScript checks and frontend production build pass. Bun reports **1.4.0**. Windows frozen installation, dependency reparse-point check and restricted-PATH build without Node.js pass.
-- Windows NSIS packaging and isolated native WebView2 checks pass: live production, purchase/checkpoint, reload, import/export, malformed-import rejection, reset/cancellation, stale commands and preference preservation. Touch emulation exercises buffer upgrades, cargo preference and express selection through the interface.
-- Native portable tests remove development runtimes from the child application's PATH. Clean-machine installation/uninstallation is separate acceptance work.
+- **89 Rust core tests and 11 native tests pass.** Coverage includes 30-seed nonperiodic development and protected ramps, directional slope parity, local chambers, earlier-reserve recovery, hidden-information boundaries, cargo ownership, save/load and exact offline equality.
+- **3 campaign-strategy tests and 12 Bun tests pass.** Vue/TypeScript checks and frontend production build pass under Bun **1.4.0**. No dependencies were installed from WSL.
+- Windows NSIS packaging succeeds. Isolated native checks pass live production, purchases, reload, import/export, malformed imports, archive/reset, cancellation, stale commands and preference preservation. Touch emulation exercises transport controls.
+- Native underground preview passes fixture import, save/reload, portrait layout and touch survey-overlay control, with no uncaught page errors. The packaged test application runs with development runtimes removed from its PATH.
 
-## Campaign results
+## Pacing and long-run evidence
 
-Thirty seeds (42–71), ten per specialisation, two 12-minute daily visits, capped half-rate offline progress, 56-day observation horizon. **30/30 reach headquarters; every authored day/week median passes.** The 56-day horizon checks outliers; headquarters target remains 28–42 days.
+Final campaign and stress reports are being collected. Do not interpret earlier version-6 headquarters results as current acceptance.
 
-| Measured milestone | Median days | Target days |
-|---|---:|---:|
-| First retirement | 1.00 | 1–3 |
-| Power station | 3.00 | 3–7 |
-| Chemical refinery | 9.00 | 7–14 |
-| First aluminium — precision-tier marker | 14.25 | 14–21 |
-| First permanent magnets — rare-earth marker | 25.51 | 21–28 |
-| Headquarters megaproject | 38.01 | 28–42 |
+Three continuous first-site geological profiles currently measure median worker purchase at startup, conveyor **4:56**, first iron **11:48**, tactics **19:51**, shaft **29:42**, and specialisation **43:48**. The first five medians meet their windows; specialisation is **1:12 earlier** than the 45-minute lower target. These are deterministic strategy measurements, not human playtests.
 
-| Strategy | Seeds completed | Headquarters median | Range, days |
-|---|---:|---:|---:|
-| Bulk extraction | 10/10 | 41.01 | 39.01–47.00 |
-| Precision refining | 10/10 | 38.01 | 37.00–39.01 |
-| Reclamation | 10/10 | 31.50 | 31.00–33.00 |
+## Remaining full-plan acceptance
 
-These are deterministic strategy measurements, not human playtest results. Milestones measure actual products where stated. The benchmark distinguishes buying electrolysis from producing aluminium, and commissions that first line before research retirement.
-
-Continuous first-site checks use one seed across all three geological profiles. Medians: worker purchase immediately, conveyor **4:56**, first iron **11:35**, tactics **19:11**, shaft **27:24**, specialisation **48:35**. All six early medians meet their windows. Minute-scale targets and scheduled wall-clock intervals use separate comparisons.
-
-Matched automatic tactical use on seeds 42–44 completes headquarters **1.21% sooner, 1.34% sooner and 3.17% later**, respectively. An isolated fixed-equipment foreground hour produces **5.2–6.9% more credits**. These tests do **not** establish the 15–25% active-advantage target or cover every manual production strategy.
-
-Continuous-play completion takes **41.51, 35.77 and 115.48 hours** for those three seeds. Continuous play supplies substantially more foreground time; compare elapsed completion separately from production gain.
-
-## Native performance and presentation
-
-A 30-minute persistent-waste run ends at **7,012.75 m**, **1,279,357 excavated cells** and a **2,318,460-byte compact save**. Its 171 samples include:
-
-- 38 desktop samples: median **58 FPS**, frame P50 **21 ms**, P95 **21.7 ms**.
-- 124 narrow-window samples: median **30 FPS**, P50 **31.6 ms**, P95 **42.2 ms**.
-- Eight samples while another app tab hid the renderer, plus one warm-up sample.
-
-This does not establish uninterrupted desktop 60 FPS. Maximum resident terrain textures: **72 chunks**. Maximum observed moving visuals: **600**. Maximum sampled JavaScript heap: **213.6 MiB**; native process working set: **178.2 MiB**. These exclude some WebView/GPU memory; persistent world data grows with explored terrain.
-
-Separate fixed-1440 desktop checks maintain approximately 58 FPS with 250 representative workers. Final package passes portrait, reduced-motion, native touch transport, reload and reset checks. Reloads log Tauri fallback/old-callback warnings; no uncaught page errors occurred.
-
-Long stress preceded later controls-recipe, interface and import-validation changes. Its fixture does not enable the changed recipe. Later shared-unit edits retain identical values. Final packaged source receives a separate native smoke run; benchmark/package provenance is recorded alongside delivered artifacts.
-
-## Remaining acceptance work
-
-- **Independent branch transport is not implemented:** current network serves one active-front chain. Separate branches continuing around a blocked branch remain future work.
-- **Active offline aggregation is incomplete:** flowing networks use exact 20-Hz ticks. Empty/stationary intervals skip safely; fully aggregated active production remains performance work.
-- **15–25% active advantage remains unmet by tested tactical policies.** Cooldown rules remain unchanged. More effective manual strategy and balancing need separate validation.
-- Navigation follows authored bench/lift/drive geometry, rather than a general arbitrary tunnel planner. Waste uses a bounded surface solver rather than individual economic grains.
-- Desktop 60 FPS target is not fully demonstrated. Actual Android/iOS touch, FPS, suspend/resume and packaging require device evidence; portrait emulation is insufficient.
+- Separate branch station networks are not implemented. Persisted cargo routes remain independent, but traffic shares station capacities; one branch cannot independently bypass a blocked shared segment.
+- Active offline production still uses exact fixed steps, with safe skipping for quiet/equipment-blocked intervals. Full event-boundary aggregation remains performance work.
+- No new tactical rebalance was introduced. The original 15–25% attentive-play advantage remains unproven.
+- Planner is bounded and heuristic; it does not prove globally optimal lifetime layout. Rock-support and clearance rules are game abstractions, not engineering simulation.
+- Actual Android/iOS hardware FPS, touch-only play, packaging and suspend/resume remain unverified. Portrait/touch emulation does not establish device acceptance.
 - macOS/Linux builds and clean-machine Windows installer installation/uninstallation remain unverified.
 
 ## Reproduce
 
-Use a Windows shell; never install dependencies from WSL.
+Use a Windows shell. Never install dependencies from WSL.
 
 ```powershell
-bun.exe install --frozen-lockfile
-bun.exe run check:runtime
+bun.exe --version
 bun.exe test
 bun.exe run build
 cargo test --workspace --release --lib --locked
@@ -88,9 +50,11 @@ cargo run -p mine-core --release --example balance -- depth 0
 cmd.exe /d /c "cargo run -p mine-core --release --example campaign -- 30 56 scheduled 8 > campaign-report.json"
 bun.exe run check:campaign campaign-report.json
 bun.exe run tauri build --bundles nsis
-bun.exe run test:native test-results 1800 release
+bun.exe scripts/native-check.ts test-results/native 0 release
+cargo run -p mine-core --release --example workings -- 1800 42 vein target/workings-fixture.json
+bun.exe scripts/workings-native-check.ts test-results/workings 1800
 ```
 
-Campaign arguments: seed count, observation days, scheduled/attentive/continuous mode, CPU worker count, optional starting seed. Workers are bounded by available logical processors. The strict checker requires 30 distinct seeds, all completions and all comparable milestone medians; minute-scale windows use the separate first-site benchmark.
+Campaign arguments are seed count, observation days, scheduled/attentive/continuous mode, CPU worker count and optional starting seed. Use separate report directories for concurrent campaigns. Windows locks running executables; copy harness executables before rebuilding their source target.
 
-Use separate working directories containing `target/` when running comparison processes concurrently. Windows locks running executables; use isolated Cargo target directories when recompiling alongside a benchmark.
+The underground fixture accelerates equipment and starts after a valid benched pit. Its stress run imports 1,000 workers with representative sprites and maximum local equipment. Reported renderer memory excludes some WebView/GPU allocations. Persistent terrain and passage history grow with exploration; moving visuals and resident chunk textures have separate bounded budgets.

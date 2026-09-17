@@ -25,7 +25,9 @@ The unpackaged Windows executable is `target/debug/deepwork.exe`. Browser-only V
 
 ## Implemented
 
-- Fine 0.25-metre terrain, natural cross-chunk deposits, local prospecting, benched pits and supported underground drives.
+- Fine 0.25-metre terrain, natural cross-chunk deposits, local prospecting, benched pits and dynamically planned underground branches.
+- Mixed lift/decline access, sampled vein chambers, local support columns, retained rock floors and a survey/work-plan overlay.
+- Cargo retains its original station itinerary when crews switch branches; completed transport never teleports to the newest face.
 - Worker recruitment, housing, independently upgraded transport buffers, fair cargo priorities, reserved feed and raw sales.
 - 56 mineral feeds, colour-coded field guide, refined products, optional manufacturing and separation recipes.
 - Explicit alumina/electrolysis path, abstract mass-conserving recipe units, steel and component production.
@@ -36,7 +38,7 @@ The unpackaged Windows executable is `target/debug/deepwork.exe`. Browser-only V
 
 ## Current limits against the full design
 
-The 30-seed scheduled campaign passes authored milestone medians, with headquarters at a median 38.01 days. This remains **short of full-plan release acceptance**. `IMPLEMENTATION_STATUS.md` records pending independent branch transport, active offline aggregation, active-advantage tuning and device/platform verification.
+Natural workings replace the former regular underground levels. Save version 7 / generator version 3 requires a fresh campaign; older saves remain exportable. Previous campaign timing measurements used the earlier geometry and do not establish balance for this version. This remains **short of full-plan release acceptance**. `IMPLEMENTATION_STATUS.md` records pending independent branch transport, active offline aggregation, active-advantage tuning and device/platform verification.
 
 ## Verification and packaging
 
@@ -79,7 +81,7 @@ Open **Records → Reset campaign**. Type `RESET` to archive the current campaig
 cargo run -p mine-core --release --example campaign -- 30 56 scheduled 8
 ```
 
-This runs 30 seeds for up to 56 days with two 12-minute visits per day and real capped offline advancement. Replace `scheduled` with `attentive` or `continuous` for comparison. The current corrected strategy passes the authored day/week milestone medians across 30 seeds; individual outliers remain visible in reports.
+This runs 30 seeds for up to 56 days with two 12-minute visits per day and real capped offline advancement. Replace `scheduled` with `attentive` or `continuous` for comparison. Use current-version reports when assessing milestone medians; the older fixed-drive campaign results are not comparable.
 
 The harness returns a failure status if any tested campaign misses headquarters completion. `cargo test -p mine-core --release --example campaign` checks that strategy contracts work before pumps, preserve endgame reserves, fund early processing and commission electrolysis before research retirement. Use `cargo run -p mine-core --release --example activity` for an isolated ability comparison; it is not a substitute for full campaign strategy comparison.
 
@@ -93,3 +95,18 @@ bun.exe run check:campaign campaign-report.json
 This gate rejects incomplete campaigns, missing milestones, duplicate seeds and mixed timing bases. Minute-scale first-site targets use the separate continuous `balance` example.
 
 The 56-day observation horizon checks late-but-completable seeds. Headquarters median target remains 28–42 days; the acceptance checker reads that unchanged target from content.
+
+## Natural underground workings
+
+After the 48-metre pit, the foreman builds access toward local survey signals and exposed ore. Survey signals show an approximate area and confidence; exact mineral cells appear only after sampling or exposure. Vein policy excavates bounded rooms around sampled ore, depth policy develops deeper access, and equipment gates allow crews to recover known reserves in earlier workings.
+
+Paths account for excavation volume, walking distance, existing haul distance and lift construction. Declines stay at or below a 1:4 gradient; automatic rails use gentler sections. Cleared sections receive local support before workers use them. Rock floors and pillars constrain extraction; the surface access ramp remains protected.
+
+The **Survey / work plan** control shows measured signal areas and the committed local section. It does not expose hidden mineral outlines. Transport saves preserve each batch's itinerary when the working face moves.
+
+```powershell
+cargo run -p mine-core --release --example workings -- 1800 42 vein target/workings-fixture.json
+bun.exe scripts/workings-native-check.ts test-results/workings 1800
+```
+
+The workings fixture contains accelerated equipment and a valid pre-excavated pit. It is an isolated geometry/performance scenario, not a campaign pacing result. The native harness imports it through the game UI, tests portrait touch interaction, exports and reloads the save, and records frame/cache/heap samples. Actual mobile hardware still needs separate verification.
