@@ -2,7 +2,11 @@ import { chromium } from "playwright-core";
 import { mkdir } from "node:fs/promises";
 const output = process.argv[2] ?? "test-results";
 await mkdir(output, { recursive: true });
-const server = Bun.spawn([process.execPath, "run", "dev", "--port", "5174"], {
+const reservation = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("reserved") });
+const port = reservation.port;
+await reservation.stop(true);
+const url = `http://127.0.0.1:${port}`;
+const server = Bun.spawn([process.execPath, "--bun", "node_modules/vite/bin/vite.js", ...(process.argv.includes("--built") ? ["preview"] : []), "--host", "127.0.0.1", "--port", String(port), "--strictPort"], {
   stdout: "ignore",
   stderr: "pipe",
 });
@@ -10,7 +14,7 @@ let browser;
 try {
   for (let i = 0; i < 100; i++) {
     try {
-      if ((await fetch("http://localhost:5174")).ok) break;
+      if ((await fetch(url)).ok) break;
     } catch {}
     await Bun.sleep(100);
   }
@@ -20,7 +24,7 @@ try {
   });
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto("http://localhost:5174");
+  await page.goto(url);
   await page.locator("canvas").waitFor();
   await page.waitForTimeout(1000);
   await page.screenshot({
