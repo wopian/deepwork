@@ -9,6 +9,7 @@ import { TerrainView } from "./terrain-view";
 import { CELL_PIXEL, CELLS_PER_METRE, RESOURCE_UNIT } from "./geometry";
 import { routePosition, cargoPosition } from "./routes";
 import { preferences, productionAudio } from "./preferences";
+import { gesture, zoomAt, type ScreenPoint } from "./camera";
 const host = ref<HTMLDivElement>();
 let app: Application | undefined;
 let world: Container;
@@ -30,8 +31,7 @@ let lastSite = 0;
 let lastCampaign = "";
 let zoom = 1;
 let offsetY = 0;
-let dragY: number | null = null;
-let dragX: number | null = null;
+const pointers = new Map<number, ScreenPoint>();
 let offsetX = 0;
 let follow = false;
 let followCrew = false;
@@ -568,7 +568,44 @@ function focusDistrict(x: number) {
   draw();
 }
 function wheel(e: WheelEvent) {
-  zoom = Math.max(0.7, Math.min(2.5, zoom - e.deltaY * 0.001));
+  changeZoom(Math.exp(-e.deltaY * 0.002), localPoint(e));
+}
+function localPoint(e: { clientX: number; clientY: number }): ScreenPoint {
+  const bounds = host.value!.getBoundingClientRect();
+  return { x: (e.clientX - bounds.left) * (app?.screen.width ?? bounds.width) / bounds.width,
+    y: (e.clientY - bounds.top) * (app?.screen.height ?? bounds.height) / bounds.height };
+}
+function changeZoom(factor: number, from = { x: (app?.screen.width ?? 0) / 2, y: (app?.screen.height ?? 0) / 2 }, to = from) {
+  const next = zoomAt({ zoom, x: offsetX, y: offsetY }, factor, from, to);
+  zoom = next.zoom; offsetX = next.x; offsetY = next.y;
+  follow = false; followCrew = false;
+  draw();
+}
+function pointerDown(e: PointerEvent) {
+  pointers.set(e.pointerId, localPoint(e));
+  follow = false; followCrew = false;
+  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+}
+function pointerMove(e: PointerEvent) {
+  if (!pointers.has(e.pointerId)) return;
+  const before = gesture([...pointers.values()]);
+  pointers.set(e.pointerId, localPoint(e));
+  const after = gesture([...pointers.values()]);
+  changeZoom(before.distance > 0 && after.distance > 0 ? after.distance / before.distance : 1, before.centre, after.centre);
+}
+function pointerEnd(e: PointerEvent) { pointers.delete(e.pointerId); }
+function fitWorkings() {
+  if (!app) return;
+  const points = state.value?.workings.passages.map(p => p.feet) ?? [];
+  if (!points.length) { focusDistrict(459); return; }
+  let minX = Infinity, maxX = -Infinity, maxY = 0;
+  for (const [x, y] of points) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); }
+  const scale = Math.min((app.screen.width - 64) / Math.max(100, (maxX - minX) * CELL_PIXEL), (app.screen.height - 96) / Math.max(100, maxY * CELL_PIXEL));
+  zoom = Math.max(0.15, Math.min(24, scale * 1100 / app.screen.width));
+  const actual = app.screen.width / 1100 * zoom;
+  offsetX = app.screen.width / 2 - (235 + (minX + maxX) / 2 * CELL_PIXEL) * actual;
+  offsetY = 48 - 208 * actual;
+  follow = false; followCrew = false; draw();
 }
 </script>
 <template>
@@ -577,33 +614,16 @@ function wheel(e: WheelEvent) {
       ref="host"
       class="world"
       @wheel.prevent="wheel"
-      @pointerdown="
-        (e: PointerEvent) => {
-          follow = false;
-          followCrew = false;
-          dragY = e.clientY;
-          dragX = e.clientX;
-          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-        }
-      "
-      @pointermove="
-        (e: PointerEvent) => {
-          if (dragY !== null) {
-            offsetY += e.clientY - dragY;
-            offsetX += e.clientX - (dragX ?? e.clientX);
-            dragY = e.clientY;
-            dragX = e.clientX;
-            draw();
-          }
-        }
-      "
-      @pointerup="dragY = null"
-      @pointercancel="dragY = null"
+      @pointerdown="pointerDown"
+      @pointermove="pointerMove"
+      @pointerup="pointerEnd"
+      @pointercancel="pointerEnd"
+      @lostpointercapture="pointerEnd"
     />
     <div class="world-tools">
-      <button @click="zoom = Math.min(2.5, zoom + 0.2)" aria-label="Zoom in">
+      <button @click="changeZoom(1.4)" aria-label="Zoom in">
         ＋</button
-      ><button @click="zoom = Math.max(0.7, zoom - 0.2)" aria-label="Zoom out">
+      ><button @click="changeZoom(1 / 1.4)" aria-label="Zoom out">
         −</button
       ><button
         @click="
@@ -629,6 +649,7 @@ function wheel(e: WheelEvent) {
       >
         Follow depth
       </button>
+      <button @click="fitWorkings">Fit workings</button>
     </div>
     <div class="world-districts">
       <button
