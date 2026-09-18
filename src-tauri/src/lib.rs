@@ -5,16 +5,26 @@ use std::{
     fs,
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
-        Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc, Mutex,
     },
     time::{SystemTime, UNIX_EPOCH},
 };
-use tauri::{ipc::Channel, Manager, State};
+use tauri::{ipc::Channel, Emitter, Manager, State};
+struct LifecycleRequest {
+    background: bool,
+    timestamp: u64,
+    epoch: u64,
+    source: &'static str,
+    reply: Option<mpsc::Sender<Result<Snapshot, String>>>,
+}
 struct Runtime {
     _save_lock: fs::File,
     game: Mutex<Game>,
     suspended: AtomicBool,
+    lifecycle: mpsc::Sender<LifecycleRequest>,
+    epoch: AtomicU64,
+    lifecycle_time: AtomicU64,
     legacy: Mutex<Option<String>>,
     path: PathBuf,
     channel: Mutex<Option<Channel<Update>>>,
@@ -67,6 +77,8 @@ impl From<Game> for Snapshot {
         game.workings.blocked_at = None;
         game.workings.surveyed.clear();
         game.workings.deferred.clear();
+        // Private anchors may lie behind the revealed facing edge.
+        game.workings.veins.clear();
         game.workings.deferred_at = (0, 0);
         game.workings.exhausted.clear();
         if let Some(section) = &mut game.workings.section {
@@ -148,18 +160,44 @@ fn now() -> u64 {
         .as_secs()
 }
 #[tauri::command]
-fn connect(channel: Channel<Update>, state: State<Runtime>) -> Result<Snapshot, String> {
-    *state.channel.lock().map_err(|e| e.to_string())? = Some(channel);
-    Ok(state.game.lock().map_err(|e| e.to_string())?.clone().into())
+async fn connect(channel: Channel<Update>, handle: tauri::AppHandle) -> Result<Snapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = handle.state::<Runtime>();
+        *state.channel.lock().map_err(|e| e.to_string())? = Some(channel);
+        let snapshot = state.game.lock().map_err(|e| e.to_string())?.clone().into();
+        Ok(snapshot)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 /// Persist before publishing either transition. Repeated platform/webview events
 /// are idempotent; a crash after resume cannot grant the same interval again.
+#[cfg(test)]
 fn transition_background(
     state: &Runtime,
     background: bool,
     timestamp: u64,
 ) -> Result<Snapshot, String> {
+    transition_epoch(
+        state,
+        background,
+        timestamp,
+        state.epoch.load(Ordering::SeqCst),
+    )
+}
+fn transition_epoch(
+    state: &Runtime,
+    background: bool,
+    timestamp: u64,
+    epoch: u64,
+) -> Result<Snapshot, String> {
     let mut game = state.game.lock().map_err(|e| e.to_string())?;
+    if epoch != state.epoch.load(Ordering::SeqCst) {
+        return Err("Campaign changed during lifecycle reconciliation".into());
+    }
+    if timestamp < state.lifecycle_time.load(Ordering::SeqCst) {
+        return Ok(game.clone().into());
+    }
     if !game.legacy_pending && state.suspended.load(Ordering::Relaxed) != background {
         let mut candidate = game.clone();
         if background {
@@ -171,14 +209,44 @@ fn transition_background(
         *game = candidate;
         state.suspended.store(background, Ordering::Relaxed);
     }
+    state.lifecycle_time.store(timestamp, Ordering::SeqCst);
     Ok(game.clone().into())
 }
 #[tauri::command]
-fn set_background(background: bool, state: State<Runtime>) -> Result<Snapshot, String> {
-    transition_background(&state, background, now())
+async fn set_background(background: bool, handle: tauri::AppHandle) -> Result<Snapshot, String> {
+    let (tx, rx) = mpsc::channel();
+    let state = handle.state::<Runtime>();
+    state
+        .lifecycle
+        .send(LifecycleRequest {
+            background,
+            timestamp: now(),
+            epoch: state.epoch.load(Ordering::SeqCst),
+            source: "webview",
+            reply: Some(tx),
+        })
+        .map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || rx.recv().map_err(|e| e.to_string())?)
+        .await
+        .map_err(|e| e.to_string())?
 }
 #[tauri::command]
-fn command(action: Action, campaign_id: String, state: State<Runtime>) -> Result<Snapshot, String> {
+async fn command(
+    action: Action,
+    campaign_id: String,
+    handle: tauri::AppHandle,
+) -> Result<Snapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        command_current(action, campaign_id, &handle.state::<Runtime>())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+fn command_current(
+    action: Action,
+    campaign_id: String,
+    state: &Runtime,
+) -> Result<Snapshot, String> {
     let mut g = state.game.lock().map_err(|e| e.to_string())?;
     if state.suspended.load(Ordering::Relaxed) {
         return Err("Resume the game before issuing commands".into());
@@ -256,6 +324,7 @@ fn reset_current(
     save(&state.path, &candidate)?;
     *game = candidate;
     *legacy = None;
+    state.epoch.fetch_add(1, Ordering::SeqCst);
     state.suspended.store(false, Ordering::Relaxed);
     Ok(game.clone().into())
 }
@@ -292,18 +361,59 @@ pub fn run() {
                     .unwrap_or_else(|| Game::new(fresh_identity(), 1))
             };
             game.legacy_pending = legacy.is_some();
-            if !game.legacy_pending {
-                game.advance_offline(now(), &materials());
-                save(&path, &game).map_err(std::io::Error::other)?;
-            }
+            let (lifecycle, requests) = mpsc::channel::<LifecycleRequest>();
             app.manage(Runtime {
                 _save_lock: save_lock,
                 game: Mutex::new(game),
-                suspended: AtomicBool::new(false),
+                suspended: AtomicBool::new(true),
+                lifecycle: lifecycle.clone(),
+                epoch: AtomicU64::new(0),
+                lifecycle_time: AtomicU64::new(0),
                 legacy: Mutex::new(legacy),
                 path,
                 channel: Mutex::new(None),
             });
+            let lifecycle_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                while let Ok(request) = requests.recv() {
+                    let started = std::time::Instant::now();
+                    if !request.background {
+                        let _ = lifecycle_handle.emit("mine-reconciling", true);
+                    }
+                    let result = transition_epoch(
+                        &lifecycle_handle.state::<Runtime>(),
+                        request.background,
+                        request.timestamp,
+                        request.epoch,
+                    );
+                    if let Err(error) = &result {
+                        let _ = lifecycle_handle.emit("mine-lifecycle-error", error.clone());
+                    }
+                    eprintln!(
+                        "Lifecycle source={} background={} timestamp={} duration_ms={} success={}",
+                        request.source,
+                        request.background,
+                        request.timestamp,
+                        started.elapsed().as_millis(),
+                        result.is_ok()
+                    );
+                    if !request.background {
+                        let _ = lifecycle_handle.emit("mine-reconciling", false);
+                    }
+                    if let Some(reply) = request.reply {
+                        let _ = reply.send(result);
+                    }
+                }
+            });
+            lifecycle
+                .send(LifecycleRequest {
+                    background: false,
+                    timestamp: now(),
+                    epoch: 0,
+                    source: "startup",
+                    reply: None,
+                })
+                .map_err(std::io::Error::other)?;
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let cat = materials();
@@ -377,11 +487,14 @@ pub fn run() {
                     _ => None,
                 };
                 if let Some(background) = background {
-                    if let Err(e) =
-                        transition_background(&handle.state::<Runtime>(), background, now())
-                    {
-                        eprintln!("Lifecycle checkpoint failed: {e}");
-                    }
+                    let state = handle.state::<Runtime>();
+                    let _ = state.lifecycle.send(LifecycleRequest {
+                        background,
+                        timestamp: now(),
+                        epoch: state.epoch.load(Ordering::SeqCst),
+                        source: "native",
+                        reply: None,
+                    });
                 }
             }
             if let tauri::RunEvent::Exit = event {
@@ -443,6 +556,9 @@ mod lifecycle_tests {
             _save_lock: persistence::lock(&directory.join("mine.lock")).unwrap(),
             game: Mutex::new(Game::default()),
             suspended: AtomicBool::new(false),
+            lifecycle: mpsc::channel().0,
+            epoch: AtomicU64::new(0),
+            lifecycle_time: AtomicU64::new(0),
             legacy: Mutex::new(None),
             path: directory.join("mine.json"),
             channel: Mutex::new(None),
@@ -455,6 +571,12 @@ mod lifecycle_tests {
         assert_eq!(resumed.game.ticks, 200);
         let repeated = transition_background(&state, false, 140).unwrap();
         assert_eq!(repeated.game.ticks, 200);
+        transition_background(&state, true, 130).unwrap();
+        assert!(
+            !state.suspended.load(Ordering::Relaxed),
+            "stale background event must not suspend resumed game"
+        );
+        assert!(transition_epoch(&state, true, 150, 999).is_err());
         let recovered = recover(&state.path).unwrap().unwrap();
         assert_eq!(recovered.last_saved, 120);
         assert_eq!(recovered.ticks, 200);
@@ -474,6 +596,9 @@ mod reset_tests {
             _save_lock: persistence::lock(&directory.join("mine.lock")).unwrap(),
             game: Mutex::new(Game::default()),
             suspended: AtomicBool::new(false),
+            lifecycle: mpsc::channel().0,
+            epoch: AtomicU64::new(0),
+            lifecycle_time: AtomicU64::new(0),
             legacy: Mutex::new(None),
             path: directory.join("mine.json"),
             channel: Mutex::new(None),
@@ -537,6 +662,13 @@ mod workings_stream_tests {
         let mut game = Game::default();
         game.workings.initialise();
         game.workings.surveyed.insert(42);
+        game.workings.veins.insert(
+            "private".into(),
+            mine_core::workings::VeinSurvey {
+                anchor: [300, 40],
+                stage: 0,
+            },
+        );
         game.workings.deferred.insert(43);
         game.workings.deferred_at = (100, 200);
         game.workings.signals.push(mine_core::workings::Signal {
@@ -545,6 +677,7 @@ mod workings_stream_tests {
             confidence: 1,
         });
         let snapshot: Snapshot = game.into();
+        assert!(snapshot.game.workings.veins.is_empty());
         let json = serde_json::to_value(snapshot).unwrap();
         assert_eq!(json["workings"]["surveyed"], serde_json::json!([]));
         assert_eq!(json["workings"]["deferred"], serde_json::json!([]));
