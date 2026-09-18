@@ -926,7 +926,7 @@ onMounted(start);
     </section>
     <footer>
       <span>DEEPWORK <b> / </b> ONE PIXEL AT A TIME.</span
-      ><span>LOCAL SAVE · RUST SIMULATION · NO CLOUD REQUIRED</span>
+      ><span>PROGRESS SAVES ON THIS DEVICE</span>
     </footer>
     <div v-if="showReset" class="modal-backdrop">
       <section

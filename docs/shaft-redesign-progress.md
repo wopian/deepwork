@@ -21,6 +21,7 @@ This is a playable checkpoint, not completion of the full redesign plan.
 - Thirty deterministic starter seeds, five simulated minutes each, with the guide buying an affordable furnace: all pass. First sale 17–28 seconds; refined iron 17–199 seconds (median 24); first horizontal branch 3 seconds.
 - These opening runs are not adverse-purchase-order tests or complete campaign simulations.
 - Built-asset browser checks pass desktop and portrait layout, navigation and page-error checks. They are illustrative browser previews, not Android device evidence.
+- Windows packaged-application harness passes isolated save/reload, purchases, background/resume, export/import, reset and simulated touch controls, with Bun/Node removed from the child application's PATH. Reloads emit Tauri callback warnings; IPC falls back successfully to postMessage. This is not a physical Android playthrough.
 - ARM64 APK signature verification passes v2/v3 and 16 KB ZIP alignment checks. This is not an ELF alignment or hardware performance claim.
 
 ## Remaining plan work
@@ -30,6 +31,6 @@ This is a playable checkpoint, not completion of the full redesign plan.
 3. Complete contextual worker/machine/route inspection, mobile bottom-sheet behavior, per-feed processing rates, effective committed reserves and justified upgrade completion estimates. Validate all contrast and font-size cases, including canvas labels.
 4. Exercise contradictory native/WebView lifecycle ordering and physical Android background, screen-lock, process-death and recreation scenarios. Automated native tests do not establish device correctness.
 5. Re-author old minute pacing windows and baseline purchase strategies, test adverse purchase/sale orders, and run 30 complete campaign seeds. The previous 4–6-week results do not validate this opening or geometry.
-6. Run the expanded-terrain stress case after horizontal streaming exists: frame times, bounded caches, memory and save size. Complete Windows gameplay and actual Android touch/FPS acceptance.
+6. Run the expanded-terrain stress case after horizontal streaming exists: frame times, bounded caches, memory and save size. Complete sustained Windows gameplay and actual Android touch/FPS acceptance.
 
 No claim is made that the entire campaign or full redesign is finished.
