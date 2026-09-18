@@ -24,7 +24,6 @@ struct Runtime {
     suspended: AtomicBool,
     lifecycle: mpsc::Sender<LifecycleRequest>,
     epoch: AtomicU64,
-    lifecycle_time: AtomicU64,
     legacy: Mutex<Option<String>>,
     path: PathBuf,
     channel: Mutex<Option<Channel<Update>>>,
@@ -195,9 +194,6 @@ fn transition_epoch(
     if epoch != state.epoch.load(Ordering::SeqCst) {
         return Err("Campaign changed during lifecycle reconciliation".into());
     }
-    if timestamp < state.lifecycle_time.load(Ordering::SeqCst) {
-        return Ok(game.clone().into());
-    }
     if !game.legacy_pending && state.suspended.load(Ordering::Relaxed) != background {
         let mut candidate = game.clone();
         if background {
@@ -209,7 +205,6 @@ fn transition_epoch(
         *game = candidate;
         state.suspended.store(background, Ordering::Relaxed);
     }
-    state.lifecycle_time.store(timestamp, Ordering::SeqCst);
     Ok(game.clone().into())
 }
 #[tauri::command]
@@ -368,7 +363,6 @@ pub fn run() {
                 suspended: AtomicBool::new(true),
                 lifecycle: lifecycle.clone(),
                 epoch: AtomicU64::new(0),
-                lifecycle_time: AtomicU64::new(0),
                 legacy: Mutex::new(legacy),
                 path,
                 channel: Mutex::new(None),
@@ -558,7 +552,6 @@ mod lifecycle_tests {
             suspended: AtomicBool::new(false),
             lifecycle: mpsc::channel().0,
             epoch: AtomicU64::new(0),
-            lifecycle_time: AtomicU64::new(0),
             legacy: Mutex::new(None),
             path: directory.join("mine.json"),
             channel: Mutex::new(None),
@@ -571,15 +564,14 @@ mod lifecycle_tests {
         assert_eq!(resumed.game.ticks, 200);
         let repeated = transition_background(&state, false, 140).unwrap();
         assert_eq!(repeated.game.ticks, 200);
-        transition_background(&state, true, 130).unwrap();
-        assert!(
-            !state.suspended.load(Ordering::Relaxed),
-            "stale background event must not suspend resumed game"
-        );
         assert!(transition_epoch(&state, true, 150, 999).is_err());
         let recovered = recover(&state.path).unwrap().unwrap();
         assert_eq!(recovered.last_saved, 120);
         assert_eq!(recovered.ticks, 200);
+        transition_background(&state, true, 160).unwrap();
+        let backwards = transition_background(&state, false, 150).unwrap();
+        assert_eq!(backwards.game.offline.as_ref().unwrap().effective, 0);
+        assert!(!state.suspended.load(Ordering::Relaxed));
         drop(state);
         fs::remove_dir_all(directory).unwrap();
     }
@@ -598,7 +590,6 @@ mod reset_tests {
             suspended: AtomicBool::new(false),
             lifecycle: mpsc::channel().0,
             epoch: AtomicU64::new(0),
-            lifecycle_time: AtomicU64::new(0),
             legacy: Mutex::new(None),
             path: directory.join("mine.json"),
             channel: Mutex::new(None),
