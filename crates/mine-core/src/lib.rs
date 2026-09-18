@@ -307,7 +307,7 @@ impl Game {
             profile: 0,
             challenge: String::new(),
             ticks: 0,
-            credits: 30,
+            credits: pacing::get().starting_credits,
             workers: 3,
             housing: 8,
             levels: BTreeMap::new(),
@@ -770,7 +770,7 @@ impl Game {
             if self.workings.survey_work >= 200 || self.workings.surveyed.is_empty() {
                 self.workings.survey_work %= 200;
                 let upgraded = self.level("survey") > 0;
-                let found = self.workings.survey(
+                let mut found = self.workings.survey(
                     &mut self.terrain,
                     self.seed,
                     self.profile,
@@ -778,6 +778,13 @@ impl Game {
                     upgraded,
                     false,
                 );
+                found.extend(self.workings.refine_survey(
+                    &mut self.terrain,
+                    self.seed,
+                    self.profile,
+                    cat,
+                    self.levels.get("survey").copied().unwrap_or(0),
+                ));
                 for id in found {
                     if self.discoveries.insert(id) {
                         self.site_discoveries += 1;
@@ -1609,6 +1616,34 @@ impl Game {
                     return Err("Unknown cargo policy".into());
                 }
                 self.cargo_policy = a.target;
+            }
+            "target_vein" => {
+                let coordinates: Vec<_> = a
+                    .target
+                    .split(',')
+                    .map(str::parse::<u32>)
+                    .collect::<Result<_, _>>()
+                    .map_err(|_| "Invalid ore target")?;
+                if coordinates.len() != 2 {
+                    return Err("Invalid ore target".into());
+                }
+                let p = [coordinates[0], coordinates[1]];
+                if p[0] >= WIDTH
+                    || p[1] >= geometry::MAX_ROWS
+                    || self.terrain.contains(p[0], p[1])
+                    || !self
+                        .terrain
+                        .known_material(p[0], p[1])
+                        .is_some_and(|id| id > 1)
+                {
+                    return Err("Select surveyed, unmined ore".into());
+                }
+                self.workings.target = Some(p);
+                self.workings.search = None;
+                self.workings.blocked_at = None;
+                self.workings.deferred.clear();
+                self.workings.revision += 1;
+                self.policy = "vein".into();
             }
             "priority" => {
                 let id = a.value as usize;

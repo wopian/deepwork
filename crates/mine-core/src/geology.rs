@@ -21,7 +21,7 @@ fn tier(depth: i64) -> u32 {
     }
 }
 #[derive(Clone, Copy)]
-struct Deposit {
+pub(crate) struct Deposit {
     x: f64,
     y: f64,
     length: f64,
@@ -110,6 +110,65 @@ fn reserve_descriptor(seed: u64, index: usize, reserve: &Reserve) -> Deposit {
     }
 }
 pub fn sample(seed: u64, profile: usize, x: u32, y: u32, catalogue: &[Material]) -> usize {
+    locate(seed, profile, x, y, catalogue).0
+}
+pub fn deposit_id(
+    seed: u64,
+    profile: usize,
+    p: [u32; 2],
+    catalogue: &[Material],
+) -> Option<String> {
+    locate(seed, profile, p[0], p[1], catalogue)
+        .1
+        .map(|d| d.identity())
+}
+impl Deposit {
+    fn identity(&self) -> String {
+        format!(
+            "{:016x}:{:x}:{:x}",
+            self.seed,
+            self.x.to_bits(),
+            self.y.to_bits()
+        )
+    }
+}
+/// One bounded descriptor, resolved with the same overlap precedence as excavation.
+/// Never a flood fill: disjoint inclusions cannot break deposit identity.
+pub fn deposit_cells(
+    seed: u64,
+    profile: usize,
+    p: [u32; 2],
+    catalogue: &[Material],
+) -> Vec<[u32; 2]> {
+    let Some(deposit) = locate(seed, profile, p[0], p[1], catalogue).1 else {
+        return vec![];
+    };
+    let extent = deposit.length + deposit.width * 3. + 64.;
+    let identity = deposit.identity();
+    let mut cells = Vec::new();
+    for y in ((deposit.y - extent).max(0.) as u32)
+        ..=((deposit.y + extent) as u32).min(crate::geometry::MAX_ROWS - 1)
+    {
+        for x in ((deposit.x - extent).max(0.) as u32)
+            ..=((deposit.x + extent) as u32).min(crate::geometry::WIDTH - 1)
+        {
+            if deposit.contains(x as f64, y as f64)
+                && deposit_id(seed, profile, [x, y], catalogue).as_deref()
+                    == Some(identity.as_str())
+            {
+                cells.push([x, y]);
+            }
+        }
+    }
+    cells
+}
+fn locate(
+    seed: u64,
+    profile: usize,
+    x: u32,
+    y: u32,
+    catalogue: &[Material],
+) -> (usize, Option<Deposit>) {
     // Irregular, reachable starter reserves; no repeating vertical stripes.
     for (index, (id, cy, radius)) in [(3, 24., 35.), (5, 76., 43.), (6, 130., 48.)]
         .into_iter()
@@ -125,7 +184,7 @@ pub fn sample(seed: u64, profile: usize, x: u32, y: u32, catalogue: &[Material])
             seed: hash(seed + index as u64),
         };
         if starter.contains(x as f64, y as f64) {
-            return id;
+            return (id, Some(starter));
         }
     }
     // Finite, irregular lenses intersect commissioned drives before later gates.
@@ -134,8 +193,9 @@ pub fn sample(seed: u64, profile: usize, x: u32, y: u32, catalogue: &[Material])
         if y.abs_diff(reserve.depth_metres * crate::geometry::CELLS_PER_METRE + 4) > 192 {
             continue;
         }
-        if reserve_descriptor(seed, index, reserve).contains(x as f64, y as f64) {
-            return reserve.feed;
+        let deposit = reserve_descriptor(seed, index, reserve);
+        if deposit.contains(x as f64, y as f64) {
+            return (reserve.feed, Some(deposit));
         }
     }
     let tx = x as i64 / 256;
@@ -200,15 +260,11 @@ pub fn sample(seed: u64, profile: usize, x: u32, y: u32, catalogue: &[Material])
                 seed: key,
             };
             if deposit.contains(x as f64, y as f64) {
-                return material.id;
+                return (material.id, Some(deposit));
             }
         }
     }
-    if y < 32 {
-        0
-    } else {
-        1
-    }
+    (if y < 32 { 0 } else { 1 }, None)
 }
 #[cfg(test)]
 mod tests {

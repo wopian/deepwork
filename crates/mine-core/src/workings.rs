@@ -106,6 +106,10 @@ pub struct Search {
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Workings {
+    #[serde(default)]
+    pub veins: BTreeMap<String, VeinSurvey>,
+    #[serde(default)]
+    pub target: Option<Point>,
     pub passages: Vec<Passage>,
     #[serde(default)]
     pub chambers: BTreeMap<usize, u32>,
@@ -130,7 +134,55 @@ pub struct Workings {
     #[serde(skip)]
     indexed: usize,
 }
+#[derive(Clone, Serialize, Deserialize)]
+pub struct VeinSurvey {
+    pub anchor: Point,
+    pub stage: u32,
+}
 impl Workings {
+    /// Reveal the facing edge at accuracy one, the remaining deposit at accuracy two.
+    /// One descriptor per survey cycle bounds foreground work and snapshot changes.
+    pub fn refine_survey(
+        &mut self,
+        terrain: &mut Terrain,
+        seed: u64,
+        profile: usize,
+        cat: &[crate::Material],
+        accuracy: u32,
+    ) -> Vec<usize> {
+        let stage = accuracy.min(2);
+        if stage == 0 || self.passages.is_empty() {
+            return vec![];
+        }
+        let at = self.passages[self.active.min(self.passages.len() - 1)].feet;
+        let next = self
+            .veins
+            .iter()
+            .filter(|(_, v)| {
+                v.stage < stage && distance(v.anchor, at) <= settings().upgraded_signal_radius * 2
+            })
+            .min_by_key(|(_, v)| distance(v.anchor, at))
+            .map(|(id, v)| (id.clone(), v.anchor));
+        let Some((id, anchor)) = next else {
+            return vec![];
+        };
+        let cells = crate::geology::deposit_cells(seed, profile, anchor, cat);
+        let nearest = cells
+            .iter()
+            .filter(|p| !terrain.contains(p[0], p[1]))
+            .map(|p| distance(*p, at))
+            .min()
+            .unwrap_or(0);
+        let mut found = BTreeSet::new();
+        for p in cells {
+            if !terrain.contains(p[0], p[1]) && (stage == 2 || distance(p, at) <= nearest + 6) {
+                found.extend(terrain.reveal(seed, profile, p[0], p[1], 0, cat));
+            }
+        }
+        self.veins.get_mut(&id).unwrap().stage = stage;
+        self.revision += 1;
+        found.into_iter().collect()
+    }
     fn index_passages(&mut self) {
         while self.indexed < self.passages.len() {
             let n = &self.passages[self.indexed];
@@ -189,16 +241,25 @@ impl Workings {
                 }
                 measured = true;
                 let mut hits = 0;
+                let mut anchor = None;
                 for oy in [4, 12, 20, 28] {
                     for ox in [4, 12, 20, 28] {
                         let id =
                             crate::geology::sample(seed, profile, bx * 32 + ox, by * 32 + oy, cat);
                         if id > 1 {
                             hits += 1;
+                            anchor.get_or_insert([bx * 32 + ox, by * 32 + oy]);
                         }
                     }
                 }
                 if hits >= 2 {
+                    if let Some(anchor) = anchor {
+                        if let Some(id) = crate::geology::deposit_id(seed, profile, anchor, cat) {
+                            self.veins
+                                .entry(id)
+                                .or_insert(VeinSurvey { anchor, stage: 0 });
+                        }
+                    }
                     self.signals.push(Signal {
                         centre,
                         radius: 23,
@@ -402,6 +463,17 @@ impl Workings {
                 }
             };
             let mut candidates: Vec<(i64, Point)> = vec![];
+            if let Some(p) = self.target {
+                if terrain.contains(p[0], p[1]) {
+                    self.target = None;
+                } else if p[1] < depth_limit
+                    && terrain.known_material(p[0], p[1]).is_some_and(|id| id > 1)
+                    && !self.deferred.contains(&area(p))
+                    && !protected(&self.floor_index, p, &[])
+                {
+                    candidates.push((-10000 + nearest_distance(p) as i64, p));
+                }
+            }
             // Targets come only from locally sampled frontier cells.
             for (&id, faces) in &terrain.ore_frontiers {
                 if id <= 1 {
@@ -729,6 +801,16 @@ impl Workings {
         }
     }
     pub fn valid(&self) -> bool {
+        if self.veins.len() > 25000
+            || self.veins.iter().any(|(id, v)| {
+                id.len() > 128 || v.anchor[0] >= WIDTH || v.anchor[1] >= MAX_ROWS || v.stage > 2
+            })
+            || self
+                .target
+                .is_some_and(|p| p[0] >= WIDTH || p[1] >= MAX_ROWS)
+        {
+            return false;
+        }
         self.chambers.iter().all(|(i, y)| {
             *i < self.passages.len()
                 && *y >= PIT_ROWS
@@ -853,6 +935,40 @@ pub fn cut_cells(a: Point, b: Point, lift: bool) -> Vec<Point> {
 mod tests {
     use super::*;
     const PIT_ROWS: u32 = 192;
+    #[test]
+    fn accuracy_reveals_facing_edge_then_only_remaining_deposit() {
+        let cat = crate::materials();
+        let mut terrain = Terrain::default();
+        let mut w = Workings::default();
+        w.initialise();
+        let anchor = (220..250)
+            .map(|x| [x, 24])
+            .find(|p| crate::geology::sample(42, 0, p[0], p[1], &cat) == 3)
+            .unwrap();
+        let id = crate::geology::deposit_id(42, 0, anchor, &cat).unwrap();
+        let cells = crate::geology::deposit_cells(42, 0, anchor, &cat);
+        w.veins.insert(id.clone(), VeinSurvey { anchor, stage: 0 });
+        assert!(w.refine_survey(&mut terrain, 42, 0, &cat, 0).is_empty());
+        assert!(terrain.visible.is_empty());
+        w.refine_survey(&mut terrain, 42, 0, &cat, 1);
+        let count = |t: &Terrain| {
+            t.visible
+                .values()
+                .flatten()
+                .filter(|&&id| id != 255)
+                .count()
+        };
+        let edge = count(&terrain);
+        assert!(edge > 0 && edge < cells.len());
+        w.refine_survey(&mut terrain, 42, 0, &cat, 2);
+        assert_eq!(count(&terrain), cells.len());
+        assert!(cells
+            .iter()
+            .all(|p| terrain.known_material(p[0], p[1]) == Some(3)));
+        assert!(!terrain.is_revealed(400, 24));
+        let restored: Workings = serde_json::from_str(&serde_json::to_string(&w).unwrap()).unwrap();
+        assert_eq!(restored.veins[&id].stage, 2);
+    }
     #[test]
     fn column_search_cost_matches_pixel_cuts_across_chunks_ramps_and_supports() {
         for pattern in 0..3 {

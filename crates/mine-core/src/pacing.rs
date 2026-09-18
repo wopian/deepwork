@@ -8,6 +8,7 @@ pub struct StartingEquipment {
 }
 #[derive(Deserialize)]
 pub struct Pacing {
+    pub starting_credits: u64,
     pub costs: BTreeMap<String, u64>,
     pub headquarters_starting: BTreeMap<String, Vec<StartingEquipment>>,
     pub worker_growth: f64,
@@ -44,6 +45,13 @@ pub fn get() -> &'static Pacing {
 }
 pub fn validate() -> Result<(), String> {
     let p = get();
+    if p.starting_credits > 1000
+        || p.starting_credits
+            < p.costs.get("worker").copied().unwrap_or(0)
+                + p.costs.get("furnace").copied().unwrap_or(0)
+    {
+        return Err("Starting credits must cover one worker and starter furnace".into());
+    }
     if crate::requirements()
         .iter()
         .any(|u| !p.costs.contains_key(&u.id))

@@ -1,4 +1,5 @@
 {
+  "starting_credits": 60,
   "costs": {
     "worker": 25,
     "housing": 90,
