@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import World from "./World.vue";
+import ProcessingPanel from "./ProcessingPanel.vue";
 import { RESOURCE_UNIT, CELLS_PER_METRE } from "./geometry";
 import upgradeRequirements from "../content/upgrades.json";
 import profiles from "../content/sites.json";
@@ -10,6 +11,7 @@ import mining from "../content/mining.json";
 import { preferences } from "./preferences";
 import {
   state,
+  reconciling,
   error,
   materials,
   upgrades,
@@ -90,6 +92,7 @@ const orderedUpgrades = [...upgrades].sort(
   (a, b) => upgradeOrder.indexOf(a[0]) - upgradeOrder.indexOf(b[0]),
 );
 const tab = ref("Operations");
+const equipmentOpen = ref(!matchMedia("(max-width: 800px)").matches);
 const query = ref("");
 const showRetire = ref(false);
 async function retirementPreview() {
@@ -117,7 +120,11 @@ const ready = computed(() => !!state.value?.steel_made && depth.value >= 300);
 onMounted(start);
 </script>
 <template>
-  <div class="shell" :style="{ zoom: preferences.uiScale }">
+  <div
+    class="shell"
+    :class="{ 'mine-first': tab === 'Operations' }"
+    :style="{ zoom: preferences.uiScale }"
+  >
     <header>
       <a class="brand" href="#"
         ><span class="brand-mark">▧</span
@@ -157,10 +164,16 @@ onMounted(start);
         Start fresh
       </button>
     </div>
+    <div class="notice" v-if="reconciling" role="status">
+      Catching up your mine… Progress is being saved before play resumes.
+    </div>
     <div class="notice" v-if="error" role="status">
       {{ error }}<button @click="error = ''" aria-label="Dismiss">×</button>
     </div>
-    <section class="offline" v-if="state?.offline?.effective && state.offline.id !== dismissedOffline">
+    <section
+      class="offline"
+      v-if="state?.offline?.effective && state.offline.id !== dismissedOffline"
+    >
       <strong>Welcome back to the mine.</strong> Your crew excavated
       {{ format(state.offline.excavated) }} cells and earned
       {{ format(state.offline.credits) }} credits while away.
@@ -181,7 +194,9 @@ onMounted(start);
         }}.
       </p>
       <p v-for="blocker in state.offline.blockers">{{ blocker }}</p>
-      <button @click="dismissedOffline = state?.offline?.id ?? ''">Continue →</button>
+      <button @click="dismissedOffline = state?.offline?.id ?? ''">
+        Continue →
+      </button>
     </section>
     <p class="notice" v-if="state?.challenge">
       SITE CHALLENGE ·
@@ -193,17 +208,17 @@ onMounted(start);
       Steel + 300 m awards 5 extra retirement research.
     </p>
     <div class="page-heading">
-      <div class="eyebrow">SMALL CREW. DEEP AMBITIONS.</div>
+      <div class="eyebrow">SHAFT OPERATIONS</div>
       <div class="title-row">
         <h1>
           {{
             tab === "Operations"
-              ? "A little deeper, every day."
+              ? "Deepwork"
               : tab === "Minerals"
-                ? "Something worth finding."
+                ? "Mineral collection"
                 : tab === "Headquarters"
-                  ? "Build beyond this mine."
-                  : "Every hole tells a story."
+                  ? "Headquarters"
+                  : "Mine records"
           }}
         </h1>
         <div class="balance">
@@ -250,6 +265,26 @@ onMounted(start);
             >
           </div>
           <World />
+          <div class="opening-guide" v-if="state && !state.levels.furnace">
+            <strong>First workshop: refine iron</strong>
+            <p>
+              Your crew follows surveyed rock automatically. Build a furnace to
+              turn held ore into iron for equipment.
+            </p>
+            <button
+              @click="act('buy', 'furnace')"
+              :disabled="!!state.purchase_blockers.furnace"
+            >
+              Build furnace · {{ state.quotes.furnace }} credits
+            </button>
+            <span>{{
+              state.purchase_blockers.furnace || "Ready to build"
+            }}</span>
+          </div>
+          <details class="workshop-sheet">
+            <summary>Processing workshop</summary>
+            <ProcessingPanel />
+          </details>
           <p class="crew-roster" v-if="state">
             <span v-for="(count, role) in state.crew" :key="role"
               >{{ count }} {{ role }}</span
@@ -458,81 +493,54 @@ onMounted(start);
           </div>
         </section>
         <aside>
-          <div class="panel-heading">
-            <h2>GIVE THEM AN EDGE</h2>
-            <span>UPGRADES</span>
-          </div>
-          <p class="crew-roster">
-            Capacity estimates assume steady feed and completed construction.
-          </p>
-          <div class="upgrade-list">
-            <button
-              class="upgrade"
-              v-for="u in orderedUpgrades"
-              :key="u[0]"
-              :disabled="!state || !!state.purchase_blockers[u[0]]"
-              @click="act('buy', u[0])"
-            >
-              <div class="upgrade-icon">
-                {{ u[0] === "worker" ? "♟" : u[0] === "furnace" ? "♨" : "▥" }}
-              </div>
-              <div>
-                <strong>{{ u[1] }}</strong>
-                <p>{{ u[2] }}</p>
-                <small>LEVEL {{ state?.levels[u[0]] ?? 0 }}</small>
-              </div>
-              <b>◈ {{ format(cost(u[0])) }}</b>
-              <small
-                class="upgrade-blocker"
-                v-if="state?.upgrade_previews[u[0]]"
-                >Machine
-                {{ format(state.upgrade_previews[u[0]].machine_percent) }}% ·
-                feed line ~{{
-                  format(state.upgrade_previews[u[0]].line_percent)
-                }}%</small
+          <details :open="equipmentOpen" class="equipment-sheet">
+            <summary>Crew & equipment</summary>
+            <div class="panel-heading">
+              <h2>CREW & EQUIPMENT</h2>
+              <span>UPGRADES</span>
+            </div>
+            <p class="crew-roster">
+              Capacity estimates assume steady feed and completed construction.
+            </p>
+            <div class="upgrade-list">
+              <button
+                class="upgrade"
+                v-for="u in orderedUpgrades"
+                :key="u[0]"
+                :disabled="!state || !!state.purchase_blockers[u[0]]"
+                @click="act('buy', u[0])"
               >
-              <small
-                class="upgrade-blocker"
-                v-if="state?.purchase_blockers[u[0]]"
-                >{{ state.purchase_blockers[u[0]] }}</small
-              >
-            </button>
-          </div>
+                <div class="upgrade-icon">
+                  {{
+                    u[0] === "worker" ? "♟" : u[0] === "furnace" ? "♨" : "▥"
+                  }}
+                </div>
+                <div>
+                  <strong>{{ u[1] }}</strong>
+                  <p>{{ u[2] }}</p>
+                  <small>LEVEL {{ state?.levels[u[0]] ?? 0 }}</small>
+                </div>
+                <b>◈ {{ format(cost(u[0])) }}</b>
+                <small
+                  class="upgrade-blocker"
+                  v-if="state?.upgrade_previews[u[0]]"
+                  >Machine
+                  {{ format(state.upgrade_previews[u[0]].machine_percent) }}% ·
+                  feed line ~{{
+                    format(state.upgrade_previews[u[0]].line_percent)
+                  }}%</small
+                >
+                <small
+                  class="upgrade-blocker"
+                  v-if="state?.purchase_blockers[u[0]]"
+                  >{{ state.purchase_blockers[u[0]] }}</small
+                >
+              </button>
+            </div>
+          </details>
         </aside>
       </div>
       <div class="bottom-grid">
-        <section class="card">
-          <div class="panel-heading">
-            <h2>A HAND FROM ABOVE</h2>
-            <span>TACTICAL BOOSTS</span>
-          </div>
-          <div class="abilities">
-            <button
-              v-for="(label, i) in [
-                'Crew rally',
-                'Freight priority',
-                'Furnace overdrive',
-                'Directed survey',
-              ]"
-              :disabled="
-                !state ||
-                !!state.cooldowns[i] ||
-                (state.site === 1 && depth < pacing.tactics_depth)
-              "
-              @click="act('ability', '', i)"
-            >
-              <span>{{ ["⚑", "⇢", "♨", "⌖"][i] }}</span
-              ><strong>{{ label }}</strong
-              ><small>{{
-                state?.cooldowns[i]
-                  ? `${state.cooldowns[i]}s cooldown`
-                  : state?.site === 1 && depth < pacing.tactics_depth
-                    ? `${pacing.tactics_depth} M UNLOCK`
-                    : "READY WHEN YOU ARE"
-              }}</small>
-            </button>
-          </div>
-        </section>
         <section class="card specialisations">
           <div class="panel-heading">
             <h2>SITE SPECIALISATION</h2>

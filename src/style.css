@@ -33,7 +33,8 @@ button:hover:not(:disabled) {
   border-color: #e5a34d;
 }
 button:disabled {
-  opacity: 0.45;
+  color: #c8c4b9;
+  border-style: dashed;
   cursor: default;
 }
 button:focus-visible,
@@ -69,7 +70,7 @@ header {
 }
 .brand small {
   display: block;
-  font: 9px monospace;
+  font: 14px monospace;
   letter-spacing: 4px;
   margin-top: 6px;
 }
@@ -82,8 +83,8 @@ nav button {
   border: 0;
   border-bottom: 2px solid transparent;
   padding: 0 4px;
-  font-size: 13px;
-  color: #e8dfc877;
+  font-size: 14px;
+  color: #c8c4b9;
 }
 nav button.active {
   color: var(--accent);
@@ -91,8 +92,8 @@ nav button.active {
 }
 .site-tag {
   margin-left: auto;
-  font: 11px monospace;
-  color: #e8dfc8aa;
+  font: 14px monospace;
+  color: #c8c4b9;
 }
 i {
   display: inline-block;
@@ -105,7 +106,7 @@ i {
   padding: 38px 0 26px;
 }
 .eyebrow {
-  font: 10px monospace;
+  font: 14px monospace;
   letter-spacing: 2px;
   color: var(--accent);
   margin-bottom: 13px;
@@ -125,9 +126,9 @@ h1 {
   text-align: right;
 }
 .balance small {
-  font: 9px monospace;
+  font: 14px monospace;
   letter-spacing: 1px;
-  color: #e8dfc899;
+  color: #c8c4b9;
 }
 .balance strong {
   display: block;
@@ -150,9 +151,9 @@ h1 {
 }
 .stats small {
   display: block;
-  font: 9px monospace;
+  font: 14px monospace;
   letter-spacing: 1.4px;
-  color: #e8dfc888;
+  color: #c8c4b9;
 }
 .stats strong {
   display: block;
@@ -160,12 +161,12 @@ h1 {
   margin: 10px 0;
 }
 .stats em {
-  font: 12px monospace;
-  color: #e8dfc877;
+  font: 14px monospace;
+  color: #c8c4b9;
 }
 .stats span {
-  font-size: 11px;
-  color: #e8dfc888;
+  font-size: 14px;
+  color: #c8c4b9;
 }
 .operation-grid {
   display: grid;
@@ -187,14 +188,14 @@ aside,
   gap: 10px;
 }
 .panel-heading h2 {
-  font: 10px monospace;
+  font: 14px monospace;
   letter-spacing: 1.5px;
   margin: 0;
 }
 .panel-heading > span {
-  font: 8px monospace;
+  font: 14px monospace;
   letter-spacing: 1px;
-  color: #e8dfc877;
+  color: #c8c4b9;
 }
 .world-wrap {
   position: relative;
@@ -220,7 +221,7 @@ aside,
 }
 .world-tools button {
   padding: 6px 12px;
-  font: 11px monospace;
+  font: 14px monospace;
 }
 .world-caption {
   position: absolute;
@@ -228,14 +229,14 @@ aside,
   left: 0;
   right: 0;
   padding: 12px 20px;
-  font: 8px monospace;
+  font: 14px monospace;
   letter-spacing: 1px;
   background: #101820dc;
   color: var(--accent);
 }
 .world-caption span {
   float: right;
-  color: #e8dfc877;
+  color: #c8c4b9;
 }
 .policy {
   display: flex;
@@ -246,12 +247,12 @@ aside,
   border-bottom: 1px solid var(--line);
 }
 .policy > span {
-  font: 8px monospace;
-  color: #e8dfc877;
+  font: 14px monospace;
+  color: #c8c4b9;
   margin-right: auto;
 }
 .policy button {
-  font-size: 10px;
+  font-size: 14px;
   padding: 6px 10px;
 }
 .selected {
@@ -272,8 +273,8 @@ aside,
   border: 0;
 }
 .pipeline small {
-  font: 8px monospace;
-  color: #e8dfc888;
+  font: 14px monospace;
+  color: #c8c4b9;
 }
 .pipeline strong {
   display: block;
@@ -281,8 +282,8 @@ aside,
   margin: 11px 0;
 }
 .pipeline em {
-  font: 10px monospace;
-  color: #e8dfc866;
+  font: 14px monospace;
+  color: #c8c4b9;
 }
 .meter {
   height: 3px;
@@ -294,8 +295,8 @@ aside,
   background: var(--accent);
 }
 .pipeline p {
-  font-size: 9px;
-  color: #e8dfc888;
+  font-size: 14px;
+  color: #c8c4b9;
   line-height: 1.5;
   margin-bottom: 0;
 }
@@ -322,23 +323,23 @@ aside,
   padding: 8px;
 }
 .upgrade strong {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
 }
 .upgrade p {
-  font-size: 10px;
-  color: #e8dfc888;
+  font-size: 14px;
+  color: #c8c4b9;
   margin: 5px 0 7px;
   max-width: 155px;
   line-height: 1.5;
 }
 .upgrade small {
-  font: 8px monospace;
-  color: #e8dfc866;
+  font: 14px monospace;
+  color: #c8c4b9;
 }
 .upgrade b {
   margin-left: auto;
-  font: 11px monospace;
+  font: 14px monospace;
   color: var(--accent);
   white-space: nowrap;
 }
@@ -365,44 +366,44 @@ aside,
 }
 .abilities strong {
   display: block;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 500;
 }
 .abilities small {
   display: block;
-  font: 7px monospace;
+  font: 14px monospace;
   margin-top: 9px;
-  color: #e8dfc877;
+  color: #c8c4b9;
 }
 .contracts > div:not(.panel-heading) {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 8px 20px;
-  font-size: 12px;
+  font-size: 14px;
   text-transform: capitalize;
 }
 .contracts small {
   display: block;
-  color: #e8dfc877;
-  font: 9px monospace;
+  color: #c8c4b9;
+  font: 14px monospace;
   margin-top: 4px;
 }
 .contracts button {
-  font-size: 10px;
+  font-size: 14px;
 }
 .contracts p {
   padding: 15px;
-  font-size: 12px;
-  color: #e8dfc888;
+  font-size: 14px;
+  color: #c8c4b9;
 }
 footer {
   display: flex;
   justify-content: space-between;
   padding: 30px 0;
-  font: 8px monospace;
+  font: 14px monospace;
   letter-spacing: 1px;
-  color: #e8dfc855;
+  color: #c8c4b9;
 }
 footer b {
   color: var(--accent);
@@ -414,7 +415,7 @@ footer b {
   border: 1px solid #e5a34d55;
   color: #e5a34d;
   margin-top: 18px;
-  font-size: 12px;
+  font-size: 14px;
   display: flex;
   align-items: center;
   gap: 15px;
@@ -434,8 +435,8 @@ footer b {
   margin-top: 25px;
 }
 .card > p {
-  color: #e8dfc888;
-  font-size: 13px;
+  color: #c8c4b9;
+  font-size: 14px;
   line-height: 1.7;
 }
 .mineral-grid {
@@ -458,19 +459,19 @@ footer b {
   color: #101820;
 }
 .mineral-grid strong {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
 }
 .mineral-grid small {
   display: block;
-  font-size: 9px;
-  color: #e8dfc888;
+  font-size: 14px;
+  color: #c8c4b9;
   margin-top: 6px;
 }
 .mineral-grid b {
   margin-left: auto;
-  font: 8px monospace;
-  color: #e8dfc877;
+  font: 14px monospace;
+  color: #c8c4b9;
 }
 input {
   background: #101820;
@@ -489,8 +490,8 @@ input {
 }
 .research-grid p,
 .research-grid span {
-  font-size: 12px;
-  color: #e8dfc888;
+  font-size: 14px;
+  color: #c8c4b9;
 }
 .primary {
   background: var(--accent);
@@ -499,7 +500,7 @@ input {
 }
 .record {
   padding: 20px;
-  font: 12px monospace;
+  font: 14px monospace;
 }
 .import {
   display: inline-block;
@@ -570,7 +571,7 @@ input {
     height: 44px;
   }
   .site-tag {
-    font-size: 9px;
+    font-size: 14px;
   }
   .operation-grid,
   .bottom-grid {
@@ -609,7 +610,7 @@ input {
     padding: 0 5px;
   }
   .pipeline small {
-    font-size: 7px;
+    font-size: 14px;
   }
   .world-caption span {
     display: none;
@@ -622,10 +623,10 @@ input {
     padding-top: 25px;
   }
   .balance small {
-    font-size: 7px;
+    font-size: 14px;
   }
   .abilities small {
-    font-size: 6px;
+    font-size: 14px;
   }
   .notice {
     align-items: flex-start;
@@ -653,11 +654,11 @@ input {
 }
 .inventory strong {
   display: block;
-  font-size: 12px;
+  font-size: 14px;
   margin-bottom: 8px;
 }
 .inventory button {
-  font-size: 10px;
+  font-size: 14px;
   padding: 8px;
 }
 nav {
@@ -701,8 +702,8 @@ nav {
 }
 .site-options p {
   margin: 5px 0;
-  font-size: 12px;
-  color: #e8dfc899;
+  font-size: 14px;
+  color: #c8c4b9;
 }
 .record svg {
   display: block;
@@ -729,13 +730,13 @@ nav {
   padding: 8px 16px;
   margin: 0;
   color: var(--muted);
-  font: 11px monospace;
+  font: 14px monospace;
 }
 
 .upgrade-blocker {
   grid-column: 2 / -1;
   white-space: normal;
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .world-districts {
@@ -752,7 +753,7 @@ nav {
   pointer-events: auto;
   padding: 6px 10px;
   background: #101820ed;
-  font: 10px monospace;
+  font: 14px monospace;
 }
 
 .collection-grid {
@@ -760,10 +761,10 @@ nav {
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 12px;
   padding: 20px;
-  font: 12px monospace;
+  font: 14px monospace;
 }
 .collection-grid span {
-  color: #e8dfc866;
+  color: #c8c4b9;
 }
 .collection-grid .found {
   color: var(--accent);
@@ -788,4 +789,179 @@ nav {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* Mine-first workshop: controls remain readable at desktop and phone sizes. */
+:root {
+  font-size: 16px;
+}
+button,
+input,
+select {
+  font-size: 16px;
+}
+.shell {
+  max-width: none;
+  padding: 0 20px;
+}
+header {
+  height: auto;
+  min-height: 72px;
+  gap: 24px;
+  flex-wrap: wrap;
+  padding: 12px 0;
+}
+.page-heading {
+  padding: 12px 0;
+}
+.page-heading .eyebrow {
+  display: none;
+}
+.stats {
+  margin-bottom: 12px;
+}
+.stats > div {
+  padding: 10px 16px;
+}
+.stats strong {
+  font-size: 20px;
+  margin: 4px 0;
+}
+.world-wrap {
+  height: clamp(480px, 65dvh, 900px);
+}
+.world-tools,
+.world-districts {
+  max-width: calc(100% - 24px);
+  flex-wrap: wrap;
+}
+.world-tools button,
+.world-districts button {
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 14px;
+  padding: 8px 10px;
+}
+.workshop-sheet summary {
+  padding: 16px;
+  cursor: pointer;
+  min-height: 44px;
+  border-top: 1px solid var(--line);
+}
+.processing-panel {
+  padding: 16px;
+  line-height: 1.5;
+}
+.processing-panel .panel-heading {
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 0;
+}
+.processing-feed {
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+}
+.processing-feed dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 0;
+}
+.processing-feed dt {
+  color: #c8c4b9;
+  font-size: 14px;
+}
+.processing-feed dd {
+  margin: 4px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 800px) {
+  .shell {
+    padding: 0 8px;
+  }
+  .site-tag,
+  .stats span,
+  .brand small {
+    display: none;
+  }
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .world-wrap {
+    height: max(460px, 65dvh);
+  }
+  .processing-feed dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .operation-grid {
+    gap: 12px;
+  }
+  nav {
+    overflow-x: auto;
+    width: 100%;
+    gap: 16px;
+  }
+}
+
+.ore-inspector {
+  position: absolute;
+  left: 12px;
+  bottom: 100px;
+  max-width: calc(100% - 24px);
+  background: #101820;
+  border: 2px solid #e5a34d;
+  padding: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  z-index: 3;
+}
+.ore-inspector span {
+  font-size: 14px;
+  color: #c8c4b9;
+}
+.equipment-sheet summary {
+  padding: 16px;
+  min-height: 44px;
+  cursor: pointer;
+}
+.opening-guide {
+  padding: 16px;
+  border-top: 2px solid var(--accent);
+}
+.opening-guide span {
+  display: block;
+  margin-top: 8px;
+  color: #c8c4b9;
+}
+.mine-first .page-heading h1 {
+  display: none;
+}
+.mine-first .title-row {
+  justify-content: flex-end;
+}
+.mine-first .stats > div:nth-child(n + 3) {
+  display: none;
+}
+.mine-first .stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.mine-first .stats span {
+  display: none;
+}
+.mine-first .balance strong {
+  font-size: 20px;
+}
+.mine-first .page-heading {
+  padding: 8px 0;
+}
+p,
+label {
+  font-size: 16px;
+}
+.world-tools button,
+.world-districts button,
+nav button {
+  font-size: 16px;
 }

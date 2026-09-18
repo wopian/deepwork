@@ -14,6 +14,14 @@ test("zoom clamps without moving its anchor", () => {
 });
 
 test("one pointer pans and two pointers define a pinch", () => {
-  expect(gesture([{ x: 10, y: 20 }])).toEqual({ centre: { x: 10, y: 20 }, distance: 0 });
-  expect(gesture([{ x: 0, y: 0 }, { x: 60, y: 80 }])).toEqual({ centre: { x: 30, y: 40 }, distance: 100 });
+  expect(gesture([{ x: 10, y: 20 }])).toEqual({
+    centre: { x: 10, y: 20 },
+    distance: 0,
+  });
+  expect(
+    gesture([
+      { x: 0, y: 0 },
+      { x: 60, y: 80 },
+    ]),
+  ).toEqual({ centre: { x: 30, y: 40 }, distance: 100 });
 });

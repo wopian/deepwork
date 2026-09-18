@@ -3,7 +3,8 @@ import { onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { Application, Graphics, Text, Container } from "pixi.js";
 // Pixi shader/uniform polyfills preserve the native CSP without eval.
 import "pixi.js/unsafe-eval";
-import { state, materials, terrainEpoch, format } from "./game";
+import { state, materials, terrainEpoch, format, act } from "./game";
+import { inspectOre } from "./inspect";
 import { WasteParticles } from "./waste";
 import { TerrainView } from "./terrain-view";
 import { CELL_PIXEL, CELLS_PER_METRE, RESOURCE_UNIT } from "./geometry";
@@ -32,6 +33,10 @@ let lastCampaign = "";
 let zoom = 1;
 let offsetY = 0;
 const pointers = new Map<number, ScreenPoint>();
+const inspected = ref<number | null>(null);
+let inspectedCell: [number, number] | null = null;
+let press: ScreenPoint | null = null;
+let moved = false;
 let offsetX = 0;
 let follow = false;
 let followCrew = false;
@@ -209,7 +214,7 @@ function draw() {
     for (let lane = 0; lane < lanes; lane++)
       rect(terrain, 213, 167 - lane * 3, 478, 1, 0xe5a34d);
   }
-  if (levels.shaft) {
+  if (g || levels.shaft) {
     rect(terrain, 444, 130, 5, 70, 0x8c9ba5);
     rect(terrain, 477, 130, 5, 70, 0x8c9ba5);
     rect(terrain, 440, 126, 46, 6, 0x8c9ba5);
@@ -388,10 +393,12 @@ onMounted(async () => {
         lastCampaign = g.campaign_id;
         fineTerrain.clear();
         drawnKey = "";
-        offsetX = 0;
-        offsetY = 0;
+        zoom = innerWidth < 800 ? 6 : 3;
+        const startScale = (app.screen.width / 1100) * zoom;
+        offsetX = app.screen.width / 2 - 459 * startScale;
+        offsetY = app.screen.height * 0.4 - 208 * startScale;
         follow = false;
-        followCrew = false;
+        followCrew = true;
         wasteParticles.items.length = 0;
         lastWaste = g.lifetime_waste;
       }
@@ -572,40 +579,100 @@ function wheel(e: WheelEvent) {
 }
 function localPoint(e: { clientX: number; clientY: number }): ScreenPoint {
   const bounds = host.value!.getBoundingClientRect();
-  return { x: (e.clientX - bounds.left) * (app?.screen.width ?? bounds.width) / bounds.width,
-    y: (e.clientY - bounds.top) * (app?.screen.height ?? bounds.height) / bounds.height };
+  return {
+    x:
+      ((e.clientX - bounds.left) * (app?.screen.width ?? bounds.width)) /
+      bounds.width,
+    y:
+      ((e.clientY - bounds.top) * (app?.screen.height ?? bounds.height)) /
+      bounds.height,
+  };
 }
-function changeZoom(factor: number, from = { x: (app?.screen.width ?? 0) / 2, y: (app?.screen.height ?? 0) / 2 }, to = from) {
+function changeZoom(
+  factor: number,
+  from = { x: (app?.screen.width ?? 0) / 2, y: (app?.screen.height ?? 0) / 2 },
+  to = from,
+) {
   const next = zoomAt({ zoom, x: offsetX, y: offsetY }, factor, from, to);
-  zoom = next.zoom; offsetX = next.x; offsetY = next.y;
-  follow = false; followCrew = false;
+  zoom = next.zoom;
+  offsetX = next.x;
+  offsetY = next.y;
+  follow = false;
+  followCrew = false;
   draw();
 }
 function pointerDown(e: PointerEvent) {
   pointers.set(e.pointerId, localPoint(e));
-  follow = false; followCrew = false;
+  if (pointers.size === 1) {
+    press = localPoint(e);
+    moved = false;
+  } else moved = true;
+  follow = false;
+  followCrew = false;
   (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 }
 function pointerMove(e: PointerEvent) {
-  if (!pointers.has(e.pointerId)) return;
+  if (!pointers.has(e.pointerId)) {
+    if (e.pointerType === "mouse") inspectAt(localPoint(e));
+    return;
+  }
+  if (
+    press &&
+    Math.hypot(localPoint(e).x - press.x, localPoint(e).y - press.y) > 6
+  )
+    moved = true;
   const before = gesture([...pointers.values()]);
   pointers.set(e.pointerId, localPoint(e));
   const after = gesture([...pointers.values()]);
-  changeZoom(before.distance > 0 && after.distance > 0 ? after.distance / before.distance : 1, before.centre, after.centre);
+  changeZoom(
+    before.distance > 0 && after.distance > 0
+      ? after.distance / before.distance
+      : 1,
+    before.centre,
+    after.centre,
+  );
 }
-function pointerEnd(e: PointerEvent) { pointers.delete(e.pointerId); }
+function inspectAt(p: ScreenPoint) {
+  if (!app || !state.value) return;
+  const scale = (app.screen.width / 1100) * zoom;
+  inspectedCell = [
+    Math.floor(((p.x - offsetX) / scale - 235) / CELL_PIXEL),
+    Math.floor(((p.y - offsetY) / scale - 208) / CELL_PIXEL),
+  ];
+  inspected.value = inspectOre(state.value.terrain, ...inspectedCell);
+}
+function pointerEnd(e: PointerEvent) {
+  if (e.type === "pointerup" && pointers.has(e.pointerId) && !moved)
+    inspectAt(localPoint(e));
+  pointers.delete(e.pointerId);
+}
 function fitWorkings() {
   if (!app) return;
-  const points = state.value?.workings.passages.map(p => p.feet) ?? [];
-  if (!points.length) { focusDistrict(459); return; }
-  let minX = Infinity, maxX = -Infinity, maxY = 0;
-  for (const [x, y] of points) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); }
-  const scale = Math.min((app.screen.width - 64) / Math.max(100, (maxX - minX) * CELL_PIXEL), (app.screen.height - 96) / Math.max(100, maxY * CELL_PIXEL));
-  zoom = Math.max(0.15, Math.min(24, scale * 1100 / app.screen.width));
-  const actual = app.screen.width / 1100 * zoom;
-  offsetX = app.screen.width / 2 - (235 + (minX + maxX) / 2 * CELL_PIXEL) * actual;
+  const points = state.value?.workings.passages.map((p) => p.feet) ?? [];
+  if (!points.length) {
+    focusDistrict(459);
+    return;
+  }
+  let minX = Infinity,
+    maxX = -Infinity,
+    maxY = 0;
+  for (const [x, y] of points) {
+    minX = Math.min(minX, x);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+  const scale = Math.min(
+    (app.screen.width - 64) / Math.max(100, (maxX - minX) * CELL_PIXEL),
+    (app.screen.height - 96) / Math.max(100, maxY * CELL_PIXEL),
+  );
+  zoom = Math.max(0.15, Math.min(24, (scale * 1100) / app.screen.width));
+  const actual = (app.screen.width / 1100) * zoom;
+  offsetX =
+    app.screen.width / 2 - (235 + ((minX + maxX) / 2) * CELL_PIXEL) * actual;
   offsetY = 48 - 208 * actual;
-  follow = false; followCrew = false; draw();
+  follow = false;
+  followCrew = false;
+  draw();
 }
 </script>
 <template>
@@ -621,10 +688,8 @@ function fitWorkings() {
       @lostpointercapture="pointerEnd"
     />
     <div class="world-tools">
-      <button @click="changeZoom(1.4)" aria-label="Zoom in">
-        ＋</button
-      ><button @click="changeZoom(1 / 1.4)" aria-label="Zoom out">
-        −</button
+      <button @click="changeZoom(1.4)" aria-label="Zoom in">＋</button
+      ><button @click="changeZoom(1 / 1.4)" aria-label="Zoom out">−</button
       ><button
         @click="
           () => {
@@ -655,7 +720,7 @@ function fitWorkings() {
       <button
         v-for="[label, x] in [
           ['Camp', 100],
-          ['Pit', 459],
+          ['Shaft', 459],
           ['Plants', 800],
           ['Waste', 1000],
         ]"
@@ -689,6 +754,28 @@ function fitWorkings() {
       <span>{{
         state?.workings?.status || "SCROLL TO ZOOM · DRAG TO EXPLORE"
       }}</span>
+    </div>
+    <div v-if="inspected !== null" class="ore-inspector" role="status">
+      <strong>{{ materials[inspected]?.name }}</strong>
+      <span
+        >Refines into
+        {{ materials[inspected]?.product.replaceAll("_", " ") }}</span
+      >
+      <button
+        @click="inspectedCell && act('target_vein', inspectedCell.join(','))"
+      >
+        Direct crew here
+      </button>
+      <button @click="act('priority', '', inspected)">
+        {{
+          state?.priorities.includes(inspected)
+            ? "Remove material priority"
+            : "Prioritise this material"
+        }}
+      </button>
+      <button @click="inspected = null" aria-label="Close mineral inspector">
+        ×
+      </button>
     </div>
   </div>
 </template>

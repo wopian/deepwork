@@ -1,5 +1,6 @@
 import { shallowRef } from "vue";
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import catalogue from "../content/materials.json";
 import { displayNumber } from "./numbers";
 import { preferences, purchaseSound } from "./preferences";
@@ -33,6 +34,7 @@ export interface Game {
   pinned: string | null;
   work_route: [number, number][];
   raw_stock: Record<string, number>;
+  concentrate: Record<string, number>;
   raw_stock_capacity: number;
   research_invested: number;
   shipments: {
@@ -139,8 +141,6 @@ export interface Game {
     research: number;
     excavated: number;
   }[];
-  cooldowns: number[];
-  boosts: number[];
   last_sequence: number;
   stages: {
     name: string;
@@ -165,6 +165,7 @@ export const state = shallowRef<Game | null>(null);
 export const terrainEpoch = shallowRef(0);
 export const error = shallowRef("");
 export const native = isTauri();
+export const reconciling = shallowRef(native);
 export function format(n: number | string) {
   return displayNumber(n, preferences.numbers);
 }
@@ -222,6 +223,14 @@ export async function start() {
     return;
   }
   try {
+    if (!lifecycleRegistered) {
+      await listen<boolean>("mine-reconciling", (event) => {
+        reconciling.value = event.payload;
+      });
+      await listen<string>("mine-lifecycle-error", (event) => {
+        error.value = event.payload;
+      });
+    }
     const channel = new Channel<{ state: Game; reset: boolean }>();
     channel.onmessage = (update) => {
       const g = update.state;
@@ -242,6 +251,7 @@ export async function start() {
     };
     state.value = await invoke<Game>("connect", { channel });
     await backgroundState(document.hidden);
+    reconciling.value = false;
     if (!lifecycleRegistered) {
       lifecycleRegistered = true;
       document.addEventListener(
@@ -260,7 +270,7 @@ export async function start() {
 }
 let pending = false;
 export async function act(kind: string, target = "", value = 0) {
-  if (!state.value || pending) return false;
+  if (!state.value || pending || reconciling.value) return false;
   pending = true;
   try {
     state.value = await invoke<Game>("command", {
