@@ -150,6 +150,7 @@ export interface Game {
     blocker: string;
   }[];
   offline: null | {
+    id: string;
     discoveries: number[];
     blockers: string[];
     capped: number;

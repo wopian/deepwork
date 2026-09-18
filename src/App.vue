@@ -102,7 +102,7 @@ async function retirementConfirm() {
 async function retirementCancel() {
   if (await act("cancel_retirement")) showRetire.value = false;
 }
-const hideOffline = ref(false);
+const dismissedOffline = ref("");
 const depth = computed(() =>
   Math.floor(Math.max(...(state.value?.heights ?? [0])) / CELLS_PER_METRE),
 );
@@ -160,7 +160,7 @@ onMounted(start);
     <div class="notice" v-if="error" role="status">
       {{ error }}<button @click="error = ''" aria-label="Dismiss">×</button>
     </div>
-    <section class="offline" v-if="state?.offline?.effective && !hideOffline">
+    <section class="offline" v-if="state?.offline?.effective && state.offline.id !== dismissedOffline">
       <strong>Welcome back to the mine.</strong> Your crew excavated
       {{ format(state.offline.excavated) }} cells and earned
       {{ format(state.offline.credits) }} credits while away.
@@ -181,7 +181,7 @@ onMounted(start);
         }}.
       </p>
       <p v-for="blocker in state.offline.blockers">{{ blocker }}</p>
-      <button @click="hideOffline = true">Continue →</button>
+      <button @click="dismissedOffline = state?.offline?.id ?? ''">Continue →</button>
     </section>
     <p class="notice" v-if="state?.challenge">
       SITE CHALLENGE ·

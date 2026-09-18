@@ -251,6 +251,9 @@ pub struct Stage {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Offline {
+    /// Stable identity of the committed away interval, independent of UI lifetime.
+    #[serde(default)]
+    pub id: String,
     #[serde(default)]
     pub discoveries: Vec<usize>,
     #[serde(default)]
@@ -1547,6 +1550,7 @@ impl Game {
             }
         }
         self.offline = Some(Offline {
+            id: format!("{}:{}:{}", self.campaign_id, self.last_saved, now),
             discoveries: self.discoveries.difference(&known).copied().collect(),
             blockers: self
                 .stages
@@ -2163,6 +2167,18 @@ mod tests {
         let n = g.excavated;
         g.advance_offline(200, &materials());
         assert_eq!(n, g.excavated);
+    }
+    #[test]
+    fn separate_returns_have_distinct_persisted_report_ids() {
+        let mut g = Game::default();
+        g.last_saved = 100;
+        g.advance_offline(120, &materials());
+        let first = g.offline.as_ref().unwrap().id.clone();
+        let mut loaded: Game = serde_json::from_str(&serde_json::to_string(&g).unwrap()).unwrap();
+        assert_eq!(loaded.offline.as_ref().unwrap().id, first);
+        loaded.advance_offline(140, &materials());
+        assert_ne!(loaded.offline.as_ref().unwrap().id, first);
+        assert_eq!(loaded.offline.as_ref().unwrap().effective, 10);
     }
     #[test]
     fn roundtrip() {
