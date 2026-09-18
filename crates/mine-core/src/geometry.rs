@@ -3,17 +3,18 @@ pub const CHUNK: u32 = 64;
 pub const WIDTH: u32 = 512;
 pub const CHUNKS_ACROSS: u32 = WIDTH / CHUNK;
 pub const CELLS_PER_METRE: u32 = 4;
-pub const PIT_ROWS: u32 = 48 * CELLS_PER_METRE;
+/// Surface entrance. Underground planning starts immediately below it.
+pub const PIT_ROWS: u32 = 1;
 pub const BENCH_ROWS: u32 = 6 * CELLS_PER_METRE;
 pub const PIT_MARGIN: u32 = 4 * CELLS_PER_METRE;
 pub const PIT_LAST_X: u32 = WIDTH - (PIT_MARGIN + (PIT_ROWS - 1) / BENCH_ROWS * BENCH_ROWS) - 1;
 pub const UNITS: u64 = 64_000;
 pub const CELL_MASS: u64 = 1_000;
 pub const MAX_ROWS: u32 = 800_000;
-pub const GENERATOR_VERSION: u32 = 3;
+pub const GENERATOR_VERSION: u32 = 4;
 /// Ground carrying the surface access ramp must survive underground exploration.
-pub fn protects_ramp(x: u32, y: u32) -> bool {
-    x >= PIT_MARGIN && x < PIT_ROWS + PIT_MARGIN && y >= x - (PIT_MARGIN - 1) && y < PIT_ROWS
+pub fn protects_ramp(_x: u32, _y: u32) -> bool {
+    false
 }
 pub fn depth(row: u32) -> u32 {
     row / CELLS_PER_METRE

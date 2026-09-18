@@ -61,18 +61,14 @@ pub fn route(t: &Terrain, heights: &[u32], face: [u32; 2], lift: bool) -> Vec<[u
 mod tests {
     use super::*;
     #[test]
-    fn ramp_reaches_daylight_but_vertical_walls_are_not_walkable() {
-        let heights: Vec<_> = (0..WIDTH)
-            .map(|x| if x < 16 { 0 } else { (x - 15).min(80) })
-            .collect();
-        let t = Terrain::from_columns(&heights);
-        let path = route(&t, &heights, [200, 79], false);
-        assert_eq!(path.first(), Some(&[200, 79]));
-        assert_eq!(path.last(), Some(&[16, 0]));
-        let wall: Vec<_> = (0..WIDTH).map(|x| if x >= 16 { 80 } else { 0 }).collect();
-        let t = Terrain::from_columns(&wall);
-        // A vertical lip cannot be used as an exit.
-        assert!(route(&t, &wall, [200, 79], false).is_empty());
+    fn commissioned_root_reaches_surface_without_a_pit_ramp() {
+        let t = Terrain::default();
+        let mut w = crate::workings::Workings::default();
+        w.initialise();
+        assert_eq!(
+            underground(&t, &vec![0; WIDTH as usize], &w),
+            vec![[SHAFT, 0]]
+        );
     }
     #[test]
     fn arbitrary_vertical_rock_is_not_a_lift() {
@@ -83,7 +79,7 @@ mod tests {
 /// Only constructed, supported edges enter navigation; no inferred periodic levels.
 pub fn underground(
     t: &Terrain,
-    heights: &[u32],
+    _heights: &[u32],
     workings: &crate::workings::Workings,
 ) -> Vec<[u32; 2]> {
     let path = workings.working_route();
@@ -103,9 +99,8 @@ pub fn underground(
     for p in path {
         push(&mut result, p);
     }
-    result.extend(route(t, heights, [SHAFT, PIT - 1], true));
     result.dedup();
-    if result.last() != Some(&[16, 0]) {
+    if result.last() != Some(&[SHAFT, 0]) {
         return vec![];
     }
     result

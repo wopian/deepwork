@@ -447,14 +447,12 @@ mod lifecycle_tests {
             path: directory.join("mine.json"),
             channel: Mutex::new(None),
         };
-        state.game.lock().unwrap().cooldowns = [100; 4];
         transition_background(&state, true, 100).unwrap();
         transition_background(&state, true, 110).unwrap();
         assert_eq!(state.game.lock().unwrap().last_saved, 100);
         let resumed = transition_background(&state, false, 120).unwrap();
         assert_eq!(resumed.game.offline.as_ref().unwrap().effective, 10);
         assert_eq!(resumed.game.ticks, 200);
-        assert_eq!(resumed.game.cooldowns, [100; 4]);
         let repeated = transition_background(&state, false, 140).unwrap();
         assert_eq!(repeated.game.ticks, 200);
         let recovered = recover(&state.path).unwrap().unwrap();

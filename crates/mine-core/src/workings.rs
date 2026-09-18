@@ -804,13 +804,6 @@ fn cut_cost(
             let feet = interpolate(a, b, x);
             (feet.saturating_sub(7), feet)
         };
-        if x >= crate::geometry::PIT_MARGIN
-            && x < PIT_ROWS + crate::geometry::PIT_MARGIN
-            && last >= x - (crate::geometry::PIT_MARGIN - 1)
-            && first.max(x - (crate::geometry::PIT_MARGIN - 1)) < PIT_ROWS
-        {
-            return None;
-        }
         if !lift
             && floors.get(&x).is_some_and(|ys| {
                 ys.range(first.saturating_sub(settings().pillar_width)..last)
@@ -859,6 +852,7 @@ pub fn cut_cells(a: Point, b: Point, lift: bool) -> Vec<Point> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    const PIT_ROWS: u32 = 192;
     #[test]
     fn column_search_cost_matches_pixel_cuts_across_chunks_ramps_and_supports() {
         for pattern in 0..3 {
@@ -926,6 +920,7 @@ mod tests {
     fn planning_is_knowledge_limited_and_resumes_identically() {
         let mut a = Workings::default();
         a.initialise();
+        a.passages[0].feet = [256, 191];
         a.signals.push(Signal {
             centre: [300, 205],
             radius: 23,
@@ -1015,6 +1010,7 @@ mod tests {
         let mut t = Terrain::from_columns(&vec![PIT_ROWS; WIDTH as usize]);
         let mut w = Workings::default();
         w.initialise();
+        w.passages[0].feet = [256, 191];
         for p in cut_cells([256, 191], [256, 223], true) {
             t.excavate(p[0], p[1]);
         }
@@ -1049,6 +1045,7 @@ mod tests {
         let mut t = Terrain::from_columns(&vec![PIT_ROWS; WIDTH as usize]);
         let mut w = Workings::default();
         w.initialise();
+        w.passages[0].feet = [256, 191];
         for i in 1..=80 {
             let feet = [256, 191 + i * 16];
             let parent = w.passages.len() - 1;
@@ -1085,6 +1082,7 @@ mod tests {
         let mut terrain = Terrain::from_columns(&vec![PIT_ROWS; WIDTH as usize]);
         let mut w = Workings::default();
         w.initialise();
+        w.passages[0].feet = [256, 191];
         for p in cut_cells([256, 191], [256, 223], true) {
             terrain.excavate(p[0], p[1]);
         }
@@ -1122,6 +1120,7 @@ mod tests {
         let mut terrain = Terrain::from_columns(&vec![PIT_ROWS; WIDTH as usize]);
         let mut w = Workings::default();
         w.initialise();
+        w.passages[0].feet = [256, 191];
         w.signals.push(Signal {
             centre: [4, 192],
             radius: 23,
@@ -1189,86 +1188,26 @@ mod development_tests {
         ] {
             g.levels.insert(id.into(), n);
         }
-        g.heights = (0..WIDTH)
-            .map(|x| {
-                if x < 16 {
-                    0
-                } else {
-                    (x - 15).min(PIT_ROWS).min(((WIDTH - 17 - x) / 24 + 1) * 24)
-                }
-            })
-            .collect();
-        g.terrain = Terrain::from_columns(&g.heights);
-        g.excavated = g.heights.iter().map(|h| *h as u64).sum();
-        g.disposed_mass = g.excavated * crate::geometry::CELL_MASS;
         g
     }
     #[test]
-    fn pit_edge_branch_can_resume_development_after_quartz_extraction() {
-        // Campaign seed 46, site 11: a shallow quartz drive ended beside the pit ramp.
+    fn shallow_vein_branch_keeps_developing_from_surface() {
         let mut g = fixture(79246);
-        g.profile = 1;
-        g.workers = 12;
-        g.housing = 12;
-        g.levels.clear();
-        for (id, level) in [
-            ("shaft", 1),
-            ("drill", 2),
-            ("conveyor", 1),
-            ("furnace", 1),
-            ("steelworks", 1),
-            ("power", 1),
-            ("reclaimer", 1),
-        ] {
-            g.levels.insert(id.into(), level);
-        }
-        g.workings.initialise();
-        for feet in [[252, 192], [236, 192], [220, 192], [208, 192]] {
-            let parent = g.workings.passages.len() - 1;
-            for p in cut_cells(g.workings.passages[parent].feet, feet, false) {
-                if g.terrain.excavate(p[0], p[1]) {
-                    g.excavated += 1;
-                    g.disposed_mass += crate::geometry::CELL_MASS;
-                    g.heights[p[0] as usize] = g.heights[p[0] as usize].max(p[1] + 1);
-                }
-            }
-            g.workings.passages.push(Passage {
-                feet,
-                parent,
-                lift: false,
-                supported: true,
-                column: true,
-            });
-        }
-        g.workings.active = 4;
-        g.workings.exhausted.extend([98511, 98512, 106704]);
-        for by in 0..13 {
-            for bx in 0..16 {
-                g.workings
-                    .surveyed
-                    .insert(key([bx * 32 + 16, by * 32 + 16]));
-            }
-        }
         let cat = crate::materials();
-        for k in g.terrain.frontier.iter().copied().collect::<Vec<_>>() {
-            let p = point(k);
-            g.terrain.reveal(g.seed, g.profile, p[0], p[1], 0, &cat);
+        for _ in 0..60 {
+            g.second(&cat, true);
         }
-        assert_eq!(g.depth(), 48);
         let mined = g.excavated;
         for _ in 0..120 {
             g.second(&cat, true);
         }
-        assert!(
-            g.excavated > mined,
-            "resume excavation beyond the stalled drive"
-        );
+        assert!(g.excavated > mined);
         assert!(g.workings.passages.len() > 5);
         assert!(!crate::navigation::underground(&g.terrain, &g.heights, &g.workings).is_empty());
         g.validate().unwrap();
     }
     #[test]
-    fn thirty_seeds_preserve_ramp_and_develop_nonperiodic_workings() {
+    fn thirty_seeds_develop_connected_nonperiodic_workings() {
         let cat = crate::materials();
         for seed in 42..72 {
             let mut g = fixture(seed);
@@ -1289,12 +1228,6 @@ mod development_tests {
                 .passages
                 .iter()
                 .any(|n| n.feet[1] % 96 != 7 && n.feet[0] != WIDTH / 2));
-            for x in 16..PIT_ROWS + 15 {
-                assert!(
-                    !g.terrain.contains(x, x - 15),
-                    "ramp floor seed {seed}, x {x}"
-                );
-            }
             assert!(g.validate().is_ok(), "seed {seed}: {:?}", g.validate());
         }
     }
@@ -1304,7 +1237,7 @@ mod development_tests {
         let mut a = fixture(49);
         a.levels.remove("supports");
         a.workings.initialise();
-        for i in 1..=63 {
+        for i in 1..=75 {
             let feet = [WIDTH / 2, PIT_ROWS - 1 + 16 * i];
             let parent = a.workings.passages.len() - 1;
             for p in cut_cells(a.workings.passages[parent].feet, feet, true) {
@@ -1319,7 +1252,7 @@ mod development_tests {
             });
         }
         a.heights[WIDTH as usize / 2] = 1200;
-        a.workings.active = 63;
+        a.workings.active = 75;
         a.workings
             .survey(&mut a.terrain, a.seed, a.profile, &cat, true, false);
         a.workings

@@ -83,7 +83,7 @@ fn pinned_feeds(g: &Game) -> Vec<usize> {
     feeds.into_iter().take(3).collect()
 }
 
-fn strategy(g: &mut Game, style: &str, attentive: bool) {
+fn strategy(g: &mut Game, style: &str, _attentive: bool) {
     if g.workers == 3 {
         act(g, "buy", "worker", 0);
     }
@@ -113,11 +113,6 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
                     .max(g.reserve.get(&c.product).copied().unwrap_or(0))
         {
             act(g, "contract", "", i as u64);
-        }
-    }
-    if attentive {
-        for i in 0..3 {
-            act(g, "ability", "", i);
         }
     }
     let branch = match style {

@@ -12,7 +12,7 @@ pub use geometry::WIDTH;
 use geometry::{CELL_MASS, UNITS};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-pub const VERSION: u32 = 7;
+pub const VERSION: u32 = 8;
 /// Deterministic fractional throughput without storing idle production credit.
 /// `rate` is thousandths of one work unit per tick; no multiplication by full age.
 fn work_budget(rate: u64, tick: u64) -> u64 {
@@ -212,8 +212,6 @@ pub struct Game {
     #[serde(skip)]
     pub retirement_quote: Option<u64>,
     pub records: Vec<Record>,
-    pub cooldowns: [u32; 4],
-    pub boosts: [u32; 3],
     pub last_saved: u64,
     pub last_sequence: u64,
     pub stages: Vec<Stage>,
@@ -315,7 +313,7 @@ impl Game {
             levels: BTreeMap::new(),
             research: 0,
             ranks: BTreeMap::new(),
-            policy: "bulk".into(),
+            policy: "vein".into(),
             specialisation: None,
             priorities: vec![],
             reserve: BTreeMap::new(),
@@ -371,8 +369,6 @@ impl Game {
                 },
             ],
             records: vec![],
-            cooldowns: [0; 4],
-            boosts: [0; 3],
             last_saved: 0,
             last_sequence: 0,
             stages: vec![],
@@ -479,18 +475,13 @@ impl Game {
             _ => self.level("trace") > 0,
         }
     }
-    fn power_factor(&self, offline: bool) -> f64 {
+    fn power_factor(&self, _offline: bool) -> f64 {
         let p = pacing::get();
         let industry = (p.base_power
             + u32::from(self.level("furnace") > 0) * p.furnace_demand
             + p.chemical_demand * self.level("chemical")
             + p.electrolysis_demand * self.level("electrolytic")
-            + p.trace_demand * self.level("trace")) as f64
-            * if !offline && self.boosts[2] > 0 {
-                1.5
-            } else {
-                1.
-            };
+            + p.trace_demand * self.level("trace")) as f64;
         let logistics: u32 = self.transport.segments.iter().map(|s| s.demand).sum();
         ((p.base_power + p.power_per_level * self.level("power")) as f64
             / (industry + logistics as f64))
@@ -617,8 +608,8 @@ impl Game {
         let n = self.level(k);
         (1. + 0.12 * n as f64) * 1.5f64.powi((n / 10) as i32)
     }
-    fn dig_rate(&self, offline: bool) -> u64 {
-        (((self.crew.diggers as f64 * self.throughput("drill")
+    fn dig_rate(&self, _offline: bool) -> u64 {
+        ((self.crew.diggers as f64 * self.throughput("drill")
             / sites()[self.profile].hardness
             / if self.challenge == "hard_rock" {
                 1.5
@@ -632,11 +623,6 @@ impl Game {
                 _ => 1.,
             }
             * (1. + 0.05 * self.ranks.get("excavation").copied().unwrap_or(0) as f64))
-            * (if !offline && self.boosts[0] > 0 {
-                1.5
-            } else {
-                1.
-            }))
             * UNITS as f64
             * pacing::get().worker_rate) as u64
     }
@@ -644,65 +630,14 @@ impl Game {
         &self.haul_path
     }
     fn next_frontier(&self, _cat: &[Material]) -> Option<u32> {
-        let depth_limit = if self.level("shaft") == 0 {
-            48
-        } else {
-            300 * (1 + self.level("shaft"))
-        };
-        let pit_complete = self
-            .terrain
-            .contains(geometry::PIT_LAST_X, geometry::PIT_ROWS - 1);
-        if pit_complete && self.level("shaft") > 0 {
-            return self.workings.next_cell(&self.terrain);
-        }
-        let mut candidates = self.terrain.access_frontier.iter().filter_map(|&key| {
-            if !self.terrain.frontier.contains(&key) {
-                return None;
-            }
-            let (x, y) = (key % WIDTH, key / WIDTH);
-            if geometry::depth(y) >= depth_limit || y >= geometry::PIT_ROWS {
-                return None;
-            }
-            let surface = true;
-            let margin = 16 + (y / 24) * 24;
-            if x < 16 + y || x >= WIDTH - margin {
-                return None;
-            }
-            // Bench completion outranks depth preference. Unknown rock never informs ore targeting.
-            let score = if surface {
-                y as i64 * 1024 + x as i64
-            } else {
-                match self.policy.as_str() {
-                    "depth" => -(y as i64) * 8 + x.abs_diff(WIDTH / 2) as i64,
-                    "vein" => {
-                        y as i64
-                            - if self
-                                .terrain
-                                .known_material(x, y)
-                                .is_some_and(|id| self.priorities.contains(&id))
-                            {
-                                160
-                            } else {
-                                0
-                            }
-                    }
-                    _ => y as i64,
-                }
-            };
-            Some((score, key))
-        });
-        if !pit_complete || self.policy == "bulk" {
-            candidates.next().map(|(_, key)| key)
-        } else {
-            candidates.min().map(|(_, key)| key)
-        }
+        self.workings.next_cell(&self.terrain)
     }
     /// No input, pending arrival, eligible recipe or reachable excavation event can fire.
     fn quiescent(&self, cat: &[Material]) -> bool {
         self.quiet_pipeline(cat) && self.next_frontier(cat).is_none() && self.transport.mass() == 0
     }
     fn quiet_pipeline(&self, cat: &[Material]) -> bool {
-        if self.level("shaft") > 0 && self.workings.blocked_at.is_none() {
+        if self.workings.blocked_at.is_none() {
             return false;
         }
         if self.transport.mass() > 0
@@ -749,7 +684,7 @@ impl Game {
         })
     }
     fn stationary_pipeline(&self, cat: &[Material]) -> bool {
-        if self.level("shaft") > 0 && self.workings.blocked_at.is_none() {
+        if self.workings.blocked_at.is_none() {
             return false;
         }
         self.ticks % 20 == 0
@@ -828,19 +763,7 @@ impl Game {
             self.flow_window = [0; 5];
         }
         let sold_before = self.sold_mass;
-        if !offline && self.ticks % 20 == 0 {
-            for c in &mut self.cooldowns {
-                *c = c.saturating_sub(1)
-            }
-            for b in &mut self.boosts {
-                *b = b.saturating_sub(1)
-            }
-        }
         self.crew = logistics::Crew::prioritise(self.workers, &self.levels, &self.crew_priority);
-        if self.level("shaft") > 0
-            && self
-                .terrain
-                .contains(geometry::PIT_LAST_X, geometry::PIT_ROWS - 1)
         {
             self.workings.initialise();
             self.workings.survey_work += 1 + self.crew.prospectors as u64 * 3;
@@ -901,11 +824,7 @@ impl Game {
         self.dig_remainder = work % 20;
         let digs = (self.dig_progress / 1000) as u32;
         self.dig_progress %= 1000;
-        let depth_limit = if self.level("shaft") == 0 {
-            48
-        } else {
-            300 * (1 + self.level("shaft"))
-        };
+        let depth_limit = 300 * (1 + self.level("shaft"));
         for _ in 0..digs.min(12800) {
             if ore_total + (mined + 1) * CELL_MASS > cap {
                 break;
@@ -931,10 +850,9 @@ impl Game {
                 self.site_discoveries += 1;
             }
         }
-        let (transport, _) = logistics::mode(&self.levels);
 
         if let Some(cell) = self.removed.last() {
-            let origin = if cell.y >= geometry::PIT_ROWS && !self.workings.passages.is_empty() {
+            let origin = if !self.workings.passages.is_empty() {
                 self.workings.passages[self
                     .workings
                     .section
@@ -949,17 +867,16 @@ impl Game {
             if self.haul_route_key != Some(key) {
                 self.haul_route_key = Some(key);
                 self.haul_legs.clear();
-                self.haul_path =
-                    if origin[1] >= geometry::PIT_ROWS && !self.workings.passages.is_empty() {
-                        navigation::underground(&self.terrain, &self.heights, &self.workings)
-                    } else {
-                        navigation::route(
-                            &self.terrain,
-                            &self.heights,
-                            origin,
-                            self.level("shaft") > 0,
-                        )
-                    };
+                self.haul_path = if !self.workings.passages.is_empty() {
+                    navigation::underground(&self.terrain, &self.heights, &self.workings)
+                } else {
+                    navigation::route(
+                        &self.terrain,
+                        &self.heights,
+                        origin,
+                        self.level("shaft") > 0,
+                    )
+                };
             }
         }
         let terrain_factor = if self.challenge == "long_haul" {
@@ -980,11 +897,6 @@ impl Game {
         let haul_rate = (UNITS as f64
             * pacing::get().haul_rate
             * self.crew.haulers as f64
-            * if !offline && self.boosts[0] > 0 && matches!(transport, "carrying" | "wheelbarrow") {
-                1.5
-            } else {
-                1.
-            }
             * self.throughput("conveyor")
             * (1. + 0.05 * self.ranks.get("logistics").copied().unwrap_or(0) as f64)
             * (if self.level("conveyor") > 0 { 3. } else { 1. })) as u64;
@@ -1007,7 +919,7 @@ impl Game {
             cap,
             &self.priorities,
             self.cargo_policy == "preferred",
-            !offline && self.boosts[1] > 0,
+            false,
             power,
         );
         let remaining = 0;
@@ -1062,12 +974,8 @@ impl Game {
             * (pacing::get().refining_rate * UNITS as f64)
             * self.throughput("furnace")
             * (1. + 0.15 * self.crew.operators.saturating_sub(1) as f64)
-            * (1. + 0.05 * self.ranks.get("metallurgy").copied().unwrap_or(0) as f64)
-            * (if !offline && self.boosts[2] > 0 {
-                1.5
-            } else {
-                1.
-            })) as u64;
+            * (1. + 0.05 * self.ranks.get("metallurgy").copied().unwrap_or(0) as f64))
+            as u64;
         let process_rate = process_rate / 20;
         let mut left = process_rate;
         let mut feed_ids: Vec<_> = self
@@ -1799,50 +1707,7 @@ impl Game {
                 self.megaproject = true;
                 self.research += 100;
             }
-            "ability" => {
-                if self.site == 1 && self.depth() < pacing::get().tactics_depth {
-                    return Err(format!(
-                        "Reach {} metres to unlock tactics",
-                        pacing::get().tactics_depth
-                    ));
-                }
-                let i = a.value as usize;
-                if i > 3 {
-                    return Err("Invalid ability".into());
-                }
-                if self.cooldowns[i] > 0 {
-                    return Err("Ability cooling down".into());
-                }
-                self.cooldowns[i] = if i == 3 { 300 } else { 180 };
-                if i < 3 {
-                    self.boosts[i] = if i == 1 { 20 } else { 30 }
-                } else {
-                    self.policy = "vein".into();
-                    let cat = materials();
-                    let (x, y) = self
-                        .removed
-                        .last()
-                        .map(|c| (c.x, c.y))
-                        .unwrap_or((WIDTH / 2, 0));
-                    let found = if self.workings.passages.is_empty() {
-                        self.terrain.reveal(self.seed, self.profile, x, y, 8, &cat)
-                    } else {
-                        self.workings.survey(
-                            &mut self.terrain,
-                            self.seed,
-                            self.profile,
-                            &cat,
-                            true,
-                            true,
-                        )
-                    };
-                    let id = found.into_iter().find(|id| *id > 1).unwrap_or(1);
-                    if self.discoveries.insert(id) {
-                        self.site_discoveries += 1;
-                    }
-                    self.priorities = vec![id]
-                }
-            }
+
             "contract" => {
                 let index = a.value as usize;
                 let c = self.contracts.get(index).ok_or("Unknown contract")?.clone();
@@ -2546,6 +2411,12 @@ mod throughput_tests {
     #[test]
     fn full_haul_buffer_reports_no_transfer() {
         let mut g = Game::default();
+        g.workings.initialise();
+        g.removed.push(Cell {
+            x: 256,
+            y: 1,
+            material: 0,
+        });
         g.hauled.insert(0, 20000 * 64);
         g.ore.insert(0, 1000 * 64);
         g.transport.stations[0].cargo.insert(0, 4 * UNITS);
@@ -2891,25 +2762,21 @@ mod offline_event_tests {
 }
 
 #[cfg(test)]
-mod pit_access_tests {
+mod shaft_access_tests {
     use super::*;
     #[test]
-    fn depth_policy_completes_bench_before_starting_shaft() {
+    fn basic_supported_access_requires_no_iron_or_shaft_purchase() {
         let mut g = Game::default();
-        g.policy = "depth".into();
-        g.levels.insert("shaft".into(), 1);
         let cat = materials();
-        for y in 0..192 {
-            for x in 16 + y..WIDTH - (16 + (y / 24) * 24) {
-                if y == 191 && x >= 254 {
-                    break;
-                }
-                g.terrain.excavate(x, y);
-                g.heights[x as usize] = y + 1;
-            }
+        for _ in 0..30 {
+            g.second(&cat, false);
         }
-        let next = g.next_frontier(&cat).unwrap();
-        assert_eq!([next % WIDTH, next / WIDTH], [254, 191]);
+        assert_eq!(g.level("shaft"), 0);
+        assert!(g.excavated > 0);
+        assert!(g.sold_mass > 0);
+        assert!(g.workings.passages.len() > 1);
+        assert_eq!(g.workings.passages[0].feet, [256, 0]);
+        assert!(!navigation::underground(&g.terrain, &g.heights, &g.workings).is_empty());
     }
 }
 
@@ -3188,64 +3055,26 @@ mod tactics_unlock_tests {
         assert_eq!(g.workings.revision, revision + 1);
     }
     #[test]
-    fn tactics_follow_depth_and_remain_available_on_later_sites() {
+    fn policies_are_available_from_start_and_removed_abilities_are_rejected() {
         let mut g = Game::default();
-        for (kind, target) in [("policy", "vein"), ("ability", "")] {
-            assert!(g
-                .action(Action {
-                    sequence: g.last_sequence + 1,
-                    kind: kind.into(),
-                    target: target.into(),
-                    value: 0
-                })
-                .is_err());
-        }
-        assert_eq!(g.policy, "bulk");
-        assert_eq!(g.boosts, [0; 3]);
-        g.heights[256] = pacing::get().tactics_depth * geometry::CELLS_PER_METRE;
         g.action(Action {
-            sequence: g.last_sequence + 1,
-            kind: "policy".into(),
-            target: "vein".into(),
-            value: 0,
-        })
-        .unwrap();
-        g.action(Action {
-            sequence: g.last_sequence + 1,
-            kind: "ability".into(),
-            target: String::new(),
-            value: 0,
-        })
-        .unwrap();
-        assert_eq!(g.boosts[0], 30);
-        let mut next = Game::new(100, 2);
-        next.action(Action {
             sequence: 1,
             kind: "policy".into(),
             target: "depth".into(),
             value: 0,
         })
         .unwrap();
-    }
-}
-
-#[cfg(test)]
-mod precision_budget_tests {
-    use super::*;
-    #[test]
-    fn headquarters_controls_fit_finite_copper_reserve() {
-        let mut g = Game::default();
-        g.levels.insert("manufacturing".into(), 1);
-        g.enabled_recipes.insert("controls".into());
-        g.products.insert("silicon".into(), 10 * UNITS);
-        g.products.insert("copper".into(), UNITS);
-        g.products.insert("gallium".into(), UNITS / 20);
-        g.reserve.insert("silicon".into(), 10 * UNITS);
-        g.reserve.insert("precision_controls".into(), 10 * UNITS);
-        for _ in 0..60 {
-            g.second(&materials(), false);
-        }
-        assert_eq!(g.products["precision_controls"], 10 * UNITS);
-        assert!(g.products["copper"] > 0);
+        assert_eq!(g.policy, "depth");
+        assert!(g
+            .action(Action {
+                sequence: 2,
+                kind: "ability".into(),
+                target: String::new(),
+                value: 0
+            })
+            .is_err());
+        let save = serde_json::to_value(&g).unwrap();
+        assert!(save.get("boosts").is_none());
+        assert!(save.get("cooldowns").is_none());
     }
 }

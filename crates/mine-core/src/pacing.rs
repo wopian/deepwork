@@ -64,7 +64,6 @@ pub fn validate() -> Result<(), String> {
         ]
         .iter()
         .any(|&v| v == 0 || v > 100)
-        || p.tactics_depth == 0
         || p.tactics_depth >= 48
         || !(100..=300).contains(&p.specialisation_depth)
         || p.headquarters_starting.len() != 5
