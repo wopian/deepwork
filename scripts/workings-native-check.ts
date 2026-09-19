@@ -230,8 +230,37 @@ try {
     path: join(out, "underground-desktop.png"),
     fullPage: true,
   });
+  const cameraSample = () =>
+    page.locator("[data-fps]").evaluate((el) => {
+      const d = (el as HTMLElement).dataset;
+      const width = Number(d.cameraWidth),
+        height = Number(d.cameraHeight);
+      const scale = (width / 1100) * Number(d.cameraZoom);
+      return {
+        follow: d.cameraFollow === "true",
+        scale,
+        centre: [
+          (width / 2 - Number(d.cameraX)) / scale,
+          (height / 2 - Number(d.cameraY)) / scale,
+        ],
+      };
+    });
+  const landscapeCamera = await cameraSample();
   await page.setViewportSize({ width: 430, height: 932 });
   await page.waitForTimeout(1500);
+  const portraitCamera = await cameraSample();
+  const rotationDrift = Math.hypot(
+    ...(portraitCamera.centre.map(
+      (value, i) => value - landscapeCamera.centre[i]!,
+    ) as [number, number]),
+  );
+  if (
+    !landscapeCamera.follow &&
+    (!Number.isFinite(rotationDrift) || rotationDrift > 0.1)
+  )
+    throw new Error(
+      `Portrait rotation lost the inspected world point: ${rotationDrift}`,
+    );
   const touch = await context.newCDPSession(page);
   await touch.send("Emulation.setTouchEmulationEnabled", { enabled: true });
   const overlay = page.getByRole("button", {
@@ -300,6 +329,7 @@ try {
         fixtureWorkers: fixtureState.workers,
         gameplayCommands: g.last_sequence - measurementStartSequence,
         touchSurvey: true,
+        rotation: { landscapeCamera, portraitCamera, drift: rotationDrift },
         passages: g.workings.passages.length,
         scenarioChanges: [
           "policy",

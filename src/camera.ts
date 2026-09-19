@@ -1,5 +1,25 @@
 export type Camera = { zoom: number; x: number; y: number };
 export type ScreenPoint = { x: number; y: number };
+export type Viewport = { width: number; height: number };
+
+/** Rotation keeps the inspected world point centred and its pixel scale stable. */
+export function resizeViewport(
+  camera: Camera,
+  before: Viewport,
+  after: Viewport,
+): Camera {
+  if (before.width <= 0 || after.width <= 0) return camera;
+  const zoom = Math.max(
+    0.15,
+    Math.min(24, (camera.zoom * before.width) / after.width),
+  );
+  const ratio = (after.width * zoom) / (before.width * camera.zoom);
+  return {
+    zoom,
+    x: after.width / 2 - (before.width / 2 - camera.x) * ratio,
+    y: after.height / 2 - (before.height / 2 - camera.y) * ratio,
+  };
+}
 
 /** Preserve the world point under the gesture while scaling and translating. */
 export function zoomAt(

@@ -10,7 +10,7 @@ import { TerrainView } from "./terrain-view";
 import { CELL_PIXEL, CELLS_PER_METRE, RESOURCE_UNIT } from "./geometry";
 import { routePosition, cargoPosition } from "./routes";
 import { preferences, productionAudio } from "./preferences";
-import { gesture, zoomAt, type ScreenPoint } from "./camera";
+import { gesture, zoomAt, resizeViewport, type ScreenPoint } from "./camera";
 const emit = defineEmits<{ inspect: [panel: string] }>();
 const host = ref<HTMLDivElement>();
 let app: Application | undefined;
@@ -64,6 +64,8 @@ function draw() {
     host.value.dataset.cameraX = String(offsetX);
     host.value.dataset.cameraY = String(offsetY);
     host.value.dataset.cameraFollow = String(follow || followCrew);
+    host.value.dataset.cameraWidth = String(app.screen.width);
+    host.value.dataset.cameraHeight = String(app.screen.height);
   }
   const groundLeft = Math.floor(-offsetX / scale) - 1100;
   const W = Math.ceil(app.screen.width / scale) + 2200;
@@ -367,8 +369,29 @@ onMounted(async () => {
   }
   draw();
   stopWatch = watch(state, draw);
+  let viewport = { width: app.screen.width, height: app.screen.height };
   app.ticker.add((ticker) => {
     if (!app) return;
+    if (
+      viewport.width !== app.screen.width ||
+      viewport.height !== app.screen.height
+    ) {
+      const nextViewport = {
+        width: app.screen.width,
+        height: app.screen.height,
+      };
+      const next = resizeViewport(
+        { zoom, x: offsetX, y: offsetY },
+        viewport,
+        nextViewport,
+      );
+      zoom = next.zoom;
+      offsetX = next.x;
+      offsetY = next.y;
+      viewport = nextViewport;
+      pointers.clear();
+      press = null;
+    }
     const frameNow = performance.now();
     if (lastFrameTime > 0) {
       frameIntervals[frameCursor++ % 120] = frameNow - lastFrameTime;
