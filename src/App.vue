@@ -547,7 +547,7 @@ onMounted(start);
                   ></span
                 ><button
                   v-for="[id, label] in [
-                    ['bulk', 'Bulk excavation'],
+                    ['bulk', 'Broad extraction'],
                     ['vein', 'Follow veins'],
                     ['depth', 'Go deeper'],
                   ]"

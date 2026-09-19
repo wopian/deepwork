@@ -1,4 +1,4 @@
-//! Floor routes through the pit ramp and lift-connected underground portals.
+//! Floor routes through supported drives and lift-connected underground portals.
 use crate::{geometry::WIDTH, terrain::Terrain};
 const PIT: i64 = crate::geometry::PIT_ROWS;
 const SHAFT: i64 = WIDTH / 2;
