@@ -2103,7 +2103,7 @@ impl Game {
             || self
                 .heights
                 .iter()
-                .any(|(x, h)| !geometry::valid_cell(*x, h.saturating_sub(1).max(0)))
+                .any(|(x, h)| *h < 0 || !geometry::valid_cell(*x, h.saturating_sub(1).max(0)))
             || self.dig_remainder >= 20
             || self.dig_progress >= 1000
             || self.workers < 3

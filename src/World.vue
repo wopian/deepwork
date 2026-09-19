@@ -35,6 +35,7 @@ let zoom = 1;
 let offsetY = 0;
 const pointers = new Map<number, ScreenPoint>();
 const inspected = ref<number | null>(null);
+const unknownSignal = ref(false);
 let inspectedCell: [number, number] | null = null;
 let press: ScreenPoint | null = null;
 let moved = false;
@@ -190,6 +191,7 @@ function draw() {
     last,
     (-offsetX / scale - 235) / CELL_PIXEL - 64,
     ((app.screen.width - offsetX) / scale - 235) / CELL_PIXEL + 64,
+    g?.selected_vein?.masks,
   );
   // Fixed district slots grow upward, keeping routes and touch camera targets stable.
   const levels = g?.levels ?? {
@@ -399,6 +401,7 @@ onMounted(async () => {
       if (lastCampaign !== g.campaign_id) {
         lastCampaign = g.campaign_id;
         inspected.value = null;
+        unknownSignal.value = false;
         inspectedCell = null;
         pointers.clear();
         press = null;
@@ -651,6 +654,15 @@ function inspectAt(p: ScreenPoint, select = false) {
     Math.floor(((p.y - offsetY) / scale - 208) / CELL_PIXEL),
   ];
   inspected.value = inspectOre(state.value.terrain, ...inspectedCell);
+  unknownSignal.value =
+    inspected.value === null &&
+    state.value.workings.signals.some(
+      (s) =>
+        Math.hypot(
+          s.centre[0] - inspectedCell![0],
+          s.centre[1] - inspectedCell![1],
+        ) <= s.radius,
+    );
   const wx = (p.x - offsetX) / scale,
     wy = (p.y - offsetY) / scale;
   if (select && wy >= 100 && wy < 208) {
@@ -770,6 +782,10 @@ function fitWorkings() {
       <span>{{
         state?.workings?.status || "SCROLL TO ZOOM · DRAG TO EXPLORE"
       }}</span>
+    </div>
+    <div v-if="unknownSignal" class="ore-inspector" role="status">
+      <strong>Unknown mineral signal</strong
+      ><span>Survey crew needs more samples to identify this deposit.</span>
     </div>
     <div v-if="inspected !== null" class="ore-inspector" role="status">
       <strong>{{ materials[inspected]?.name }}</strong>

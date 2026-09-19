@@ -1430,3 +1430,21 @@ nav button {
   border-color: #e5a34d;
   color: #e5a34d;
 }
+.mine-first .opening-guide {
+  bottom: 100px;
+}
+.selected-order {
+  padding: 16px;
+  border-bottom: 1px solid #e5a34d;
+}
+.pin-upgrade,
+.mine-first .world-tools button,
+.mine-first .world-districts button {
+  font-size: 16px;
+}
+@media (max-height: 600px) {
+  .mine-first .opening-guide p,
+  .mine-first .opening-guide span {
+    display: none;
+  }
+}

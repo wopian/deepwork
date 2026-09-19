@@ -136,6 +136,7 @@ try {
   ]) {
     await page.getByRole("button", { name, exact: true }).click();
   }
+  await page.getByRole("button", { name: "Logistics", exact: true }).click();
   await page.getByLabel("Cargo scheduling").selectOption("preferred");
   await page.waitForFunction(async () => {
     const data = await (window as any).__TAURI_INTERNALS__.invoke(
@@ -143,6 +144,7 @@ try {
     );
     return JSON.parse(data).cargo_policy === "preferred";
   });
+  await page.getByRole("button", { name: "Close panel", exact: true }).click();
   // Exercise the actual file input/download path, not only IPC commands.
   await page.getByRole("button", { name: "Records", exact: true }).click();
   const downloadEvent = page.waitForEvent("download", { timeout: 15000 });
@@ -332,7 +334,7 @@ try {
   )
     throw new Error("Portrait page overflows viewport");
   const transportBefore = JSON.parse(await invoke("export_save"));
-  await tapTarget(page.locator(".transport-panel summary"));
+  await tap("Logistics");
   await page.locator(".transport-cargo").first().waitFor({ state: "visible" });
   const loadingBay = page.locator(".transport-station").first();
   await tapTarget(

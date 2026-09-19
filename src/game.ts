@@ -103,6 +103,11 @@ export interface Game {
       support_work: number;
     } | null;
   };
+  selected_vein: {
+    anchor: [number, number];
+    known_cells: number;
+    masks: Record<string, number[]>;
+  } | null;
   pinned_inputs: Record<string, number>;
   processing: {
     id: number;

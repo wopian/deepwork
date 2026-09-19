@@ -21,3 +21,18 @@ test("terrain textures preserve RGB channels and hide unrevealed geology", () =>
     128, 96, 68, 255,
   ]);
 });
+
+test("priority outlines cannot reveal unknown or excavated minerals", () => {
+  const selected = [1];
+  const hidden = Array(4096).fill(255);
+  expect([
+    ...terrainPixels(undefined, hidden, 1, selected).slice(0, 4),
+  ]).toEqual([128, 96, 68, 255]);
+  hidden[0] = 3;
+  expect([
+    ...terrainPixels(undefined, hidden, 1, selected).slice(0, 4),
+  ]).toEqual([232, 223, 200, 255]);
+  expect([...terrainPixels([1], hidden, 1, selected).slice(0, 4)]).toEqual([
+    16, 24, 32, 255,
+  ]);
+});

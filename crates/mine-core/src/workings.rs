@@ -138,7 +138,7 @@ pub struct Workings {
     #[serde(skip)]
     node_index: BTreeMap<i64, usize>,
     #[serde(skip)]
-    node_tiles: BTreeMap<(i64,i64), Vec<usize>>,
+    node_tiles: BTreeMap<(i64, i64), Vec<usize>>,
     #[serde(skip)]
     indexed: usize,
 }
@@ -147,7 +147,36 @@ pub struct VeinSurvey {
     pub anchor: Point,
     pub stage: i64,
 }
+#[derive(Clone, Serialize)]
+pub struct VeinOrderView {
+    pub anchor: Point,
+    pub known_cells: usize,
+    pub masks: BTreeMap<i64, Vec<u8>>,
+}
 impl Workings {
+    pub fn order_view(&self, terrain: &Terrain) -> Option<VeinOrderView> {
+        let anchor = self.target?;
+        let mut masks = BTreeMap::new();
+        let mut known_cells = 0;
+        for &p in &self.target_cells {
+            if terrain.contains(p[0], p[1])
+                || !terrain.known_material(p[0], p[1]).is_some_and(|id| id > 1)
+            {
+                continue;
+            }
+            let bit = crate::geometry::bit_index(p[0], p[1]);
+            masks
+                .entry(crate::geometry::chunk_id(p[0], p[1]))
+                .or_insert_with(|| vec![0; 512])[bit / 8] |= 1 << (bit % 8);
+            known_cells += 1;
+        }
+        Some(VeinOrderView {
+            anchor,
+            known_cells,
+            masks,
+        })
+    }
+
     pub fn prepare_deposit_order(&mut self, seed: u64, profile: usize, cat: &[crate::Material]) {
         if self.target_cells.is_empty() {
             if let Some(anchor) = self.target {
@@ -227,7 +256,10 @@ impl Workings {
         while self.indexed < self.passages.len() {
             let n = &self.passages[self.indexed];
             self.node_index.insert(key(n.feet), self.indexed);
-            self.node_tiles.entry((n.feet[0].div_euclid(64),n.feet[1]/64)).or_default().push(self.indexed);
+            self.node_tiles
+                .entry((n.feet[0].div_euclid(64), n.feet[1] / 64))
+                .or_default()
+                .push(self.indexed);
             if !n.lift {
                 self.floor_index
                     .entry(n.feet[0])
@@ -278,7 +310,8 @@ impl Workings {
                 (at[0].saturating_sub(radius).div_euclid(32))..=((at[0] + radius).div_euclid(32))
             {
                 let centre = [bx * 32 + 16, by * 32 + 16];
-                if centre[1] < PIT_ROWS
+                if !valid_cell(centre[0], centre[1])
+                    || centre[1] < PIT_ROWS
                     || distance(at, centre) > radius
                     || !self.surveyed.insert(key(centre))
                 {
@@ -489,18 +522,29 @@ impl Workings {
                 if access_blocked {
                     // Reuse older surveyed workings when the next equipment gate stops
                     // access development. The derived spatial index bounds this lookup.
-                    let tx=p[0].div_euclid(64); let ty=p[1]/64;
-                    let mut best=i64::MAX;
+                    let tx = p[0].div_euclid(64);
+                    let ty = p[1] / 64;
+                    let mut best = i64::MAX;
                     for ring in 0_i64..=4 {
-                        for dy in -ring..=ring { for dx in -ring..=ring {
-                            if dx.abs().max(dy.abs())!=ring { continue; }
-                            let x=(tx+dx)*64; let y=(ty+dy)*64;
-                            let lower=distance(p,[p[0].clamp(x,x+63),p[1].clamp(y,y+63)]);
-                            if lower>=best || lower>256 { continue; }
-                            if let Some(nodes)=self.node_tiles.get(&(tx+dx,ty+dy)) {
-                                for &i in nodes { best=best.min(distance(self.passages[i].feet,p)); }
+                        for dy in -ring..=ring {
+                            for dx in -ring..=ring {
+                                if dx.abs().max(dy.abs()) != ring {
+                                    continue;
+                                }
+                                let x = (tx + dx) * 64;
+                                let y = (ty + dy) * 64;
+                                let lower =
+                                    distance(p, [p[0].clamp(x, x + 63), p[1].clamp(y, y + 63)]);
+                                if lower >= best || lower > 256 {
+                                    continue;
+                                }
+                                if let Some(nodes) = self.node_tiles.get(&(tx + dx, ty + dy)) {
+                                    for &i in nodes {
+                                        best = best.min(distance(self.passages[i].feet, p));
+                                    }
+                                }
                             }
-                        }}
+                        }
                     }
                     best
                 } else {
@@ -860,7 +904,9 @@ impl Workings {
             .is_some_and(|id| id.len() > 128)
             || self.veins.len() > 25000
             || self.veins.iter().any(|(id, v)| {
-                id.len() > 128 || !valid_cell(v.anchor[0], v.anchor[1]) || v.stage > 2
+                id.len() > 128
+                    || !valid_cell(v.anchor[0], v.anchor[1])
+                    || !(0..=2).contains(&v.stage)
             })
             || self.target.is_some_and(|p| !valid_cell(p[0], p[1]))
         {
@@ -896,7 +942,17 @@ impl Workings {
                     && valid_cell(s.to[0], s.to[1])
             })
             && self.search.as_ref().is_none_or(|s| {
-                s.costs.len() <= 32768
+                (0..=settings().search_limit + settings().search_budget).contains(&s.expanded)
+                    && valid_cell(s.origin[0], s.origin[1])
+                    && s.costs.keys().chain(s.previous.keys()).all(|k| {
+                        let p = cell_point(*k);
+                        valid_cell(p[0], p[1])
+                    })
+                    && s.open.iter().all(|Reverse((_, _, k))| {
+                        let p = cell_point(*k);
+                        valid_cell(p[0], p[1])
+                    })
+                    && s.costs.len() <= 32768
                     && s.open.len() <= 65536
                     && s.previous.len() <= 32768
                     && s.sources.iter().all(|(k, i)| {
@@ -986,6 +1042,38 @@ mod tests {
     use super::*;
     const PIT_ROWS: i64 = 192;
     #[test]
+    fn selected_ore_extends_connected_supported_drives_past_negative_x() {
+        let mut terrain=Terrain::default(); let mut w=Workings::default(); w.initialise();
+        let mut destinations=vec![([256,63],true)];
+        destinations.extend((-32_i32..256).step_by(16).rev().map(|x|([x as i64,63],false)));
+        for (to,lift) in destinations {
+            let from=w.passages.last().unwrap().feet;
+            let mut pending=cut_cells(from,to,lift);
+            while !pending.is_empty() {
+                let before=pending.len();
+                pending.retain(|p| !terrain.contains(p[0],p[1]) && !terrain.excavate(p[0],p[1]));
+                assert!(pending.len()<before,"fixture must excavate connected faces");
+            }
+            w.passages.push(Passage {feet:to,parent:w.passages.len()-1,lift,supported:true,column:true});
+        }
+        w.active=w.passages.len()-1;
+        let goal=[-80,63];
+        terrain.reveal(42,0,goal[0],goal[1],0,&crate::materials());
+        terrain.visible.get_mut(&crate::geometry::chunk_id(goal[0],goal[1])).unwrap()[crate::geometry::bit_index(goal[0],goal[1])]=3;
+        w.target=Some(goal); w.target_cells=vec![goal];
+        for _ in 0..100 {
+            w.advance(&terrain,&[3],"vein",1200,1,0);
+            if w.section.is_some() {break;}
+        }
+        let section=w.section.as_ref().expect("bounded planner should extend beyond old wall");
+        assert!(section.to[0] < -32);
+        while let Some(k)=w.next_cell(&terrain) { let p=point(k); assert!(terrain.excavate(p[0],p[1])); }
+        w.advance(&terrain,&[3],"vein",1200,100,10);
+        assert!(w.passages.last().unwrap().supported);
+        assert!(w.working_route().iter().all(|p|terrain.contains(p[0],p[1])));
+        terrain.rebuild().unwrap(); assert!(w.valid());
+    }
+    #[test]
     fn deposit_order_survives_selected_cell_and_save_without_leaking_geometry() {
         let cat = crate::materials();
         let mut w = Workings::default();
@@ -1004,6 +1092,11 @@ mod tests {
         restored.prepare_deposit_order(42, 0, &cat);
         assert_eq!(restored.target_deposit, identity);
         assert_eq!(restored.target_cells, w.target_cells);
+        let mut knowledge = Terrain::default();
+        assert_eq!(restored.order_view(&knowledge).unwrap().known_cells, 0);
+        assert!(restored.order_view(&knowledge).unwrap().masks.is_empty());
+        knowledge.reveal(42, 0, anchor[0], anchor[1], 0, &cat);
+        assert_eq!(restored.order_view(&knowledge).unwrap().known_cells, 1);
         let mut t = Terrain::default();
         for y in 0..=anchor[1] {
             assert!(t.excavate(anchor[0], y));

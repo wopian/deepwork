@@ -148,7 +148,8 @@ impl Terrain {
         let mut found = std::collections::BTreeSet::new();
         for py in y.saturating_sub(radius).max(0)..=y.saturating_add(radius).min(MAX_ROWS - 1) {
             for px in x.saturating_sub(radius)..=x.saturating_add(radius) {
-                if px.abs_diff(x).pow(2) + py.abs_diff(y).pow(2) > radius.pow(2) as u64
+                if !valid_cell(px, py)
+                    || px.abs_diff(x).pow(2) + py.abs_diff(y).pow(2) > radius.pow(2) as u64
                     || self.is_revealed(px, py)
                 {
                     continue;

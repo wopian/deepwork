@@ -365,6 +365,18 @@ onMounted(start);
             </div>
             <ProcessingPanel v-if="panel === 'Processing'" />
             <div v-if="panel === 'Crew'">
+              <div class="selected-order" v-if="state?.selected_vein">
+                <strong>Following selected vein</strong>
+                <p>
+                  {{ state.selected_vein.known_cells }} revealed cells remain.
+                  White edges mark your order.
+                </p>
+                <p v-if="!state.selected_vein.known_cells">
+                  No revealed ore remains. Prospect further or choose another
+                  vein.
+                </p>
+                <button @click="act('clear_vein')">Clear vein order</button>
+              </div>
               <p class="crew-roster" v-if="state">
                 <span v-for="(count, role) in state.crew" :key="role"
                   >{{ count }} {{ role }}</span

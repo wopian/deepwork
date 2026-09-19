@@ -47,6 +47,7 @@ struct Snapshot {
     raw_stock_capacity: u64,
     processing: Vec<mine_core::ProcessingFeed>,
     pinned_inputs: std::collections::BTreeMap<String, u64>,
+    selected_vein: Option<mine_core::workings::VeinOrderView>,
     research_invested: u64,
     upgrade_previews: std::collections::BTreeMap<String, mine_core::UpgradePreview>,
     purchase_blockers: std::collections::BTreeMap<String, String>,
@@ -65,6 +66,7 @@ impl From<Game> for Snapshot {
             )
             .collect();
         let upgrade_previews = game.upgrade_previews();
+        let selected_vein = game.workings.order_view(&game.terrain);
         let retirement_award = game.retirement_quote.unwrap_or_else(|| game.award());
         let purchase_blockers = mine_core::requirements()
             .iter()
@@ -91,6 +93,7 @@ impl From<Game> for Snapshot {
             station.routing.clear();
         }
         Self {
+            selected_vein,
             requires_reset: game.legacy_pending,
             workings_offset: 0,
             shipments: game.transport.visual(),

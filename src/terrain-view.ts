@@ -7,7 +7,7 @@ export class TerrainView {
   readonly layer = new Container();
   private cache = new Map<
     number,
-    { sprite: Sprite; mask?: number[]; visible?: number[] }
+    { sprite: Sprite; mask?: number[]; visible?: number[]; selected?: number[] }
   >();
   update(
     terrain: Game["terrain"] | undefined,
@@ -15,6 +15,7 @@ export class TerrainView {
     last: number,
     left: number,
     right: number,
+    selection?: Record<string, number[]>,
   ) {
     const keep = new Set<number>();
     // Neutral host ground needs no GPU texture. Allocate only explored viewport
@@ -47,15 +48,22 @@ export class TerrainView {
         cy = y / CHUNK;
       keep.add(id);
       const mask = terrain?.chunks[id],
-        visible = terrain?.visible[id];
+        visible = terrain?.visible[id],
+        selected = selection?.[id];
       const old = this.cache.get(id);
-      if (old && old.mask === mask && old.visible === visible) continue;
+      if (
+        old &&
+        old.mask === mask &&
+        old.visible === visible &&
+        String(old.selected) === String(selected)
+      )
+        continue;
       const canvas = document.createElement("canvas");
       canvas.width = CHUNK;
       canvas.height = CHUNK;
       const context = canvas.getContext("2d")!;
       const pixels = context.createImageData(CHUNK, CHUNK);
-      pixels.data.set(terrainPixels(mask, visible, cy));
+      pixels.data.set(terrainPixels(mask, visible, cy, selected));
       context.putImageData(pixels, 0, 0);
       if (old) {
         old.sprite.destroy({ texture: true, textureSource: true });
@@ -70,7 +78,7 @@ export class TerrainView {
       );
       sprite.scale.set(CELL_PIXEL);
       this.layer.addChild(sprite);
-      this.cache.set(id, { sprite, mask, visible });
+      this.cache.set(id, { sprite, mask, visible, selected });
     }
     for (const [id, entry] of this.cache)
       if (!keep.has(id)) {
