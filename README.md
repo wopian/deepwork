@@ -25,20 +25,24 @@ The unpackaged Windows executable is `target/debug/deepwork.exe`. Browser-only V
 
 ## Implemented
 
-- Fine 0.25-metre terrain, natural cross-chunk deposits, local prospecting, benched pits and dynamically planned underground branches.
-- Mixed lift/decline access, sampled vein chambers, local support columns, retained rock floors and a survey/work-plan overlay.
+- Fine 0.25-metre terrain, natural cross-chunk deposits, local prospecting and supported shafts from the surface. Signed coordinates let branches expand beyond the compact surface district.
+- Mixed lift/decline access, whole-vein orders, local support columns, retained rock floors and a survey/work-plan overlay.
+- Prospecting progresses from anonymous signals to facing ore boundaries and full unmined silhouettes. Selected veins are outlined only where geology is known.
 - Cargo retains its original station itinerary when crews switch branches; completed transport never teleports to the newest face.
 - Worker recruitment, housing, independently upgraded transport buffers, fair cargo priorities, reserved feed and raw sales.
 - 56 mineral feeds, colour-coded field guide, refined products, optional manufacturing and separation recipes.
 - Explicit alumina/electrolysis path, abstract mass-conserving recipe units, steel and component production.
 - Contracts, resource reserves, pausable processing recipes, power throttling, recovery, authored headquarters equipment, retirement and megaproject delivery.
-- Tactical boosts, capped half-rate offline simulation, compact atomic saves, archived campaign reset and stale-command protection.
-- Pixi world with extended terrain palette, camera pan/zoom/follow, responsive interface and reduced-motion preference.
+- Capped half-rate offline simulation, per-return reports, compact atomic saves, archived campaign reset and stale-command protection. Cooldown powers have been removed.
+- Persistent Pixi mine viewport, desktop context panels, mobile bottom sheets, anchored pinch/wheel zoom, touch ore inspection and reduced motion.
+- Processing telemetry names ore and refined outputs, shows actual throughput and recovery, and uses the same reservation calculation as dispatch.
 - Bun-only toolchain, Rust accounting tests and Windows CI.
 
 ## Current limits against the full design
 
-Natural workings replace the former regular underground levels. Save version 7 / generator version 3 requires a fresh campaign; older saves remain exportable. Previous campaign timing measurements used the earlier geometry and do not establish balance for this version. This remains **short of full-plan release acceptance**. `IMPLEMENTATION_STATUS.md` records pending independent branch transport, active offline aggregation, active-advantage tuning and device/platform verification.
+Save version **9** / generator version **5** requires a fresh campaign. Older campaigns remain exportable and are archived before reset. Simulation, renderer and save keys use the same signed coordinates; terrain chunks stay 64×64 cells at 0.25 metres per cell. The renderer retains at most 768 explored viewport textures.
+
+See `docs/shaft-redesign-progress.md` for measured evidence and outstanding hardware acceptance. Campaign completion and human/device playtesting are separate checks; earlier fixed-width campaign reports do not validate this release.
 
 ## Verification and packaging
 
@@ -83,7 +87,7 @@ cargo run -p mine-core --release --example campaign -- 30 56 scheduled 8
 
 This runs 30 seeds for up to 56 days with two 12-minute visits per day and real capped offline advancement. Replace `scheduled` with `attentive` or `continuous` for comparison. Use current-version reports when assessing milestone medians; the older fixed-drive campaign results are not comparable.
 
-The harness returns a failure status if any tested campaign misses headquarters completion. `cargo test -p mine-core --release --example campaign` checks that strategy contracts work before pumps, preserve endgame reserves, fund early processing and commission electrolysis before research retirement. Use `cargo run -p mine-core --release --example activity` for an isolated ability comparison; it is not a substitute for full campaign strategy comparison.
+The harness returns a failure status if any tested campaign misses headquarters completion. `cargo test -p mine-core --release --example campaign` checks that strategy contracts work before pumps, preserve endgame reserves, fund early processing and commission electrolysis before research retirement. Attentive strategies can prioritise surveyed deposits; they receive no hidden rate multiplier or cooldown power.
 
 After a scheduled campaign report finishes, validate all 30 seeds and authored day/week medians:
 
@@ -92,15 +96,17 @@ cmd.exe /d /c "cargo run -p mine-core --release --example campaign -- 30 56 sche
 bun.exe run check:campaign campaign-report.json
 ```
 
-This gate rejects incomplete campaigns, missing milestones, duplicate seeds and mixed timing bases. Minute-scale first-site targets use the separate continuous `balance` example.
+This gate rejects incomplete campaigns, missing milestones, duplicate seeds and mixed timing bases. Opening checks use `cargo run --release -p mine-core --example opening -- 30 guided` and `-- 30 adverse`. Adverse runs spend starting funds on housing and release the furnace reservation before recovering through ordinary production.
 
 The 56-day observation horizon checks late-but-completable seeds. Headquarters median target remains 28–42 days; the acceptance checker reads that unchanged target from content.
 
 ## Natural underground workings
 
-After the 48-metre pit, the foreman builds access toward local survey signals and exposed ore. Survey signals show an approximate area and confidence; exact mineral cells appear only after sampling or exposure. Vein policy excavates bounded rooms around sampled ore, depth policy develops deeper access, and equipment gates allow crews to recover known reserves in earlier workings.
+The foreman starts at the surface shaft and builds toward local survey signals and exposed ore. Survey accuracy reveals the nearest facing arc, then the full remaining vein. Click or tap revealed ore to prioritise its entire deposit; the order survives individual cuts and save/load. Unknown portions never become planner targets or client mineral tooltips.
 
-Paths account for excavation volume, walking distance, existing haul distance and lift construction. Declines stay at or below a 1:4 gradient; automatic rails use gentler sections. Cleared sections receive local support before workers use them. Rock floors and pillars constrain extraction; the surface access ramp remains protected.
+Branches reuse supported passages and can cross zero or extend past the original surface width. Geometry is generated from deterministic world-space descriptors, independent of chunk boundaries and exploration order.
+
+Paths account for excavation volume, walking distance, existing haul distance and lift construction. Declines stay at or below a 1:4 gradient; automatic rails use gentler sections. Cleared sections receive local support before workers use them. Rock floors and pillars constrain extraction; there is no open-pit prerequisite.
 
 The **Survey / work plan** control shows measured signal areas and the committed local section. It does not expose hidden mineral outlines. Transport saves preserve each batch's itinerary when the working face moves.
 
@@ -109,4 +115,14 @@ cargo run -p mine-core --release --example workings -- 1800 42 vein target/worki
 bun.exe scripts/workings-native-check.ts test-results/workings 1800
 ```
 
-The workings fixture contains accelerated equipment and a valid pre-excavated pit. It is an isolated geometry/performance scenario, not a campaign pacing result. The native harness imports it through the game UI, tests portrait touch interaction, exports and reloads the save, and records frame/cache/heap samples. Actual mobile hardware still needs separate verification.
+The workings fixture contains accelerated equipment and a prepared surface entrance. It is an isolated geometry/performance scenario, not a campaign pacing result. The native harness imports it through the game UI, tests portrait touch interaction, exports and reloads the save, and records frame/cache/heap samples. Actual mobile hardware still needs separate verification.
+
+## Android test package
+
+Run from a Windows terminal with the Android SDK/NDK and JDK installed:
+
+```powershell
+scripts\android-test.cmd C:\path\to\output
+```
+
+This builds ARM64 assets with Windows Bun 1.4.0, signs with the local Android test key, and verifies the APK signature and ZIP alignment. Packaging checks do not establish touch performance or lifecycle behaviour on physical Android hardware.
