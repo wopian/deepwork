@@ -92,7 +92,23 @@ const orderedUpgrades = [...upgrades].sort(
   (a, b) => upgradeOrder.indexOf(a[0]) - upgradeOrder.indexOf(b[0]),
 );
 const tab = ref("Operations");
-const equipmentOpen = ref(!matchMedia("(max-width: 800px)").matches);
+const panel = ref("");
+const panelNames = [
+  "Equipment",
+  "Processing",
+  "Crew",
+  "Logistics",
+  "Production",
+  "Contracts",
+];
+const constraint = computed(() =>
+  state.value?.stages.find(
+    (s) => s.blocker && !["Flowing", "Working", "Selling"].includes(s.blocker),
+  ),
+);
+function openPanel(name: string) {
+  panel.value = panel.value === name ? "" : name;
+}
 const query = ref("");
 const showRetire = ref(false);
 async function retirementPreview() {
@@ -107,7 +123,9 @@ async function retirementCancel() {
 }
 const dismissedOffline = ref("");
 const depth = computed(() =>
-  Math.floor(Math.max(0, ...Object.values(state.value?.heights ?? {})) / CELLS_PER_METRE),
+  Math.floor(
+    Math.max(0, ...Object.values(state.value?.heights ?? {})) / CELLS_PER_METRE,
+  ),
 );
 const filtered = computed(() =>
   materials.filter((m) =>
@@ -228,32 +246,18 @@ onMounted(start);
       </div>
     </div>
     <template v-if="tab === 'Operations'">
-      <div class="stats">
-        <div>
-          <small>DEPTH REACHED</small><strong>{{ depth }} <em>m</em></strong
-          ><span
-            >Next frontier ·
-            {{ state?.levels.shaft ? 300 * (1 + state.levels.shaft) : 100 }}
-            m</span
-          >
-        </div>
-        <div>
-          <small>ON THE PAYROLL</small
-          ><strong>{{ state?.workers ?? 3 }} <em>minions</em></strong
-          ><span>{{ state?.housing ?? 8 }} bunks available</span>
-        </div>
-        <div>
-          <small>MATERIAL EXCAVATED</small
-          ><strong>{{ format(state?.excavated ?? 0) }} <em>cells</em></strong
-          ><span>One pixel at a time</span>
-        </div>
-        <div>
-          <small>MINERALS DISCOVERED</small
-          ><strong
-            >{{ state?.discoveries.length ?? 0 }}
-            <em>/ {{ materials.length }}</em></strong
-          ><span>Your collection is growing</span>
-        </div>
+      <div class="mine-hud">
+        <span class="hud-credits">◈ {{ format(state?.credits ?? 0) }}</span>
+        <span
+          ><strong>{{ depth }} m</strong> depth</span
+        >
+        <button @click="openPanel('Crew')">
+          <strong>{{ state?.workers ?? 3 }}</strong> crew
+        </button>
+        <button class="constraint" @click="openPanel('Production')">
+          {{ constraint?.name ?? "Production" }} ·
+          {{ constraint?.blocker ?? "Crew preparing access" }}
+        </button>
       </div>
       <div class="operation-grid">
         <section class="mine-panel">
@@ -264,12 +268,12 @@ onMounted(start);
               {{ state ? "CREW AT WORK" : "AWAITING NATIVE ENGINE" }}</span
             >
           </div>
-          <World />
+          <World @inspect="panel = $event" />
           <div class="opening-guide" v-if="state && !state.levels.furnace">
             <strong>First workshop: refine iron</strong>
             <p>
-              Your crew follows surveyed rock automatically. Build a furnace to
-              turn held ore into iron for equipment.
+              Crew follows surveyed rock. Furnace turns held ore into equipment
+              iron.
             </p>
             <button
               @click="act('buy', 'furnace')"
@@ -281,336 +285,408 @@ onMounted(start);
               state.purchase_blockers.furnace || "Ready to build"
             }}</span>
           </div>
-          <details class="workshop-sheet">
-            <summary>Processing workshop</summary>
-            <ProcessingPanel />
-          </details>
-          <p class="crew-roster" v-if="state">
-            <span v-for="(count, role) in state.crew" :key="role"
-              >{{ count }} {{ role }}</span
-            >
-          </p>
-          <label class="crew-roster" v-if="state"
-            >Crew priority
-            <select
-              :value="state.crew_priority || 'balanced'"
-              @change="
-                act('crew_priority', ($event.target as HTMLSelectElement).value)
-              "
-            >
-              <option value="engineering">
-                Engineering · needs support workshop
-              </option>
-              <option value="prospecting">
-                Prospecting · needs survey office
-              </option>
-              <option value="balanced">Balanced</option>
-              <option value="digging">Digging</option>
-              <option value="hauling">Hauling</option>
-              <option value="refining">Refining · needs furnace</option>
-              <option value="reclaiming">Reclamation · needs reclaimer</option>
-            </select>
-            <span
-              >Shift spare diggers to the bottleneck. One digger and one hauler
-              always remain.</span
-            >
-          </label>
-          <label class="crew-roster" v-if="state">
-            Cargo scheduling
-            <select
-              :value="state.cargo_policy || 'balanced'"
-              @change="
-                act('cargo_policy', ($event.target as HTMLSelectElement).value)
-              "
-            >
-              <option value="balanced">Balanced cargo</option>
-              <option value="preferred">Preferred minerals first</option>
-            </select>
-            <span
-              >Hauling and sorting favour your three mineral priorities. Every
-              fifth slot serves other cargo.</span
-            >
-          </label>
-          <details v-if="state" class="transport-panel">
-            <summary>Transport buffers and express service</summary>
-            <div
-              v-for="(station, index) in state.transport.stations"
-              :key="station.id"
-              class="transport-station"
-            >
-              <strong>{{ station.name }}</strong>
-              <span
-                >{{ format(cargoTotal(station.cargo) / RESOURCE_UNIT) }} /
-                {{ format(station.capacity / RESOURCE_UNIT) }} units</span
-              >
-              <span
-                >In {{ format(station.incoming / RESOURCE_UNIT) }} · out
-                {{ format(station.outgoing / RESOURCE_UNIT) }} this second</span
-              >
-              <button
-                :disabled="
-                  station.level >= 50 ||
-                  BigInt(state.credits) < BigInt(station.quote)
-                "
-                @click="act('buffer', station.id)"
-              >
-                Buffer + · {{ format(station.quote) }} credits
-              </button>
-              <label
-                ><input
-                  type="checkbox"
-                  :checked="station.preferred"
+        </section>
+        <aside
+          v-if="panel"
+          class="context-panel"
+          :aria-label="panel + ' controls'"
+          @keydown.esc="panel = ''"
+        >
+          <div class="context-heading">
+            <h2>{{ panel }}</h2>
+            <button @click="panel = ''" aria-label="Close panel">✕</button>
+          </div>
+          <div class="context-body">
+            <div v-if="panel === 'Equipment'">
+              <div class="panel-heading">
+                <h2>CREW & EQUIPMENT</h2>
+                <span>UPGRADES</span>
+              </div>
+              <p class="crew-roster">
+                Capacity estimates assume steady feed and completed
+                construction.
+              </p>
+              <div class="upgrade-list">
+                <div
+                  v-for="u in orderedUpgrades"
+                  :key="u[0]"
+                  class="upgrade-row"
+                >
+                  <button
+                    class="upgrade"
+                    :disabled="!state || !!state.purchase_blockers[u[0]]"
+                    @click="act('buy', u[0])"
+                  >
+                    <div class="upgrade-icon">
+                      {{
+                        u[0] === "worker"
+                          ? "♟"
+                          : u[0] === "furnace"
+                            ? "♨"
+                            : "▥"
+                      }}
+                    </div>
+                    <div>
+                      <strong>{{ u[1] }}</strong>
+                      <p>{{ u[2] }}</p>
+                      <small>LEVEL {{ state?.levels[u[0]] ?? 0 }}</small>
+                    </div>
+                    <b>◈ {{ format(cost(u[0])) }}</b>
+                    <small
+                      class="upgrade-blocker"
+                      v-if="state?.upgrade_previews[u[0]]"
+                      >Machine
+                      {{
+                        format(state.upgrade_previews[u[0]].machine_percent)
+                      }}% · feed line ~{{
+                        format(state.upgrade_previews[u[0]].line_percent)
+                      }}%</small
+                    >
+                    <small
+                      class="upgrade-blocker"
+                      v-if="state?.purchase_blockers[u[0]]"
+                      >{{ state.purchase_blockers[u[0]] }}</small
+                    >
+                  </button>
+                  <button
+                    class="pin-upgrade"
+                    :aria-pressed="state?.pinned === u[0]"
+                    :disabled="!state"
+                    @click="act('pin', u[0])"
+                  >
+                    {{
+                      state?.pinned === u[0]
+                        ? "Release reserved materials"
+                        : "Save materials for this"
+                    }}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <ProcessingPanel v-if="panel === 'Processing'" />
+            <div v-if="panel === 'Crew'">
+              <p class="crew-roster" v-if="state">
+                <span v-for="(count, role) in state.crew" :key="role"
+                  >{{ count }} {{ role }}</span
+                >
+              </p>
+              <label class="crew-roster" v-if="state"
+                >Crew priority
+                <select
+                  :value="state.crew_priority || 'balanced'"
                   @change="
                     act(
-                      'station_priority',
-                      station.id,
-                      ($event.target as HTMLInputElement).checked ? 1 : 0,
+                      'crew_priority',
+                      ($event.target as HTMLSelectElement).value,
                     )
                   "
-                />
-                Prefer selected minerals</label
-              >
-              <template v-if="index < state.transport.segments.length">
+                >
+                  <option value="engineering">
+                    Engineering · needs support workshop
+                  </option>
+                  <option value="prospecting">
+                    Prospecting · needs survey office
+                  </option>
+                  <option value="balanced">Balanced</option>
+                  <option value="digging">Digging</option>
+                  <option value="hauling">Hauling</option>
+                  <option value="refining">Refining · needs furnace</option>
+                  <option value="reclaiming">
+                    Reclamation · needs reclaimer
+                  </option>
+                </select>
                 <span
-                  >{{ state.transport.segments[index]!.name }} ·
-                  {{
-                    Math.round(
-                      state.transport.segments[index]!.utilisation * 100,
-                    )
-                  }}% loading ·
-                  {{
-                    state.transport.segments[index]!.blocked
-                      ? state.transport.segments[index]!.blocker
-                      : "Flowing"
-                  }}</span
+                  >Shift spare diggers to the bottleneck. One digger and one
+                  hauler always remain.</span
                 >
-                <span class="transport-cargo">
-                  In transit
+              </label>
+              <p class="crew-roster" v-if="state?.levels.supports">
+                {{
+                  state.workings.status ||
+                  "Supports follow commissioned passages."
+                }}
+                <template v-if="state.workings.section?.support_work">
+                  · Local support construction
                   {{
-                    format(
-                      batchTotal(state.transport.segments[index]!.batches) /
-                        RESOURCE_UNIT,
+                    Math.min(
+                      100,
+                      Math.floor(
+                        (100 * state.workings.section.support_work) /
+                          mining.support_work,
+                      ),
                     )
-                  }}
-                  /
-                  {{
-                    format(
-                      state.transport.segments[index]!.capacity / RESOURCE_UNIT,
-                    )
-                  }}
-                  units
-                </span>
-                <span>
-                  Nominal cycle
-                  {{
-                    format(state.transport.segments[index]!.duration_ms / 1000)
-                  }}
-                  s ·
-                  {{
-                    format(
-                      state.transport.segments[index]!.rate / RESOURCE_UNIT,
-                    )
-                  }}
-                  units/s · {{ state.transport.segments[index]!.demand }} power
-                </span>
-                <button
-                  :class="{ selected: state.transport.express === index }"
-                  @click="act('express', '', index)"
+                  }}%
+                </template>
+              </p>
+              <div class="policy">
+                <span
+                  >EXCAVATION STRATEGY
+                  <small
+                    v-if="state?.site === 1 && depth < pacing.tactics_depth"
+                    >{{ pacing.tactics_depth }} M UNLOCK</small
+                  ></span
+                ><button
+                  v-for="[id, label] in [
+                    ['bulk', 'Bulk excavation'],
+                    ['vein', 'Follow veins'],
+                    ['depth', 'Go deeper'],
+                  ]"
+                  :class="{ selected: state?.policy === id }"
+                  :disabled="
+                    !state || (state.site === 1 && depth < pacing.tactics_depth)
+                  "
+                  @click="act('policy', id)"
                 >
-                  {{
-                    state.transport.express === index
-                      ? "Express selected"
-                      : "Select express route"
-                  }}
+                  {{ label }}
                 </button>
-              </template>
-            </div>
-          </details>
-          <p class="crew-roster" v-if="state?.levels.supports">
-            {{
-              state.workings.status || "Supports follow commissioned passages."
-            }}
-            <template v-if="state.workings.section?.support_work">
-              · Local support construction
-              {{
-                Math.min(
-                  100,
-                  Math.floor(
-                    (100 * state.workings.section.support_work) /
-                      mining.support_work,
-                  ),
-                )
-              }}%
-            </template>
-          </p>
-          <div class="policy">
-            <span
-              >EXCAVATION STRATEGY
-              <small v-if="state?.site === 1 && depth < pacing.tactics_depth"
-                >{{ pacing.tactics_depth }} M UNLOCK</small
-              ></span
-            ><button
-              v-for="[id, label] in [
-                ['bulk', 'Bulk excavation'],
-                ['vein', 'Follow veins'],
-                ['depth', 'Go deeper'],
-              ]"
-              :class="{ selected: state?.policy === id }"
-              :disabled="
-                !state || (state.site === 1 && depth < pacing.tactics_depth)
-              "
-              @click="act('policy', id)"
-            >
-              {{ label }}
-            </button>
-          </div>
-          <div class="pipeline">
-            <div
-              v-for="(s, i) in state?.stages.length
-                ? state.stages
-                : ['Digging', 'Hauling', 'Sorting', 'Refining', 'Dispatch'].map(
-                    (name) => ({
-                      name,
-                      rate: 0,
-                      buffer: 0,
-                      capacity: 20000,
-                      blocker: 'Awaiting crew',
-                    }),
-                  )"
-              :key="s.name"
-            >
-              <small>0{{ i + 1 }} / {{ s.name.toUpperCase() }}</small
-              ><strong>{{ format(s.rate) }} <em>/s</em></strong>
-              <div class="meter">
-                <span
-                  :style="{
-                    width: Math.min(100, (s.buffer / s.capacity) * 100) + '%',
-                  }"
-                />
               </div>
-              <p>{{ s.blocker }}</p>
+            </div>
+            <div v-if="panel === 'Logistics'">
+              <label class="crew-roster" v-if="state">
+                Cargo scheduling
+                <select
+                  :value="state.cargo_policy || 'balanced'"
+                  @change="
+                    act(
+                      'cargo_policy',
+                      ($event.target as HTMLSelectElement).value,
+                    )
+                  "
+                >
+                  <option value="balanced">Balanced cargo</option>
+                  <option value="preferred">Preferred minerals first</option>
+                </select>
+                <span
+                  >Hauling and sorting favour your three mineral priorities.
+                  Every fifth slot serves other cargo.</span
+                >
+              </label>
+              <div v-if="state" class="transport-panel">
+                <h3>Buffers & express service</h3>
+                <div
+                  v-for="(station, index) in state.transport.stations"
+                  :key="station.id"
+                  class="transport-station"
+                >
+                  <strong>{{ station.name }}</strong>
+                  <span
+                    >{{ format(cargoTotal(station.cargo) / RESOURCE_UNIT) }} /
+                    {{ format(station.capacity / RESOURCE_UNIT) }} units</span
+                  >
+                  <span
+                    >In {{ format(station.incoming / RESOURCE_UNIT) }} · out
+                    {{ format(station.outgoing / RESOURCE_UNIT) }} this
+                    second</span
+                  >
+                  <button
+                    :disabled="
+                      station.level >= 50 ||
+                      BigInt(state.credits) < BigInt(station.quote)
+                    "
+                    @click="act('buffer', station.id)"
+                  >
+                    Buffer + · {{ format(station.quote) }} credits
+                  </button>
+                  <label
+                    ><input
+                      type="checkbox"
+                      :checked="station.preferred"
+                      @change="
+                        act(
+                          'station_priority',
+                          station.id,
+                          ($event.target as HTMLInputElement).checked ? 1 : 0,
+                        )
+                      "
+                    />
+                    Prefer selected minerals</label
+                  >
+                  <template v-if="index < state.transport.segments.length">
+                    <span
+                      >{{ state.transport.segments[index]!.name }} ·
+                      {{
+                        Math.round(
+                          state.transport.segments[index]!.utilisation * 100,
+                        )
+                      }}% loading ·
+                      {{
+                        state.transport.segments[index]!.blocked
+                          ? state.transport.segments[index]!.blocker
+                          : "Flowing"
+                      }}</span
+                    >
+                    <span class="transport-cargo">
+                      In transit
+                      {{
+                        format(
+                          batchTotal(state.transport.segments[index]!.batches) /
+                            RESOURCE_UNIT,
+                        )
+                      }}
+                      /
+                      {{
+                        format(
+                          state.transport.segments[index]!.capacity /
+                            RESOURCE_UNIT,
+                        )
+                      }}
+                      units
+                    </span>
+                    <span>
+                      Nominal cycle
+                      {{
+                        format(
+                          state.transport.segments[index]!.duration_ms / 1000,
+                        )
+                      }}
+                      s ·
+                      {{
+                        format(
+                          state.transport.segments[index]!.rate / RESOURCE_UNIT,
+                        )
+                      }}
+                      units/s ·
+                      {{ state.transport.segments[index]!.demand }} power
+                    </span>
+                    <button
+                      :class="{ selected: state.transport.express === index }"
+                      @click="act('express', '', index)"
+                    >
+                      {{
+                        state.transport.express === index
+                          ? "Express selected"
+                          : "Select express route"
+                      }}
+                    </button>
+                  </template>
+                </div>
+              </div>
+            </div>
+            <div v-if="panel === 'Production'">
+              <div class="pipeline">
+                <div
+                  v-for="(s, i) in state?.stages.length
+                    ? state.stages
+                    : [
+                        'Digging',
+                        'Hauling',
+                        'Sorting',
+                        'Refining',
+                        'Dispatch',
+                      ].map((name) => ({
+                        name,
+                        rate: 0,
+                        buffer: 0,
+                        capacity: 20000,
+                        blocker: 'Awaiting crew',
+                      }))"
+                  :key="s.name"
+                >
+                  <small>0{{ i + 1 }} / {{ s.name.toUpperCase() }}</small
+                  ><strong>{{ format(s.rate) }} <em>/s</em></strong>
+                  <div class="meter">
+                    <span
+                      :style="{
+                        width:
+                          Math.min(100, (s.buffer / s.capacity) * 100) + '%',
+                      }"
+                    />
+                  </div>
+                  <p>{{ s.blocker }}</p>
+                </div>
+              </div>
+            </div>
+            <div v-if="panel === 'Contracts'">
+              <div class="bottom-grid">
+                <section class="card specialisations">
+                  <div class="panel-heading">
+                    <h2>SITE SPECIALISATION</h2>
+                    <span>{{
+                      state?.specialisation ??
+                      `STEEL + ${pacing.specialisation_depth} M`
+                    }}</span>
+                  </div>
+                  <p>Choose once per site. New sites offer a fresh choice.</p>
+                  <div class="abilities specialisation-options">
+                    <button
+                      v-for="[id, label, detail] in [
+                        [
+                          'bulk',
+                          'Bulk extraction',
+                          '+30% digging; recovery −5 percentage points.',
+                        ],
+                        [
+                          'precision',
+                          'Precision refining',
+                          'Recovery +10 points (95% cap); −20% digging.',
+                        ],
+                        [
+                          'reclamation',
+                          'Reclamation',
+                          '3× tailings and slag recovery; −15% primary refining.',
+                        ],
+                      ]"
+                      :class="{ selected: state?.specialisation === id }"
+                      :disabled="
+                        !state ||
+                        depth < pacing.specialisation_depth ||
+                        !state.steel_made ||
+                        !!state.specialisation
+                      "
+                      @click="act('specialise', id)"
+                    >
+                      <strong>{{ label }}</strong
+                      ><small>{{ detail }}</small>
+                    </button>
+                  </div>
+                </section>
+                <section class="card contracts">
+                  <div class="panel-heading">
+                    <h2>OUTGOING ORDERS</h2>
+                    <span>25% PREMIUM · NO DEADLINES</span>
+                  </div>
+                  <div v-for="(c, i) in state?.contracts ?? []">
+                    <span
+                      >{{ c.product }}
+                      <small
+                        >{{
+                          format(
+                            (state?.products[c.product] ?? 0) / RESOURCE_UNIT,
+                          )
+                        }}
+                        / {{ c.amount / RESOURCE_UNIT }} units</small
+                      ></span
+                    ><button
+                      :disabled="
+                        !c.complete &&
+                        (state?.products[c.product] ?? 0) < c.amount
+                      "
+                      @click="
+                        act(c.complete ? 'new_contract' : 'contract', '', i)
+                      "
+                    >
+                      {{ c.complete ? "New order →" : "Deliver →" }}
+                    </button>
+                  </div>
+                  <p v-if="!state">
+                    Delivery contracts appear when native game starts.
+                  </p>
+                </section>
+              </div>
             </div>
           </div>
-        </section>
-        <aside>
-          <details :open="equipmentOpen" class="equipment-sheet">
-            <summary>Crew & equipment</summary>
-            <div class="panel-heading">
-              <h2>CREW & EQUIPMENT</h2>
-              <span>UPGRADES</span>
-            </div>
-            <p class="crew-roster">
-              Capacity estimates assume steady feed and completed construction.
-            </p>
-            <div class="upgrade-list">
-              <button
-                class="upgrade"
-                v-for="u in orderedUpgrades"
-                :key="u[0]"
-                :disabled="!state || !!state.purchase_blockers[u[0]]"
-                @click="act('buy', u[0])"
-              >
-                <div class="upgrade-icon">
-                  {{
-                    u[0] === "worker" ? "♟" : u[0] === "furnace" ? "♨" : "▥"
-                  }}
-                </div>
-                <div>
-                  <strong>{{ u[1] }}</strong>
-                  <p>{{ u[2] }}</p>
-                  <small>LEVEL {{ state?.levels[u[0]] ?? 0 }}</small>
-                </div>
-                <b>◈ {{ format(cost(u[0])) }}</b>
-                <small
-                  class="upgrade-blocker"
-                  v-if="state?.upgrade_previews[u[0]]"
-                  >Machine
-                  {{ format(state.upgrade_previews[u[0]].machine_percent) }}% ·
-                  feed line ~{{
-                    format(state.upgrade_previews[u[0]].line_percent)
-                  }}%</small
-                >
-                <small
-                  class="upgrade-blocker"
-                  v-if="state?.purchase_blockers[u[0]]"
-                  >{{ state.purchase_blockers[u[0]] }}</small
-                >
-              </button>
-            </div>
-          </details>
         </aside>
       </div>
-      <div class="bottom-grid">
-        <section class="card specialisations">
-          <div class="panel-heading">
-            <h2>SITE SPECIALISATION</h2>
-            <span>{{
-              state?.specialisation ??
-              `STEEL + ${pacing.specialisation_depth} M`
-            }}</span>
-          </div>
-          <p>Choose once per site. New sites offer a fresh choice.</p>
-          <div class="abilities specialisation-options">
-            <button
-              v-for="[id, label, detail] in [
-                [
-                  'bulk',
-                  'Bulk extraction',
-                  '+30% digging; recovery −5 percentage points.',
-                ],
-                [
-                  'precision',
-                  'Precision refining',
-                  'Recovery +10 points (95% cap); −20% digging.',
-                ],
-                [
-                  'reclamation',
-                  'Reclamation',
-                  '3× tailings and slag recovery; −15% primary refining.',
-                ],
-              ]"
-              :class="{ selected: state?.specialisation === id }"
-              :disabled="
-                !state ||
-                depth < pacing.specialisation_depth ||
-                !state.steel_made ||
-                !!state.specialisation
-              "
-              @click="act('specialise', id)"
-            >
-              <strong>{{ label }}</strong
-              ><small>{{ detail }}</small>
-            </button>
-          </div>
-        </section>
-        <section class="card contracts">
-          <div class="panel-heading">
-            <h2>OUTGOING ORDERS</h2>
-            <span>25% PREMIUM · NO DEADLINES</span>
-          </div>
-          <div v-for="(c, i) in state?.contracts ?? []">
-            <span
-              >{{ c.product }}
-              <small
-                >{{
-                  format((state?.products[c.product] ?? 0) / RESOURCE_UNIT)
-                }}
-                / {{ c.amount / RESOURCE_UNIT }} units</small
-              ></span
-            ><button
-              :disabled="
-                !c.complete && (state?.products[c.product] ?? 0) < c.amount
-              "
-              @click="act(c.complete ? 'new_contract' : 'contract', '', i)"
-            >
-              {{ c.complete ? "New order →" : "Deliver →" }}
-            </button>
-          </div>
-          <p v-if="!state">
-            Delivery contracts appear when native game starts.
-          </p>
-        </section>
-      </div>
+      <nav class="worksite-dock" aria-label="Worksite controls">
+        <button
+          v-for="name in panelNames"
+          :key="name"
+          :aria-pressed="panel === name"
+          @click="openPanel(name)"
+        >
+          {{ name }}
+        </button>
+      </nav>
     </template>
     <section v-else-if="tab === 'Minerals'" class="card catalogue">
       <div class="panel-heading">

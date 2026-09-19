@@ -8,23 +8,14 @@ const quantity = (n: number) =>
     : (n / RESOURCE_UNIT).toLocaleString(undefined, {
         maximumFractionDigits: 3,
       });
-const stage = computed(() =>
-  state.value?.stages.find((s) => s.name === "Refining"),
-);
-const feeds = computed(() =>
-  materials.filter((m) => {
-    const g = state.value;
-    return (
-      g &&
-      [
-        g.ore[m.id],
-        g.hauled[m.id],
-        g.raw_stock[m.id],
-        g.concentrate[m.id],
-        g.products[m.product],
-      ].some((n) => n > 0)
-    );
-  }),
+const rate = (n: number) =>
+  n > 0 && n < 0.001
+    ? "<0.001"
+    : n.toLocaleString(undefined, { maximumFractionDigits: 3 });
+const pinned = computed(() =>
+  state.value?.pinned
+    ? { id: state.value.pinned, inputs: state.value.pinned_inputs ?? {} }
+    : null,
 );
 const label = (s: string) => s.replaceAll("_", " ");
 </script>
@@ -34,68 +25,103 @@ const label = (s: string) => s.replaceAll("_", " ");
     v-if="state"
     aria-label="Processing workshop"
   >
-    <div class="panel-heading">
-      <h2>Processing workshop</h2>
-      <strong>{{ stage?.blocker ?? "Waiting for material" }}</strong>
+    <div v-if="pinned" class="pinned-requirements">
+      <strong>Saving for {{ label(pinned.id) }}</strong>
+      <div v-for="(amount, product) in pinned.inputs" :key="product">
+        <span
+          >{{ label(product) }} · {{ quantity(state.products[product] ?? 0) }} /
+          {{ quantity(amount) }}</span
+        >
+        <progress
+          :value="Math.min(amount, state.products[product] ?? 0)"
+          :max="amount"
+          :aria-label="product + ' reserved for upgrade'"
+        />
+      </div>
+      <p v-if="!Object.keys(pinned.inputs).length">
+        Credit-funded investment. {{ state.quotes[pinned.id] }} credits needed.
+      </p>
     </div>
-    <p v-if="!state.levels.furnace">
-      Ore is arriving, but metal needs a furnace. Reserved ore stays in storage
-      until equipment is ready.
-    </p>
-    <p v-else>
-      Continuous refining ·
-      {{
-        (stage?.rate ?? 0).toLocaleString(undefined, {
-          maximumFractionDigits: 3,
-        })
-      }}
-      units/s through refining. Output appears as work completes.
-    </p>
-    <button
-      v-if="!state.levels.furnace"
-      @click="act('buy', 'furnace')"
-      :disabled="!!state.purchase_blockers.furnace"
+    <div v-if="!state.levels.furnace" class="furnace-investment">
+      <h3>Ore needs a furnace</h3>
+      <p>
+        Starter ore stays reserved. Build your first workshop to produce iron.
+      </p>
+      <button
+        @click="act('buy', 'furnace')"
+        :disabled="!!state.purchase_blockers.furnace"
+      >
+        Build furnace · {{ state.quotes.furnace }} credits
+      </button>
+      <p>{{ state.purchase_blockers.furnace || "Ready to build" }}</p>
+    </div>
+    <article
+      class="processing-feed"
+      v-for="feed in state.processing ?? []"
+      :key="feed.id"
     >
-      Build furnace · {{ state.quotes.furnace }} credits
-    </button>
-    <p v-if="!state.levels.furnace && state.purchase_blockers.furnace">
-      {{ state.purchase_blockers.furnace }}
-    </p>
-    <div class="processing-feed" v-for="m in feeds" :key="m.id">
-      <strong>{{ m.name }} → {{ label(m.product) }}</strong>
+      <div class="feed-title">
+        <span
+          class="mineral-swatch"
+          :style="{ background: materials[feed.id]?.color }"
+          >▨</span
+        >
+        <strong
+          >{{ materials[feed.id]?.name
+          }}<small>→ {{ label(feed.output) }}</small></strong
+        >
+      </div>
+      <p class="flow-state" :class="{ flowing: feed.output_rate > 0 }">
+        <i aria-hidden="true" />{{ feed.blocker }}
+      </p>
+      <div class="refinery-flow">
+        <span>{{ rate(feed.input_rate) }}<small>ore units / s</small></span
+        ><span aria-hidden="true">→</span
+        ><span
+          >{{ rate(feed.output_rate)
+          }}<small>{{ label(feed.output) }} / s</small></span
+        >
+      </div>
+      <p class="recovery-label">
+        {{ feed.recovery_percent }}% primary recovery · remaining contents enter
+        waste recovery.
+      </p>
       <dl>
         <div>
-          <dt>At work face</dt>
-          <dd>{{ quantity(state.ore[m.id] ?? 0) }}</dd>
+          <dt>In transit</dt>
+          <dd>{{ quantity(feed.transit) }}</dd>
         </div>
         <div>
-          <dt>Waiting for sorting</dt>
-          <dd>{{ quantity(state.hauled[m.id] ?? 0) }}</dd>
+          <dt>Sorting queue</dt>
+          <dd>{{ quantity(feed.queued) }}</dd>
         </div>
         <div>
-          <dt>Stored raw feed</dt>
-          <dd>{{ quantity(state.raw_stock[m.id] ?? 0) }}</dd>
+          <dt>Stored raw ore</dt>
+          <dd>{{ quantity(feed.stored) }}</dd>
         </div>
         <div>
           <dt>Refinery intake</dt>
-          <dd>{{ quantity(state.concentrate[m.id] ?? 0) }}</dd>
+          <dd>{{ quantity(feed.intake) }}</dd>
         </div>
         <div>
           <dt>Refined stock</dt>
-          <dd>{{ quantity(state.products[m.product] ?? 0) }}</dd>
+          <dd>{{ quantity(feed.product) }}</dd>
         </div>
         <div>
-          <dt>Product reserve target</dt>
-          <dd>{{ quantity(state.reserve[m.product] ?? 0) }}</dd>
+          <dt>Reserved stock</dt>
+          <dd>
+            {{ quantity(feed.reserved) }} / {{ quantity(feed.reserve_target) }}
+          </dd>
         </div>
       </dl>
-    </div>
-    <p v-if="!feeds.length">
+      <p class="output-destination">{{ feed.destination }}</p>
+    </article>
+    <p v-if="!state.processing?.length">
       No feed yet. Follow active crew to inspect excavation and hauling.
     </p>
-    <p>
-      Surplus products sell automatically. Pinned upgrades and manufacturing can
-      hold additional stock; held stock is not a processing delay.
+    <p class="measurement-note">
+      Rates measure current simulation-second output. Refining runs
+      continuously; quantities below one unit still count.
     </p>
   </section>
 </template>

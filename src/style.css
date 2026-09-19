@@ -967,3 +967,466 @@ label {
 nav button {
   font-size: 16px;
 }
+
+/* Workshop shell: a persistent mine, with controls opened where work happens. */
+.mine-first {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding: 0 16px;
+  overflow: hidden;
+}
+.mine-first header {
+  min-height: 64px;
+  padding: 6px 0;
+  gap: 20px;
+  flex-shrink: 0;
+}
+.mine-first header nav {
+  margin-left: auto;
+  gap: 18px;
+}
+.mine-first .site-tag,
+.mine-first footer,
+.mine-first .page-heading .eyebrow {
+  display: none;
+}
+.mine-first .page-heading {
+  position: absolute;
+  right: 20px;
+  top: 68px;
+  z-index: 2;
+  padding: 0;
+}
+.mine-first .balance small {
+  display: none;
+}
+.mine-first .balance strong {
+  font:
+    700 20px/44px "Segoe UI",
+    sans-serif;
+  color: var(--accent);
+}
+.mine-hud {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  min-height: 52px;
+  padding-right: 160px;
+  font-variant-numeric: tabular-nums;
+}
+.mine-hud > span {
+  white-space: nowrap;
+}
+.mine-hud button {
+  padding: 4px 10px;
+  border: 0;
+  text-align: left;
+}
+.mine-hud .constraint {
+  color: #e8dfc8;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.mine-first .operation-grid {
+  position: relative;
+  display: block;
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+}
+.mine-first .mine-panel {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid #65717b;
+}
+.mine-first .mine-panel > .panel-heading {
+  display: none;
+}
+.mine-first .world-wrap {
+  height: 100%;
+  min-height: 0;
+}
+.mine-first .world-tools {
+  top: 12px;
+  bottom: auto;
+  right: 12px;
+  left: auto;
+  max-width: 55%;
+}
+.mine-first .world-districts {
+  top: 12px;
+  max-width: 43%;
+}
+.mine-first .world-caption {
+  background: #101820e8;
+  bottom: 0;
+  font-size: 14px;
+}
+.mine-first .opening-guide {
+  position: absolute;
+  left: 16px;
+  bottom: 42px;
+  width: min(350px, calc(100% - 32px));
+  background: #101820f5;
+  border: 1px solid var(--accent);
+  padding: 12px;
+}
+.mine-first .opening-guide p {
+  margin: 8px 0;
+  font-size: 14px;
+}
+.mine-first .opening-guide span {
+  font-size: 14px;
+}
+.context-panel {
+  position: absolute;
+  z-index: 6;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: min(420px, 48%);
+  display: flex;
+  flex-direction: column;
+  background: #151f28;
+  border: 2px solid #8c9ba5;
+  box-shadow: -8px 0 0 #10182080;
+}
+.context-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-bottom: 2px solid var(--accent);
+}
+.context-heading h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.context-heading button {
+  min-width: 44px;
+  padding: 8px;
+}
+.context-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  flex: 1;
+  min-height: 0;
+  padding-bottom: 20px;
+}
+.context-body .panel-heading {
+  padding: 12px 16px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.context-body .panel-heading span {
+  font-size: 14px;
+}
+.context-body .upgrade-list {
+  max-height: none;
+  overflow: visible;
+}
+.context-body .upgrade {
+  text-align: left;
+  padding: 16px;
+  border-bottom: 1px solid #65717b;
+}
+.context-body .upgrade p,
+.context-body small {
+  font-family: "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #d0cbbb;
+}
+.context-body .crew-roster {
+  display: flex;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  gap: 12px;
+  line-height: 1.5;
+}
+.context-body select {
+  max-width: 100%;
+  background: #101820;
+  color: #e8dfc8;
+  min-height: 44px;
+  padding: 8px;
+}
+.context-body .policy {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 16px;
+  gap: 8px;
+}
+.context-body .pipeline,
+.context-body .bottom-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  margin: 0;
+  gap: 0;
+}
+.context-body .pipeline > div {
+  padding: 16px;
+  border-bottom: 1px solid #65717b;
+}
+.context-body .pipeline p {
+  min-height: 0;
+  font-family: "Segoe UI", sans-serif;
+  font-size: 16px;
+}
+.context-body .specialisation-options {
+  grid-template-columns: 1fr;
+}
+.context-body .card {
+  border: 0;
+  padding: 12px;
+}
+.worksite-dock {
+  display: flex;
+  flex-shrink: 0;
+  justify-content: center;
+  overflow-x: auto;
+  gap: 4px;
+  padding: 8px 0 max(8px, env(safe-area-inset-bottom));
+  width: 100%;
+}
+.worksite-dock button {
+  min-height: 48px;
+  padding: 8px 20px;
+  border: 1px solid #65717b;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.worksite-dock button[aria-pressed="true"] {
+  color: #101820;
+  background: #e5a34d;
+  border-color: #e5a34d;
+}
+@media (max-width: 800px) {
+  .mine-first {
+    padding: 0 6px;
+  }
+  .mine-first header {
+    gap: 0;
+    padding: 0;
+    min-height: 48px;
+    flex-wrap: nowrap;
+  }
+  .mine-first header .brand {
+    display: none;
+  }
+  .mine-first header nav {
+    margin: 0;
+    gap: 18px;
+  }
+  .mine-first header nav button {
+    flex-shrink: 0;
+    min-height: 48px;
+  }
+  .mine-first .page-heading {
+    right: 12px;
+    top: 49px;
+  }
+  .mine-first .balance strong {
+    font-size: 18px;
+  }
+  .mine-hud {
+    gap: 8px;
+    padding-right: 130px;
+    min-height: 48px;
+    font-size: 16px;
+  }
+  .mine-hud .constraint {
+    display: none;
+  }
+  .context-panel {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: min(52dvh, 480px);
+    box-shadow: 0 -8px 0 #10182080;
+    border-radius: 12px 12px 0 0;
+  }
+  .context-heading {
+    padding: 4px 12px;
+  }
+  .worksite-dock {
+    justify-content: flex-start;
+    padding-top: 6px;
+    gap: 4px;
+  }
+  .worksite-dock button {
+    padding: 8px 12px;
+  }
+  .mine-first .world-tools {
+    gap: 4px;
+    max-width: 46%;
+    top: 8px;
+    right: 8px;
+  }
+  .mine-first .world-districts {
+    top: 8px;
+    left: 8px;
+    max-width: 46%;
+    gap: 4px;
+  }
+  .mine-first .world-tools button,
+  .mine-first .world-districts button {
+    font-size: 14px;
+    padding: 4px 8px;
+    background: #101820f5;
+  }
+  .mine-first .opening-guide {
+    left: 8px;
+    bottom: 32px;
+    width: min(320px, calc(100% - 16px));
+  }
+  .mine-first .ore-inspector {
+    bottom: 32px;
+    left: 8px;
+    padding: 8px;
+    gap: 8px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  button {
+    transition: none;
+  }
+}
+.feed-title {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.feed-title small {
+  display: block;
+  margin-top: 4px;
+}
+.flow-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+}
+.flow-state i {
+  display: block;
+  width: 8px;
+  height: 8px;
+  background: #e5a34d;
+}
+.flow-state.flowing i {
+  background: #a4cc78;
+}
+.refinery-flow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  background: #101820;
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+.refinery-flow small {
+  display: block;
+  font-size: 14px;
+}
+.recovery-label,
+.measurement-note,
+.output-destination {
+  font-size: 14px;
+  color: #d0cbbb;
+}
+.pinned-requirements {
+  padding: 12px;
+  border: 1px solid #e5a34d;
+  margin-bottom: 16px;
+}
+.pinned-requirements > div {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.pinned-requirements progress {
+  width: 100%;
+  height: 8px;
+  accent-color: #e5a34d;
+}
+.mine-first .page-heading {
+  display: none;
+}
+.mine-hud {
+  padding-right: 0;
+}
+.hud-credits {
+  margin-left: auto;
+  order: 3;
+  color: #e5a34d;
+  font-size: 20px;
+  font-weight: 700;
+}
+.mine-first .world-districts {
+  top: auto;
+  bottom: 40px;
+  left: 8px;
+  right: 8px;
+  max-width: none;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  pointer-events: auto;
+  align-items: start;
+  background: transparent;
+}
+.mine-first .world-districts button {
+  flex-shrink: 0;
+}
+.mine-first .world-tools {
+  max-width: calc(100% - 16px);
+  align-content: start;
+}
+@media (max-width: 800px) {
+  .mine-hud {
+    flex-wrap: wrap;
+    gap: 0 8px;
+    padding: 0 4px 6px;
+  }
+  .mine-hud .constraint {
+    display: block;
+    order: 4;
+    flex-basis: 100%;
+    font-size: 14px;
+    min-height: 28px;
+    padding: 2px 0;
+  }
+  .mine-first .world-tools {
+    max-width: calc(100% - 16px);
+  }
+  .mine-first .world-districts {
+    max-width: none;
+  }
+  .mine-first .opening-guide,
+  .mine-first .ore-inspector {
+    bottom: 92px;
+  }
+}
+.upgrade-row {
+  border-bottom: 1px solid #65717b;
+  padding-bottom: 8px;
+}
+.upgrade-row .upgrade {
+  width: 100%;
+  border-bottom: 0;
+}
+.pin-upgrade {
+  margin: 0 16px;
+  font-size: 14px;
+}
+.pin-upgrade[aria-pressed="true"] {
+  border-color: #e5a34d;
+  color: #e5a34d;
+}

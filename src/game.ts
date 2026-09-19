@@ -103,6 +103,23 @@ export interface Game {
       support_work: number;
     } | null;
   };
+  pinned_inputs: Record<string, number>;
+  processing: {
+    id: number;
+    output: string;
+    intake: number;
+    stored: number;
+    transit: number;
+    queued: number;
+    product: number;
+    reserve_target: number;
+    reserved: number;
+    input_rate: number;
+    output_rate: number;
+    recovery_percent: number;
+    blocker: string;
+    destination: string;
+  }[];
   heights: Record<string, number>;
   terrain: {
     chunks: Record<string, number[]>;

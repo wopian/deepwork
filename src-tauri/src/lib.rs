@@ -45,6 +45,8 @@ struct Snapshot {
     shipments: Vec<mine_core::transport::VisualCargo>,
     work_route: Vec<[i64; 2]>,
     raw_stock_capacity: u64,
+    processing: Vec<mine_core::ProcessingFeed>,
+    pinned_inputs: std::collections::BTreeMap<String, u64>,
     research_invested: u64,
     upgrade_previews: std::collections::BTreeMap<String, mine_core::UpgradePreview>,
     purchase_blockers: std::collections::BTreeMap<String, String>,
@@ -94,6 +96,13 @@ impl From<Game> for Snapshot {
             shipments: game.transport.visual(),
             work_route: game.work_route().to_vec(),
             raw_stock_capacity: game.raw_stock_capacity(),
+            processing: game.processing(),
+            pinned_inputs: game
+                .pinned
+                .as_ref()
+                .and_then(|id| mine_core::requirements().iter().find(|u| &u.id == id))
+                .map(|u| u.inputs.clone())
+                .unwrap_or_default(),
             research_invested: game.research_invested(),
             game,
             quotes,

@@ -128,6 +128,23 @@ pub struct Record {
     pub research: u64,
     pub excavated: u64,
 }
+#[derive(Clone, Serialize)]
+pub struct ProcessingFeed {
+    pub id: usize,
+    pub output: String,
+    pub intake: u64,
+    pub stored: u64,
+    pub transit: u64,
+    pub queued: u64,
+    pub product: u64,
+    pub reserve_target: u64,
+    pub reserved: u64,
+    pub input_rate: f64,
+    pub output_rate: f64,
+    pub recovery_percent: u32,
+    pub blocker: String,
+    pub destination: String,
+}
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Game {
     pub version: u32,
@@ -170,6 +187,8 @@ pub struct Game {
     pub raw_stock: BTreeMap<usize, u64>,
     #[serde(default)]
     pub flow_window: [u64; 5],
+    #[serde(default)]
+    pub processing_window: BTreeMap<usize, [u64; 2]>,
     #[serde(default)]
     pub trace_feed: BTreeMap<String, u64>,
     #[serde(default)]
@@ -327,6 +346,7 @@ impl Game {
             concentrate: BTreeMap::new(),
             raw_stock: BTreeMap::new(),
             flow_window: [0; 5],
+            processing_window: BTreeMap::new(),
             trace_feed: BTreeMap::new(),
             trace_fraction: BTreeMap::new(),
             transport: transport::Network::default(),
@@ -466,6 +486,136 @@ impl Game {
                 .unwrap_or(0)
                 .saturating_mul(2),
         )
+    }
+    pub fn product_hold(&self, p: &str) -> u64 {
+        let recipe_hold = recipes().iter().any(|r| {
+            self.levels.get(&r.building).copied().unwrap_or(0) > 0
+                && !self.paused_recipes.contains(&r.id)
+                && (r.id == "steel" || r.id == "aluminium" || self.enabled_recipes.contains(&r.id))
+                && r.inputs.contains_key(p)
+        });
+        // While the furnace is pinned, retain its first construction output.
+        // Explicitly unpinning releases these provisional reserves.
+        let progression_hold = if matches!(self.pinned.as_deref(), Some("furnace" | "steelworks")) {
+            match p {
+                "iron" => 8 * UNITS,
+                "coke" | "lime" => 2 * UNITS,
+                _ => 0,
+            }
+        } else {
+            0
+        };
+        let foundation_hold = if p == "steel" && self.pinned.is_some() {
+            requirements()
+                .iter()
+                .filter(|u| {
+                    pacing::get().foundation_upgrades.contains(&u.id)
+                        && self.levels.get(&u.id).copied().unwrap_or(0) == 0
+                })
+                .filter_map(|u| u.inputs.get("steel"))
+                .sum()
+        } else {
+            0
+        };
+        let reserved = progression_hold.max(foundation_hold).max(
+            self.reserve
+                .get(p)
+                .copied()
+                .unwrap_or(0)
+                .max(if recipe_hold { 8 * UNITS } else { 0 })
+                .max(
+                    self.pinned
+                        .as_ref()
+                        .and_then(|id| requirements().iter().find(|u| u.id == *id))
+                        .and_then(|u| u.inputs.get(p))
+                        .copied()
+                        .unwrap_or(0),
+                ),
+        );
+        let contract_hold = self
+            .contracts
+            .iter()
+            .filter(|c| !c.complete && c.product == *p)
+            .map(|c| c.amount)
+            .sum::<u64>();
+        reserved.max(contract_hold)
+    }
+    pub fn processing(&self) -> Vec<ProcessingFeed> {
+        let seconds = ((self.ticks.saturating_sub(1)) % 20 + 1) as f64 / 20.;
+        materials()
+            .iter()
+            .filter_map(|m| {
+                let id = m.id;
+                let output = if m.name == "Bauxite" {
+                    "alumina"
+                } else {
+                    &m.product
+                };
+                let input = self.concentrate.get(&id).copied().unwrap_or(0);
+                let stock = self.raw_stock.get(&id).copied().unwrap_or(0);
+                let transit = self
+                    .transport
+                    .segments
+                    .iter()
+                    .flat_map(|s| &s.batches)
+                    .filter(|b| b.material == id)
+                    .map(|b| b.amount)
+                    .sum::<u64>();
+                let queued = self.hauled.get(&id).copied().unwrap_or(0);
+                let product = self.products.get(output).copied().unwrap_or(0);
+                let flow = self.processing_window.get(&id).copied().unwrap_or_default();
+                if input + stock + transit + queued + product + flow[0] == 0 {
+                    return None;
+                }
+                let hold = self.product_hold(output);
+                let unlocked = self.feed_unlocked(m);
+                Some(ProcessingFeed {
+                    id,
+                    output: output.into(),
+                    intake: input,
+                    stored: stock,
+                    transit,
+                    queued,
+                    product,
+                    reserve_target: hold,
+                    reserved: product.min(hold),
+                    input_rate: flow[0] as f64 / UNITS as f64 / seconds,
+                    output_rate: flow[1] as f64 / UNITS as f64 / seconds,
+                    recovery_percent: (65i32
+                        + 3 * self.level("recovery") as i32
+                        + match self.specialisation.as_deref() {
+                            Some("bulk") => -5,
+                            Some("precision") => 10,
+                            _ => 0,
+                        })
+                    .clamp(0, 95) as u32,
+                    blocker: if !unlocked {
+                        match m.family.as_str() {
+                            "furnace" | "industrial" => "Build furnace",
+                            "sulfide" | "chemical" | "electrolytic" => "Build chemical refinery",
+                            _ => "Build separation hall",
+                        }
+                    } else if flow[0] > 0 {
+                        "Processing"
+                    } else if input > 0 {
+                        "Waiting for refinery capacity"
+                    } else if stock > 0 {
+                        "Stored feed awaiting sorting capacity"
+                    } else if transit + queued > 0 {
+                        "Feed arriving"
+                    } else {
+                        "Waiting for ore"
+                    }
+                    .into(),
+                    destination: if hold > 0 {
+                        "Reserve, then sell surplus"
+                    } else {
+                        "Sell refined output"
+                    }
+                    .into(),
+                })
+            })
+            .collect()
     }
     fn feed_unlocked(&self, m: &Material) -> bool {
         match m.family.as_str() {
@@ -763,6 +913,7 @@ impl Game {
         self.ticks += 1;
         if self.ticks % 20 == 1 {
             self.flow_window = [0; 5];
+            self.processing_window.clear();
         }
         let sold_before = self.sold_mass;
         self.crew = logistics::Crew::prioritise(self.workers, &self.levels, &self.crew_priority);
@@ -1086,6 +1237,9 @@ impl Game {
             if primary > 0 {
                 self.collection.insert(product.clone());
             }
+            let flow = self.processing_window.entry(id).or_default();
+            flow[0] += n;
+            flow[1] += primary;
             *self.products.entry(product).or_default() += primary;
             let residue = waste / 5;
             if matches!(m.family.as_str(), "furnace" | "sulfide") {
@@ -1187,61 +1341,14 @@ impl Game {
                 *self.hauled.entry(id).or_default() += n;
             }
         }
+        let product_holds: BTreeMap<_, _> = self
+            .products
+            .keys()
+            .map(|p| (p.clone(), self.product_hold(p)))
+            .collect();
         for (p, q) in &mut self.products {
-            let recipe_hold = recipes.iter().any(|r| {
-                self.levels.get(&r.building).copied().unwrap_or(0) > 0
-                    && !self.paused_recipes.contains(&r.id)
-                    && (r.id == "steel"
-                        || r.id == "aluminium"
-                        || self.enabled_recipes.contains(&r.id))
-                    && r.inputs.contains_key(p)
-            });
-            // While the furnace is pinned, retain its first construction output.
-            // Explicitly unpinning releases these provisional reserves.
-            let progression_hold =
-                if matches!(self.pinned.as_deref(), Some("furnace" | "steelworks")) {
-                    match p.as_str() {
-                        "iron" => 8 * UNITS,
-                        "coke" | "lime" => 2 * UNITS,
-                        _ => 0,
-                    }
-                } else {
-                    0
-                };
-            let foundation_hold = if p == "steel" && self.pinned.is_some() {
-                requirements()
-                    .iter()
-                    .filter(|u| {
-                        pacing::get().foundation_upgrades.contains(&u.id)
-                            && self.levels.get(&u.id).copied().unwrap_or(0) == 0
-                    })
-                    .filter_map(|u| u.inputs.get("steel"))
-                    .sum()
-            } else {
-                0
-            };
-            let reserved = progression_hold.max(foundation_hold).max(
-                self.reserve
-                    .get(p)
-                    .copied()
-                    .unwrap_or(0)
-                    .max(if recipe_hold { 8 * UNITS } else { 0 })
-                    .max(
-                        self.pinned
-                            .as_ref()
-                            .and_then(|id| requirements().iter().find(|u| u.id == *id))
-                            .and_then(|u| u.inputs.get(p))
-                            .copied()
-                            .unwrap_or(0),
-                    ),
-            );
-            let contract_hold = self
-                .contracts
-                .iter()
-                .filter(|c| !c.complete && c.product == *p)
-                .map(|c| c.amount)
-                .sum::<u64>();
-            let sold = q.saturating_sub(reserved.max(contract_hold));
+            let held = product_holds.get(p).copied().unwrap_or(0);
+            let sold = q.saturating_sub(held);
             *q -= sold;
             self.sold_mass += sold;
             let price = cat
@@ -1455,6 +1562,7 @@ impl Game {
                 self.dig_remainder = work % 20;
                 if (self.ticks - 1) / 20 != (self.ticks + skip - 1) / 20 {
                     self.flow_window = [0; 5];
+                    self.processing_window.clear();
                 }
                 let transport_seconds = ((self.ticks + skip) / 20 - self.ticks / 20) as u32;
                 if transport_seconds > 0 {
@@ -2085,6 +2193,30 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn processing_telemetry_reports_real_output_and_sales_reservations() {
+        let mut g = Game::new(42, 1);
+        g.action(Action {
+            sequence: 1,
+            kind: "buy".into(),
+            target: "furnace".into(),
+            value: 0,
+        })
+        .unwrap();
+        g.concentrate.insert(3, UNITS);
+        g.reserve.insert("iron".into(), UNITS);
+        g.second(&materials(), false);
+        let rows = g.processing();
+        let iron = rows.iter().find(|f| f.id == 3).unwrap();
+        assert!(iron.input_rate > 0. && iron.output_rate > 0.);
+        assert_eq!(iron.reserved, iron.product.min(g.product_hold("iron")));
+        assert_eq!(iron.product, g.products["iron"]);
+        assert!(
+            (iron.output_rate * UNITS as f64 - g.processing_window[&3][1] as f64).abs() < 0.001
+        );
+        assert_eq!(iron.recovery_percent, 65);
+        assert_eq!(iron.reserve_target, 8 * UNITS);
+    }
     #[test]
     fn deterministic() {
         let mut a = Game::default();

@@ -200,7 +200,7 @@ try {
     );
     await page.getByRole("button", { name: "Operations", exact: true }).click();
     await page
-      .getByRole("button", { name: "Follow depth", exact: true })
+      .getByRole("button", { name: "Active crew", exact: true })
       .click();
     const cdp = await context.newCDPSession(page);
     await cdp.send("Performance.enable");
@@ -246,7 +246,9 @@ try {
         heapBytes: metrics.find((m: any) => m.name === "JSHeapUsedSize")?.value,
         nativeKb: memory ? Number(memory[1]!.replaceAll(",", "")) : null,
         telemetry,
-        depthMetres: Math.max(...status.heights) / CELLS_PER_METRE,
+        depthMetres:
+          Math.max(0, ...(Object.values(status.heights) as number[])) /
+          CELLS_PER_METRE,
         excavated: status.excavated,
         chunks: Object.keys(status.terrain.chunks).length,
         shipments: status.transport.segments.reduce(

@@ -11,6 +11,7 @@ import { CELL_PIXEL, CELLS_PER_METRE, RESOURCE_UNIT } from "./geometry";
 import { routePosition, cargoPosition } from "./routes";
 import { preferences, productionAudio } from "./preferences";
 import { gesture, zoomAt, type ScreenPoint } from "./camera";
+const emit = defineEmits<{ inspect: [panel: string] }>();
 const host = ref<HTMLDivElement>();
 let app: Application | undefined;
 let world: Container;
@@ -183,7 +184,13 @@ function draw() {
   rect(terrain, groundLeft, 190, W, (last + 5) * CELL_PIXEL, 0x806044);
   rect(terrain, groundLeft, 188, W, 8, 0x6b8f47);
   rect(terrain, groundLeft, 196, W, 12, 0xd8bc7d);
-  fineTerrain.update(g?.terrain, first, last, (-offsetX / scale - 235) / CELL_PIXEL - 64, ((app.screen.width-offsetX) / scale - 235) / CELL_PIXEL + 64);
+  fineTerrain.update(
+    g?.terrain,
+    first,
+    last,
+    (-offsetX / scale - 235) / CELL_PIXEL - 64,
+    ((app.screen.width - offsetX) / scale - 235) / CELL_PIXEL + 64,
+  );
   // Fixed district slots grow upward, keeping routes and touch camera targets stable.
   const levels = g?.levels ?? {
     conveyor: 10,
@@ -391,6 +398,10 @@ onMounted(async () => {
     if (g) {
       if (lastCampaign !== g.campaign_id) {
         lastCampaign = g.campaign_id;
+        inspected.value = null;
+        inspectedCell = null;
+        pointers.clear();
+        press = null;
         fineTerrain.clear();
         drawnKey = "";
         zoom = innerWidth < 800 ? 6 : 3;
@@ -632,7 +643,7 @@ function pointerMove(e: PointerEvent) {
     after.centre,
   );
 }
-function inspectAt(p: ScreenPoint) {
+function inspectAt(p: ScreenPoint, select = false) {
   if (!app || !state.value) return;
   const scale = (app.screen.width / 1100) * zoom;
   inspectedCell = [
@@ -640,10 +651,15 @@ function inspectAt(p: ScreenPoint) {
     Math.floor(((p.y - offsetY) / scale - 208) / CELL_PIXEL),
   ];
   inspected.value = inspectOre(state.value.terrain, ...inspectedCell);
+  const wx = (p.x - offsetX) / scale,
+    wy = (p.y - offsetY) / scale;
+  if (select && wy >= 100 && wy < 208) {
+    emit("inspect", wx < 235 ? "Crew" : wx < 680 ? "Logistics" : "Processing");
+  }
 }
 function pointerEnd(e: PointerEvent) {
   if (e.type === "pointerup" && pointers.has(e.pointerId) && !moved)
-    inspectAt(localPoint(e));
+    inspectAt(localPoint(e), true);
   pointers.delete(e.pointerId);
 }
 function fitWorkings() {
@@ -706,13 +722,13 @@ function fitWorkings() {
       ><button
         @click="
           () => {
-            followCrew = false;
-            follow = !follow;
+            followCrew = true;
+            follow = false;
             draw();
           }
         "
       >
-        Follow depth
+        Active crew
       </button>
       <button @click="fitWorkings">Fit workings</button>
     </div>
