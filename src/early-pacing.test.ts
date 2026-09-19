@@ -7,9 +7,9 @@ const runs = () =>
     events: [
       { seconds: 0, upgrade: "worker" },
       { seconds: 240, upgrade: "conveyor" },
-      { seconds: 500, upgrade: "furnace" },
-      { seconds: 600, product: "iron" },
-      { seconds: 1100, unlock: "tactics" },
+      { seconds: 1, upgrade: "furnace" },
+      { seconds: 150, product: "iron" },
+      { seconds: 1, unlock: "tactics" },
       { seconds: 1800, upgrade: "shaft" },
       { seconds: 3000, specialisation: "bulk" },
     ],
