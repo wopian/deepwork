@@ -411,7 +411,7 @@ impl Workings {
         }
         false
     }
-    pub fn survey_pending(&self, terrain: &Terrain, upgraded: bool) -> bool {
+    pub fn survey_pending(&self, terrain: &Terrain, accuracy: u32) -> bool {
         if self
             .signals
             .iter()
@@ -423,7 +423,13 @@ impl Workings {
             return false;
         }
         let at = self.passages[self.active].feet;
-        let r = if upgraded {
+        if self.veins.values().any(|vein| {
+            vein.stage < accuracy.min(2) as i64
+                && distance(vein.anchor, at) <= settings().upgraded_signal_radius * 2
+        }) {
+            return true;
+        }
+        let r = if accuracy > 0 {
             settings().upgraded_signal_radius
         } else {
             settings().signal_radius

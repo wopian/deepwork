@@ -831,7 +831,7 @@ impl Game {
         if !self.workings.passages.is_empty() {
             return self
                 .workings
-                .survey_pending(&self.terrain, self.level("survey") > 0);
+                .survey_pending(&self.terrain, self.level("survey"));
         }
         if self.level("survey") == 0 {
             return false;
@@ -3085,6 +3085,35 @@ mod stationary_network_tests {
 #[cfg(test)]
 mod survey_offline_tests {
     use super::*;
+    #[test]
+    fn blocked_idle_intervals_finish_pending_vein_accuracy() {
+        let cat = materials();
+        let mut offline = Game::new(42, 1);
+        offline.last_saved = 1;
+        offline.levels.insert("survey".into(), 2);
+        offline.workings.initialise();
+        offline
+            .workings
+            .survey(&mut offline.terrain, 42, 0, cat, true, false);
+        assert!(offline.workings.veins.values().any(|v| v.stage == 0));
+        offline.terrain.frontier.clear();
+        offline.terrain.ore_frontiers.clear();
+        offline.terrain.access_frontier.clear();
+        offline.workings.blocked_at =
+            Some((offline.terrain.revision, offline.workings.revision, 1200));
+        let mut stepped = offline.clone();
+        offline.advance_offline(241, cat);
+        for _ in 0..2400 {
+            stepped.tick(cat, true);
+        }
+        assert!(stepped.workings.veins.values().any(|v| v.stage == 2));
+        assert_eq!(offline.terrain.revealed, stepped.terrain.revealed);
+        assert_eq!(offline.terrain.visible, stepped.terrain.visible);
+        assert_eq!(
+            serde_json::to_value(&offline.workings.veins).unwrap(),
+            serde_json::to_value(&stepped.workings.veins).unwrap()
+        );
+    }
     #[test]
     fn known_commodities_do_not_skip_local_prospecting() {
         let cat = materials();
