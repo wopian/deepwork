@@ -1355,10 +1355,16 @@ impl Game {
         }
         let product_holds: BTreeMap<_, _> = self
             .products
-            .keys()
-            .map(|p| (p.clone(), self.product_hold(p)))
+            .iter()
+            .filter(|(_, quantity)| **quantity > 0)
+            .map(|(p, _)| (p.clone(), self.product_hold(p)))
             .collect();
         for (p, q) in &mut self.products {
+            // Keep empty collection entries without repeatedly quoting their reserves.
+            // Preserve carry normalization for older diagnostic/imported states too.
+            if *q == 0 && self.credit_fraction < 2 * UNITS {
+                continue;
+            }
             let held = product_holds.get(p).copied().unwrap_or(0);
             let sold = q.saturating_sub(held);
             *q -= sold;
