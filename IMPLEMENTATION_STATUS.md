@@ -30,6 +30,8 @@ Current saves use **version 9 / generator 5**. Older campaigns are archived befo
 
 Sparse-depth caching preserves a 1,200-second full-state replay. Geology envelope optimization preserves all 220,242 signed-coordinate samples in a compatibility fingerprint. On a 7,020-passage mine, planner lookup/sorting optimization reduces the same 1,200-second replay from 37.6 to 18.6 seconds with identical full state. Bounded distance/work-area caches reduce that replay further to 7.6 seconds, again with identical complete state. A larger replay caught a deferred-area invalidation error missed by the initial small tests; the fix and a restored-cache regression are included. These are local fixture timings, not mobile catch-up measurements.
 
+A separate 3.6 km campaign save with 4,856 passages passes an eight-real-hour offline replay against four hours of exact 20 Hz simulation. Complete serialized state matches after excluding the report and save timestamp: 30,436 cells excavated and 6,098 credits earned. Offline computation took 116.5 seconds versus 115.0 seconds for stepped simulation on this loaded Windows host. Correct accounting is verified; catch-up latency remains substantial and is not a mobile performance pass. `offline_replay` reproduces this comparison from an exported save.
+
 ## Strategy intervention diagnostic
 
 Three one-hour simulations with identical upgraded equipment compared fixed depth policy against priorities based only on discovered commodity prices. Credit changes were **+58.0%, −15.0%, and −20.5%**; the vein policy reached 174–360 metres versus 2,796–3,200 metres for depth policy. These fixture runs demonstrate a production/access tradeoff, not a guaranteed active-play bonus or campaign acceptance. No timed power multiplier is involved.
@@ -64,6 +66,7 @@ cargo test --workspace --release --lib --locked
 cargo test -p mine-core --release --example campaign --locked
 cargo run -p mine-core --release --example opening -- 30 guided
 cargo run -p mine-core --release --example opening -- 30 adverse
+cargo run -p mine-core --release --example offline_replay -- campaign-save.json 28800
 cargo run -p mine-core --release --example campaign -- 30 56 scheduled 12 42
 bun.exe scripts/check-campaign.ts campaign-report.json
 bun.exe run tauri build --no-bundle

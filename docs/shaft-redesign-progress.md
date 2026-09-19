@@ -35,3 +35,7 @@ Electrolysis now requires 300 retained research instead of 275. The 350-point di
 Benchmark recovery now detects two visits without deeper access, equipment, required ingredient stock or needed funding progress. This catches sites selling abundant junk while lacking a construction feed; it uses ordinary voluntary retirement and no hidden geology. Thirteen strategy/checkpoint tests pass, including ingredient progress and income-only stagnation.
 
 All 30 seeds restart fresh on `5ddf8cc` with unchanged pacing windows. Earlier checkpoints and reports are preserved as diagnostics, not presented as final acceptance.
+
+## Deep offline parity
+
+The `offline_replay` example compares an exported campaign save under capped offline advancement and exact fixed steps. A 3.6 km save with 4,856 passages matched complete serialized state after eight real hours / four credited simulation hours, excluding only the report and checkpoint timestamp. Both paths excavated 30,436 cells and earned 6,098 credits. Local computation took 116.5 seconds offline and 115.0 seconds stepped; this proves accounting parity, not acceptable Android catch-up latency.
