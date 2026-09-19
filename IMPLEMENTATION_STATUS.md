@@ -19,7 +19,7 @@ Current saves use **version 9 / generator 5**. Older campaigns are archived befo
 ## Verified in this milestone
 
 - **103 Rust core tests**, including signed route/save validation, cross-boundary geology, hidden-ore privacy, whole-vein selection, connected negative-coordinate branches, lateral depth-gate recovery and exact offline/stepped accounting.
-- **8 campaign-strategy tests** include selecting surveyed but unexposed cells without reading hidden geology. Baseline strategies now purchase survey accuracy and keep orders tied to missing equipment or headquarters feed.
+- **9 campaign-strategy tests** include selecting surveyed but unexposed cells without reading hidden geology. Baseline strategies now purchase survey accuracy and keep orders tied to missing equipment or headquarters feed without switching away between survey decisions.
 - **12 native persistence/lifecycle tests** cover checkpoint failure, duplicate events, stale ordering and native ownership over WebView signals.
 - **25 Bun tests** pass. Vue/TypeScript checking and production frontend builds run on Windows **Bun 1.4.0**, without WSL dependency installation.
 - Guided opening: **30/30 seeds** sell within 17 seconds, first refined iron in 17–290 seconds (median 23), conveyor in 33–159 seconds (median 123.5).
