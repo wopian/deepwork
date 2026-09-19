@@ -517,6 +517,82 @@ fn record(g: &Game, wall: u64, events: &mut BTreeMap<String, u64>) {
         }
     }
 }
+/// A strategy should retire an unproductive site even while selling junk rock.
+/// Track public progress toward construction, not unrelated gross income.
+struct Advancement {
+    site: u32,
+    depth: u32,
+    levels: BTreeMap<String, u32>,
+    collection: usize,
+    research: u64,
+    funding: u64,
+    stocks: BTreeMap<String, u64>,
+}
+impl Advancement {
+    fn read(game: &Game) -> Self {
+        let mut pending: Vec<String> = game
+            .pinned
+            .as_ref()
+            .and_then(|id| requirements().iter().find(|u| u.id == *id))
+            .map(|u| u.inputs.keys().cloned().collect())
+            .unwrap_or_else(|| {
+                [
+                    "advanced_structure",
+                    "precision_controls",
+                    "magnets",
+                    "batteries",
+                ]
+                .into_iter()
+                .map(String::from)
+                .collect()
+            });
+        let mut stocks = BTreeMap::new();
+        while let Some(product) = pending.pop() {
+            if stocks.contains_key(&product) {
+                continue;
+            }
+            stocks.insert(
+                product.clone(),
+                game.products
+                    .get(&product)
+                    .copied()
+                    .unwrap_or(0)
+                    .min(16 * mine_core::geometry::UNITS),
+            );
+            if let Some(recipe) = recipes().iter().find(|r| r.output == product) {
+                pending.extend(recipe.inputs.keys().cloned());
+            }
+        }
+        Self {
+            site: game.site,
+            depth: game.depth(),
+            levels: game.levels.clone(),
+            collection: game.collection.len(),
+            research: game.research_invested(),
+            funding: game
+                .pinned
+                .as_ref()
+                .map(|id| game.credits.min(game.cost(id)))
+                .unwrap_or(0),
+            stocks,
+        }
+    }
+    fn advanced_to(&self, next: &Self) -> bool {
+        next.site != self.site
+            || next.depth > self.depth
+            || next.collection > self.collection
+            || next.research > self.research
+            || next.funding > self.funding
+            || next
+                .levels
+                .iter()
+                .any(|(id, level)| *level > self.levels.get(id).copied().unwrap_or(0))
+            || next
+                .stocks
+                .iter()
+                .any(|(id, quantity)| *quantity > self.stocks.get(id).copied().unwrap_or(0))
+    }
+}
 fn run(seed: u64, style: &str, days: u64, mode: &str, resume: Option<&std::path::Path>) -> Value {
     let run_started = std::time::Instant::now();
     let mut g = Game::new(seed, 1);
@@ -562,7 +638,7 @@ fn run(seed: u64, style: &str, days: u64, mode: &str, resume: Option<&std::path:
             );
             idle_visits = 0;
         }
-        let before = (g.site, g.excavated, g.credits, g.levels.clone());
+        let before = Advancement::read(&g);
         for second in 0..720 {
             if second % 5 == 0 {
                 strategy(&mut g, style, mode == "attentive");
@@ -596,7 +672,7 @@ fn run(seed: u64, style: &str, days: u64, mode: &str, resume: Option<&std::path:
             wall += gap;
             record(&g, wall, &mut events);
         }
-        idle_visits = if before == (g.site, g.excavated, g.credits, g.levels.clone()) {
+        idle_visits = if !before.advanced_to(&Advancement::read(&g)) {
             idle_visits + 1
         } else {
             0
@@ -774,6 +850,30 @@ mod strategy_tests {
             stalls: vec![],
             game,
         }
+    }
+    #[test]
+    fn junk_sales_do_not_hide_a_missing_construction_feed() {
+        let mut game = Game::new(42, 1);
+        game.pinned = Some("electrolytic".into());
+        game.credits = 10_000;
+        let before = Advancement::read(&game);
+        game.credits += 5_000;
+        game.excavated += 10_000;
+        game.products.insert("aggregate".into(), 640_000);
+        assert!(!before.advanced_to(&Advancement::read(&game)));
+        game.products.insert("insulation".into(), 64_000);
+        assert!(before.advanced_to(&Advancement::read(&game)));
+    }
+    #[test]
+    fn saving_for_equipment_and_deeper_access_are_progress() {
+        let mut game = Game::new(42, 1);
+        game.pinned = Some("electrolytic".into());
+        let before = Advancement::read(&game);
+        game.credits += 1;
+        assert!(before.advanced_to(&Advancement::read(&game)));
+        let before = Advancement::read(&game);
+        game.heights.excavate_to(256, 400);
+        assert!(before.advanced_to(&Advancement::read(&game)));
     }
     #[test]
     fn resume_rejects_changed_content_clock_or_strategy() {
