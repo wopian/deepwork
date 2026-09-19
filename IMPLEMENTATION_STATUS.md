@@ -24,6 +24,7 @@ Current saves use **version 9 / generator 5**. Older campaigns are archived befo
 - **30 Bun tests** pass. Vue/TypeScript checking and production frontend builds run on Windows **Bun 1.4.0**, without WSL dependency installation.
 - Guided opening: **30/30 seeds** sell within 17 seconds, first refined iron in 17–290 seconds (median 23), conveyor in 33–159 seconds (median 123.5). A stronger junction check confirms actual underground forks in 22–95 seconds on all 30 seeds.
 - Adverse housing-first purchase order: **30/30 seeds** recover. First iron 175–498 seconds; lift purchase 891–1,552 seconds (median 1,127.5). These are deterministic strategies, not human playtests.
+- An additional deliberate-sale diagnostic spends the first two iron on a contract and releases surplus before repinning the lift. Passive bulk recovery misses the one-hour budget on four seeds; public survey, whole-vein orders and renewed depth exploration recover 29/30 within one hour. The remaining seed recovers at 5,417 seconds (90:17). This proves a recovery path, not fast recovery after selling construction feed. Original failed strategy reports are retained.
 - Continuous steel-first runs across all three geological profiles reach steel/specialisation in 1,073–1,497 seconds. Improved lift median is 1,908 seconds; the slowest profile takes 2,365 seconds, outside the 25–35 minute target. Lift-first adverse runs remain faster.
 - Isolated packaged Windows checks pass anchored two-finger pinch, two-axis pan, production, purchases, import/export, rejection of corrupt imports, reset/archive, stale commands, preferences, background/resume and reload. Child application PATH excludes development runtimes. Desktop/portrait screenshots and emulated touch controls pass. Latest computed settled-state readability checks pass across 25 views (1,018 text and 533 control observations), including normal-text contrast, 16-pixel controls, 14-pixel secondary text and 44-pixel targets. Rotation preserves the inspected world centre and pixel scale; this is asserted in the native harness, not inferred from layout dimensions.
 - Android ARM64 build script produces a debug-signed test APK and verifies v2/v3 signatures plus 16 KB ZIP and native ELF alignment. Current test APK includes the snapshot privacy fix.
@@ -82,6 +83,7 @@ cargo test --workspace --release --lib --locked
 cargo test -p mine-core --release --example campaign --locked
 cargo run -p mine-core --release --example opening -- 30 guided
 cargo run -p mine-core --release --example opening -- 30 adverse
+cargo run -p mine-core --release --example opening -- 30 released 0 7200
 cargo run -p mine-core --release --example offline_replay -- campaign-state.json 28800
 cargo run -p deepwork --release --example save_roundtrip -- campaign-save.json
 cargo run -p mine-core --release --example campaign -- 30 56 scheduled 12 42
