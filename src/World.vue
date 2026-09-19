@@ -18,6 +18,7 @@ let world: Container;
 let terrain: Graphics;
 const fineTerrain = new TerrainView();
 let actors: Graphics;
+const actorTargets: { x: number; y: number; panel: string }[] = [];
 let structures: Graphics;
 let wasteLabel: Text;
 let t = 0;
@@ -398,6 +399,7 @@ onMounted(async () => {
     world.y = offsetY;
     world.x = offsetX;
     actors.clear();
+    actorTargets.length = 0;
     const g = state.value;
     productionAudio(g?.stages.reduce((sum, s) => sum + s.rate, 0) ?? 0);
     if (g) {
@@ -497,6 +499,7 @@ onMounted(async () => {
             )[role] ?? 100;
           x += (i % 8) * 8;
         }
+        actorTargets.push({ x: x + 2, y: y - 3, panel: "Crew" });
         rect(actors, x, y - 7, 4, 3, 0xe8dfc8);
         rect(actors, x, y - 4, 5, 4, role === "diggers" ? 0xe5a34d : 0x8c9ba5);
         if (role === "diggers")
@@ -559,6 +562,7 @@ onMounted(async () => {
         ? [235 + leg.point[0] * CELL_PIXEL, 208 + leg.point[1] * CELL_PIXEL]
         : routePosition(points, progress);
       const mode = leg?.mode ?? cargo.mode;
+      actorTargets.push({ x: x + 4, y: y + 2, panel: "Logistics" });
       rect(
         actors,
         x,
@@ -686,6 +690,24 @@ function inspectAt(p: ScreenPoint, select = false) {
     );
   const wx = (p.x - offsetX) / scale,
     wy = (p.y - offsetY) / scale;
+  if (select && inspected.value === null) {
+    const radius = 22 / scale;
+    const target = actorTargets.reduce<{
+      x: number;
+      y: number;
+      panel: string;
+    } | null>((best, candidate) => {
+      const distance = Math.hypot(candidate.x - wx, candidate.y - wy);
+      return distance <= radius &&
+        (!best || distance < Math.hypot(best.x - wx, best.y - wy))
+        ? candidate
+        : best;
+    }, null);
+    if (target) {
+      emit("inspect", target.panel);
+      return;
+    }
+  }
   if (select && wy >= 100 && wy < 208) {
     emit("inspect", wx < 235 ? "Crew" : wx < 680 ? "Logistics" : "Processing");
   }

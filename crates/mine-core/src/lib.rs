@@ -135,6 +135,7 @@ pub struct ProcessingFeed {
     pub intake: u64,
     pub stored: u64,
     pub transit: u64,
+    pub buffered: u64,
     pub queued: u64,
     pub product: u64,
     pub reserve_target: u64,
@@ -561,10 +562,17 @@ impl Game {
                     .filter(|b| b.material == id)
                     .map(|b| b.amount)
                     .sum::<u64>();
+                let buffered = self.ore.get(&id).copied().unwrap_or(0)
+                    + self
+                        .transport
+                        .stations
+                        .iter()
+                        .map(|s| s.cargo.get(&id).copied().unwrap_or(0))
+                        .sum::<u64>();
                 let queued = self.hauled.get(&id).copied().unwrap_or(0);
                 let product = self.products.get(output).copied().unwrap_or(0);
                 let flow = self.processing_window.get(&id).copied().unwrap_or_default();
-                if input + stock + transit + queued + product + flow[0] == 0 {
+                if input + stock + transit + buffered + queued + product + flow[0] == 0 {
                     return None;
                 }
                 let hold = self.product_hold(output);
@@ -575,6 +583,7 @@ impl Game {
                     intake: input,
                     stored: stock,
                     transit,
+                    buffered,
                     queued,
                     product,
                     reserve_target: hold,
@@ -601,6 +610,8 @@ impl Game {
                         "Waiting for refinery capacity"
                     } else if stock > 0 {
                         "Stored feed awaiting sorting capacity"
+                    } else if buffered > 0 {
+                        "Ore waiting in route stockpiles"
                     } else if transit + queued > 0 {
                         "Feed arriving"
                     } else {
@@ -2216,6 +2227,10 @@ mod tests {
         );
         assert_eq!(iron.recovery_percent, 65);
         assert_eq!(iron.reserve_target, 8 * UNITS);
+        g.ore.insert(3, 17);
+        g.transport.stations[0].cargo.insert(3, 23);
+        let rows = g.processing();
+        assert_eq!(rows.iter().find(|f| f.id == 3).unwrap().buffered, 40);
     }
     #[test]
     fn deterministic() {

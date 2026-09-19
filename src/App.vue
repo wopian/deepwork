@@ -418,7 +418,7 @@ onMounted(start);
                   hauler always remain.</span
                 >
               </label>
-              <p class="crew-roster" v-if="state?.levels.supports">
+              <p class="crew-roster" v-if="state">
                 {{
                   state.workings.status ||
                   "Supports follow commissioned passages."

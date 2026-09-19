@@ -115,6 +115,7 @@ export interface Game {
     intake: number;
     stored: number;
     transit: number;
+    buffered: number;
     queued: number;
     product: number;
     reserve_target: number;

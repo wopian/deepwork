@@ -88,6 +88,10 @@ const label = (s: string) => s.replaceAll("_", " ");
       </p>
       <dl>
         <div>
+          <dt>Route stockpiles</dt>
+          <dd>{{ quantity(feed.buffered) }}</dd>
+        </div>
+        <div>
           <dt>In transit</dt>
           <dd>{{ quantity(feed.transit) }}</dd>
         </div>
