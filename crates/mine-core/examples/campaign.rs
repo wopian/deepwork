@@ -803,6 +803,54 @@ fn median_seconds(sorted: &[u64]) -> Option<f64> {
     Some((sorted[(sorted.len() - 1) / 2] as f64 + sorted[sorted.len() / 2] as f64) / 2.0)
 }
 
+fn progress_path() -> std::path::PathBuf {
+    std::path::PathBuf::from("target/campaign-progress.json")
+}
+
+fn load_progress(
+    path: &std::path::Path,
+    seed_start: u64,
+    seeds: u64,
+    mode: &str,
+) -> Result<Vec<Value>, String> {
+    let backup = path.with_extension("json.bak");
+    let bytes = std::fs::read(path)
+        .or_else(|_| std::fs::read(&backup))
+        .map_err(|error| format!("Could not read campaign progress: {error}"))?;
+    let runs: Vec<Value> = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("Could not decode campaign progress: {error}"))?;
+    let mut completed = std::collections::BTreeSet::new();
+    for run in &runs {
+        let seed = run["seed"]
+            .as_u64()
+            .ok_or_else(|| "Campaign progress entry has no seed".to_string())?;
+        if !(seed_start..seed_start + seeds).contains(&seed)
+            || run["mode"] != mode
+            || run["complete"] != true
+            || run["content_fingerprint"] != content_fingerprint().to_string()
+            || !completed.insert(seed)
+        {
+            return Err("Campaign progress does not match run parameters/content".into());
+        }
+    }
+    Ok(runs)
+}
+
+fn persist_progress(path: &std::path::Path, runs: &[Value]) -> Result<(), String> {
+    let temporary = path.with_extension("json.tmp");
+    let backup = path.with_extension("json.bak");
+    std::fs::write(&temporary, serde_json::to_vec_pretty(runs).unwrap())
+        .map_err(|error| format!("Could not write campaign progress: {error}"))?;
+    if path.exists() {
+        std::fs::copy(path, &backup)
+            .map_err(|error| format!("Could not back up campaign progress: {error}"))?;
+        std::fs::remove_file(path)
+            .map_err(|error| format!("Could not replace campaign progress: {error}"))?;
+    }
+    std::fs::rename(&temporary, path)
+        .map_err(|error| format!("Could not commit campaign progress: {error}"))
+}
+
 fn main() {
     let started = std::time::Instant::now();
     mine_core::content::validate().unwrap();
@@ -819,7 +867,6 @@ fn main() {
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(42);
     let mode = args.get(3).map(String::as_str).unwrap_or("scheduled");
-    let resume = args.get(6).map(std::path::Path::new);
     assert!(["scheduled", "attentive", "continuous"].contains(&mode));
     let seed_start = args
         .get(5)
@@ -833,10 +880,20 @@ fn main() {
             1,
             std::thread::available_parallelism().map_or(4, usize::from),
         );
-    std::fs::write("target/campaign-progress.json", "[]").unwrap();
+    let resume = args.get(6).map(std::path::Path::new);
+    let progress = progress_path();
+    let mut runs = if resume.is_some()
+        && (progress.exists() || progress.with_extension("json.bak").exists())
+    {
+        load_progress(&progress, seed_start, seeds, mode).unwrap()
+    } else {
+        Vec::new()
+    };
+    persist_progress(&progress, &runs).unwrap();
+    let completed: std::collections::BTreeSet<_> =
+        runs.iter().filter_map(|run| run["seed"].as_u64()).collect();
     let next = std::sync::atomic::AtomicU64::new(0);
     let (sender, receiver) = std::sync::mpsc::channel();
-    let mut runs = Vec::new();
     std::thread::scope(|scope| {
         for _ in 0..workers {
             let sender = sender.clone();
@@ -845,6 +902,9 @@ fn main() {
                 let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if index >= seeds {
                     break;
+                }
+                if completed.contains(&(seed_start + index)) {
+                    continue;
                 }
                 let style = ["bulk", "precision", "reclamation"][(seed_start + index) as usize % 3];
                 sender
@@ -859,11 +919,10 @@ fn main() {
                 report["seed"], report["complete"]
             );
             runs.push(report);
-            std::fs::write(
-                "target/campaign-progress.json",
-                serde_json::to_vec_pretty(&runs).unwrap(),
-            )
-            .unwrap();
+            persist_progress(&progress, &runs).unwrap();
+            let seed = runs.last().unwrap()["seed"].as_u64().unwrap();
+            let _ = std::fs::remove_file(format!("target/campaign-state-{seed}.json"));
+            let _ = std::fs::remove_file(format!("target/campaign-checkpoint-{seed}.json"));
         }
     });
     runs.sort_by_key(|r| r["seed"].as_u64());
@@ -903,6 +962,25 @@ mod strategy_tests {
         assert_eq!(median_seconds(&[10]), Some(10.0));
         assert_eq!(median_seconds(&[10, 13]), Some(11.5));
         assert_eq!(median_seconds(&[10, 13, 30]), Some(13.0));
+    }
+
+    #[test]
+    fn completed_progress_resumes_without_replaying_seed() {
+        let directory =
+            std::env::temp_dir().join(format!("deepwork-campaign-progress-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("progress.json");
+        let runs = vec![json!({
+            "seed": 42,
+            "mode": "scheduled",
+            "complete": true,
+            "content_fingerprint": content_fingerprint().to_string(),
+        })];
+        persist_progress(&path, &runs).unwrap();
+        assert_eq!(load_progress(&path, 42, 30, "scheduled").unwrap(), runs);
+        assert!(load_progress(&path, 43, 30, "scheduled").is_err());
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     fn checkpoint_fixture() -> Checkpoint {
