@@ -15,3 +15,9 @@ A separate packaged-app test uses actual mouse/touch drags and clicks to inspect
 Distance lookups are cached until passage geometry/scope changes. Candidate work areas are cached across failed searches, bounded to 16,384 entries. Deferred areas remain in the cache because completing a passage can clear deferrals without another geometry revision. That transition has a focused restored-state regression.
 
 The expanded 7,020-passage fixture advances 1,200 exact simulation seconds in 7.6 seconds versus 18.6 seconds before these caches, producing identical complete serialized state. All 109 core tests pass. The 30-seed campaign continues from atomic visit checkpoints on `2480471`, retaining its prior events and content fingerprint; the manifest records each executable.
+
+## Readability and deep cargo payloads
+
+Computed settled-state checks cover 25 desktop/portrait views: 1,015 text and 536 control observations. They found and fixed 14-pixel policy/contract controls, default small headquarters labels, 41-pixel settings selectors and a 28-pixel mobile production shortcut. Normal text meets 4.5:1 contrast in the checked DOM views; canvas art and physical-device comfort remain separately assessed.
+
+A campaign-derived 3.6 km endurance fixture exposed full-route cargo duplication in IPC. Its initial frame stalls reached about 10 FPS and native private memory peaked at 790 MiB; the 120-second partial run was stopped and retained as failed diagnostic evidence. Snapshots now send the occupied leg only and strip persistent batch/segment geometry without changing saved routes or material ownership. Position and snapshot-size regressions pass; totals are 110 core and 13 native tests. A new full-duration run uses the same deep fixture.
