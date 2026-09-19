@@ -54,3 +54,14 @@ test("even campaign samples average both central milestone observations", () => 
     31 * 86400,
   );
 });
+test("accepted medians still expose slow seeds and their strategies", () => {
+  const runs = validRuns();
+  runs[0]!.events.headquarters = 50 * 86400;
+  const result = assessCampaign(runs);
+  expect(result.accepted).toBe(true);
+  expect(result.milestones.headquarters!.maximum_seconds).toBe(50 * 86400);
+  expect(result.milestones.headquarters!.outside_window).toEqual([
+    { seed: 42, strategy: "bulk", seconds: 50 * 86400, in_window: false },
+  ]);
+  expect(result.milestones.headquarters!.observations).toHaveLength(30);
+});

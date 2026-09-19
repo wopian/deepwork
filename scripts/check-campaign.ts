@@ -48,6 +48,24 @@ export function assessCampaign(runs: CampaignRun[]) {
         if (times.length !== runs.length)
           errors.push(`${name}: missing milestone observations.`);
         if (!inWindow) errors.push(`${name}: median outside authored window.`);
+        const observations = [...runs]
+          .sort((a, b) => a.seed - b.seed)
+          .map((run) => {
+            const time = run.events[name];
+            const seconds =
+              time !== undefined && Number.isFinite(time) && time >= 0
+                ? time
+                : null;
+            return {
+              seed: run.seed,
+              strategy: run.strategy,
+              seconds,
+              in_window:
+                seconds !== null &&
+                seconds >= window[0]! &&
+                seconds <= window[1]!,
+            };
+          });
         return [
           name,
           {
@@ -55,6 +73,10 @@ export function assessCampaign(runs: CampaignRun[]) {
             median_seconds: median,
             target_seconds: window,
             in_window: inWindow,
+            minimum_seconds: times[0] ?? null,
+            maximum_seconds: times.at(-1) ?? null,
+            outside_window: observations.filter((row) => !row.in_window),
+            observations,
           },
         ];
       }),
