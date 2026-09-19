@@ -611,7 +611,6 @@ impl Workings {
                     if !terrain.contains(p[0], p[1])
                         && p[1] < depth_limit
                         && terrain.known_material(p[0], p[1]).is_some_and(|id| id > 1)
-                        && !self.deferred.contains(&area(p))
                         && !protected(&self.floor_index, p, &[])
                     {
                         let near = nearest_distance(p);
@@ -629,7 +628,6 @@ impl Workings {
                         let p = point(k);
                         if p[1] < PIT_ROWS
                             || p[1] >= depth_limit
-                            || self.deferred.contains(&area(p))
                             || protected(&self.floor_index, p, &[])
                             || !access_blocked && p[1] + 256 < deepest
                         {
@@ -650,7 +648,6 @@ impl Workings {
                 for s in &self.signals {
                     if s.centre[1] >= depth_limit
                         || self.exhausted.contains(&key(s.centre))
-                        || self.deferred.contains(&area(s.centre))
                         || !access_blocked && s.centre[1] + 256 < deepest
                     {
                         continue;
@@ -668,6 +665,8 @@ impl Workings {
                         *score -= (p[1] - deepest) as i64;
                     }
                 }
+                // Include currently deferred areas: finishing a passage can clear
+                // deferrals next tick without changing these geometry revisions.
                 // Failed searches defer a whole 4x4 area. Keep its best candidate:
                 // any other point in that area becomes ineligible at the same time.
                 let mut areas = BTreeMap::<i64, (i64, Point)>::new();
@@ -1696,6 +1695,42 @@ mod development_tests {
             g.levels.insert(id.into(), n);
         }
         g
+    }
+    #[test]
+    fn clearing_deferred_areas_restores_cached_candidates() {
+        let cat = crate::materials();
+        let mut game = fixture(42);
+        for _ in 0..5000 {
+            game.tick(cat, false);
+            if !game.workings.candidate_cache.is_empty() {
+                break;
+            }
+        }
+        let candidate = *game
+            .workings
+            .candidate_cache
+            .iter()
+            .min()
+            .expect("surveyed work area");
+        let mut cached = game.workings;
+        cached.section = None;
+        cached.search = None;
+        cached.deferred.insert(area(candidate.1));
+        cached.deferred_at = (game.terrain.revision, cached.passages.len());
+        cached.candidate_stamp = None;
+        cached.advance(&game.terrain, &game.priorities, "vein", 4800, 1, 1);
+        assert!(cached.candidate_stamp.is_some());
+        cached.search = None;
+        cached.section = None;
+        cached.deferred.clear();
+        let mut restored: Workings =
+            serde_json::from_value(serde_json::to_value(&cached).unwrap()).unwrap();
+        cached.advance(&game.terrain, &game.priorities, "vein", 4800, 1, 1);
+        restored.advance(&game.terrain, &game.priorities, "vein", 4800, 1, 1);
+        assert_eq!(
+            serde_json::to_value(cached).unwrap(),
+            serde_json::to_value(restored).unwrap()
+        );
     }
     #[test]
     fn planner_caches_preserve_policy_priority_and_geometry_transitions() {
