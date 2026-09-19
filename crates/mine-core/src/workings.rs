@@ -551,6 +551,13 @@ impl Workings {
                                 }
                             }
                         }
+                        let outside = (p[0] - (tx - ring) * 64 + 1)
+                            .min((tx + ring + 1) * 64 - p[0])
+                            .min(p[1] - (ty - ring) * 64 + 1)
+                            .min((ty + ring + 1) * 64 - p[1]);
+                        if best <= outside {
+                            break;
+                        }
                     }
                     best
                 } else {
@@ -572,9 +579,11 @@ impl Workings {
                     && terrain.known_material(p[0], p[1]).is_some_and(|id| id > 1)
                     && !self.deferred.contains(&area(p))
                     && !protected(&self.floor_index, p, &[])
-                    && nearest_distance(p) <= settings().search_radius
                 {
-                    candidates.push((-10000 + nearest_distance(p) as i64, p));
+                    let near = nearest_distance(p);
+                    if near <= settings().search_radius {
+                        candidates.push((-10000 + near, p));
+                    }
                 }
             }
             // Targets come only from locally sampled frontier cells.
@@ -625,32 +634,35 @@ impl Workings {
                     *score -= (p[1] - deepest) as i64;
                 }
             }
-            candidates.sort_unstable();
-            let goal = candidates.first().map(|(_, p)| *p).unwrap_or_else(|| {
-                if deepest + 1 >= depth_limit {
-                    // A depth gate must never exhaust basic earning. Extend a
-                    // supported edge into unsurveyed host rock, then let local
-                    // surveys steer subsequent cuts. No hidden ore query here.
-                    let right = self.passages.len() % 2 == 0;
-                    let edge = self
-                        .passages
-                        .iter()
-                        .filter(|n| n.supported && n.feet[1] >= 16)
-                        .min_by_key(|n| if right { -n.feet[0] } else { n.feet[0] })
-                        .unwrap_or(&self.passages[self.active]);
-                    let rise = if self.passages.len() % 3 == 0 { 4 } else { 0 };
-                    [
-                        edge.feet[0] + if right { 16 } else { -16 },
-                        (edge.feet[1] - rise).max(16).min(depth_limit - 1),
-                    ]
-                } else {
-                    let n = self.passages.iter().max_by_key(|n| n.feet[1]).unwrap();
-                    [
-                        n.feet[0],
-                        (n.feet[1] + 16).min(depth_limit.saturating_sub(1)),
-                    ]
-                }
-            });
+            let goal = candidates
+                .into_iter()
+                .min()
+                .map(|(_, p)| p)
+                .unwrap_or_else(|| {
+                    if deepest + 1 >= depth_limit {
+                        // A depth gate must never exhaust basic earning. Extend a
+                        // supported edge into unsurveyed host rock, then let local
+                        // surveys steer subsequent cuts. No hidden ore query here.
+                        let right = self.passages.len() % 2 == 0;
+                        let edge = self
+                            .passages
+                            .iter()
+                            .filter(|n| n.supported && n.feet[1] >= 16)
+                            .min_by_key(|n| if right { -n.feet[0] } else { n.feet[0] })
+                            .unwrap_or(&self.passages[self.active]);
+                        let rise = if self.passages.len() % 3 == 0 { 4 } else { 0 };
+                        [
+                            edge.feet[0] + if right { 16 } else { -16 },
+                            (edge.feet[1] - rise).max(16).min(depth_limit - 1),
+                        ]
+                    } else {
+                        let n = self.passages.iter().max_by_key(|n| n.feet[1]).unwrap();
+                        [
+                            n.feet[0],
+                            (n.feet[1] + 16).min(depth_limit.saturating_sub(1)),
+                        ]
+                    }
+                });
             // Reachable sampled ore becomes a local extraction area, not a new access shaft.
             if !development
                 && terrain
@@ -750,15 +762,22 @@ impl Workings {
                 self.blocked_at = Some(stamp);
                 return;
             }
-            let mut nearest: Vec<_> = self
+            let mut nearest = BinaryHeap::with_capacity(9);
+            for (i, node) in self
                 .passages
                 .iter()
                 .enumerate()
                 .filter(|(_, n)| n.supported)
-                .map(|(i, n)| (distance(n.feet, goal), i))
-                .collect();
-            nearest.sort_unstable();
-            nearest.truncate(8);
+            {
+                let candidate = (distance(node.feet, goal), i);
+                if nearest.len() < 8 {
+                    nearest.push(candidate);
+                } else if nearest.peek().is_some_and(|worst| candidate < *worst) {
+                    nearest.pop();
+                    nearest.push(candidate);
+                }
+            }
+            let nearest = nearest.into_sorted_vec();
             let mut search = Search {
                 goal,
                 origin: goal,
