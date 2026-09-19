@@ -541,6 +541,25 @@ struct Advancement {
 }
 impl Advancement {
     fn read(game: &Game) -> Self {
+        // Public catalogue tiers define a reasonable search band. Continuing
+        // below it is not progress toward a missing construction ingredient.
+        // A selected, revealed deeper source can extend that search explicitly.
+        let feeds = pinned_feeds(game);
+        let mut search_depth = feeds
+            .iter()
+            .map(|id| [100, 300, 700, 1500, 3000, 6000][materials()[*id].tier.min(5) as usize])
+            .max()
+            .unwrap_or(300)
+            .max(300);
+        if let Some(target) = game.workings.target {
+            if game
+                .terrain
+                .known_material(target[0], target[1])
+                .is_some_and(|id| feeds.contains(&id))
+            {
+                search_depth = search_depth.max(mine_core::geometry::depth(target[1]));
+            }
+        }
         let mut pending: Vec<String> = game
             .pinned
             .as_ref()
@@ -591,7 +610,7 @@ impl Advancement {
         }
         Self {
             site: game.site,
-            depth: game.depth(),
+            depth: game.depth().min(search_depth),
             levels: game.levels.clone(),
             collection: game.collection.len(),
             research: game.research_invested(),
@@ -914,6 +933,39 @@ mod strategy_tests {
         assert!(before.advanced_to(&Advancement::read(&game)));
         let before = Advancement::read(&game);
         game.heights.excavate_to(256, 400);
+        assert!(before.advanced_to(&Advancement::read(&game)));
+    }
+    #[test]
+    fn unrelated_deepening_does_not_hide_missing_aluminium_feed() {
+        let mut game = Game::new(42, 1);
+        game.pinned = Some("trace".into());
+        game.heights
+            .excavate_to(256, 1500 * mine_core::geometry::CELLS_PER_METRE);
+        let before = Advancement::read(&game);
+        game.heights
+            .excavate_to(256, 7500 * mine_core::geometry::CELLS_PER_METRE);
+        assert!(!before.advanced_to(&Advancement::read(&game)));
+        game.products.insert("alumina".into(), 1);
+        assert!(before.advanced_to(&Advancement::read(&game)));
+    }
+    #[test]
+    fn revealed_required_source_extends_search_but_unknown_target_does_not() {
+        use mine_core::geometry::{bit_index, chunk_id, CELLS_PER_METRE};
+        let mut game = Game::new(42, 1);
+        game.pinned = Some("trace".into());
+        let target = [256, 2500 * CELLS_PER_METRE];
+        game.workings.target = Some(target);
+        game.heights.excavate_to(256, 1500 * CELLS_PER_METRE);
+        let before = Advancement::read(&game);
+        game.heights.excavate_to(256, 2000 * CELLS_PER_METRE);
+        assert!(!before.advanced_to(&Advancement::read(&game)));
+        let source = pinned_feeds(&game)[0];
+        game.terrain
+            .visible
+            .entry(chunk_id(target[0], target[1]))
+            .or_insert_with(|| vec![255; 4096])[bit_index(target[0], target[1])] = source as u8;
+        let before = Advancement::read(&game);
+        game.heights.excavate_to(256, 2200 * CELLS_PER_METRE);
         assert!(before.advanced_to(&Advancement::read(&game)));
     }
     #[test]
