@@ -27,3 +27,11 @@ A campaign-derived 3.6 km endurance fixture exposed full-route cargo duplication
 The corrected 3.6 km run reached its first measurement (50 FPS, 157.7 MiB native working set, 140.0 MiB private memory), then the application closed. Windows Defender records show quarantine of the exact temporary executable/process as `Trojan:Win32/Bearfoos.A!ml` (threat ID 2147731250). A second copy was quarantined before startup, and the source executable subsequently became inaccessible. Classification is unresolved; no exclusions, restores or protection changes were performed. The initial sample is not a completed endurance result. Earlier complete endurance runs remain evidence for their recorded binaries only.
 
 The harness now captures native stdout/stderr and exit codes. Rust tests, browser readability, Android packaging and campaign simulations remain independently verifiable.
+
+## Final fresh campaign retune
+
+Electrolysis now requires 300 retained research instead of 275. The 350-point diagnostic pilot delayed its first observed aluminium production to day 21.5 and was rejected. Baseline diagnostic headquarters completions were days 29.0, 30.5, 31.0, 31.5 and 40.0; the full baseline was stopped before all seeds finished.
+
+Benchmark recovery now detects two visits without deeper access, equipment, required ingredient stock or needed funding progress. This catches sites selling abundant junk while lacking a construction feed; it uses ordinary voluntary retirement and no hidden geology. Thirteen strategy/checkpoint tests pass, including ingredient progress and income-only stagnation.
+
+All 30 seeds restart fresh on `5ddf8cc` with unchanged pacing windows. Earlier checkpoints and reports are preserved as diagnostics, not presented as final acceptance.
