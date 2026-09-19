@@ -18,7 +18,8 @@ Current saves use **version 9 / generator 5**. Older campaigns are archived befo
 
 ## Verified in this milestone
 
-- **102 Rust core tests**, including signed route/save validation, cross-boundary geology, hidden-ore privacy, whole-vein selection, connected negative-coordinate branches, lateral depth-gate recovery and exact offline/stepped accounting.
+- **103 Rust core tests**, including signed route/save validation, cross-boundary geology, hidden-ore privacy, whole-vein selection, connected negative-coordinate branches, lateral depth-gate recovery and exact offline/stepped accounting.
+- **8 campaign-strategy tests** include selecting surveyed but unexposed cells without reading hidden geology. Baseline strategies now purchase survey accuracy and keep orders tied to missing equipment or headquarters feed.
 - **12 native persistence/lifecycle tests** cover checkpoint failure, duplicate events, stale ordering and native ownership over WebView signals.
 - **25 Bun tests** pass. Vue/TypeScript checking and production frontend builds run on Windows **Bun 1.4.0**, without WSL dependency installation.
 - Guided opening: **30/30 seeds** sell within 17 seconds, first refined iron in 17–290 seconds (median 23), conveyor in 33–159 seconds (median 123.5).
@@ -33,7 +34,9 @@ Three one-hour simulations with identical upgraded equipment compared fixed dept
 
 ## Measurements in progress
 
-The new 30-seed scheduled campaign and 30-minute expanded-terrain endurance run are being measured. Their reports, not earlier fixed-width measurements, determine campaign and performance acceptance. Headquarters remains targeted at 28–42 days with two daily 12-minute visits.
+A 30-minute expanded-terrain Windows run passed at median **58 FPS**, **86.7 MiB** peak JavaScript heap, **30** peak resident terrain textures and a **571,539-byte** compact save. Supported passages grew from 791 to 2,073 with 1,000 simulated workers represented by at most 250 sprites. Save/reload and portrait touch checks passed. The original harness falsely flagged equipment changes because JSON key order differed; recursive comparison confirms unchanged values and zero gameplay commands during measurement. Its report and corrected assessment are preserved separately.
+
+The final 30-seed scheduled campaign uses survey purchases and public whole-vein orders. An earlier strategy that never bought survey accuracy is retained only as diagnostic evidence. Each visit now writes a full state checkpoint for reproducible diagnosis. A second endurance case tests a selected vein in older workings. Headquarters remains targeted at 28–42 days with two daily 12-minute visits; final campaign acceptance remains pending.
 
 ## Practical limits
 

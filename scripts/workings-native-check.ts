@@ -1,5 +1,6 @@
 /** Isolated native visual/stream acceptance for dynamically generated workings. */
 import { chromium } from "playwright-core";
+import { chunkOrigin } from "../src/geometry";
 import {
   mkdtemp,
   mkdir,
@@ -12,10 +13,25 @@ import { join, resolve } from "node:path";
 const out = resolve(process.argv[2] ?? "test-results/workings");
 const duration = Number(process.argv[3] ?? 30);
 const inputLocked = process.argv.includes("--locked-input");
+const priorityOrder = process.argv.includes("--priority");
+const canonical = (value: any): any =>
+  Array.isArray(value)
+    ? value.map(canonical)
+    : value && typeof value === "object"
+      ? Object.fromEntries(
+          Object.entries(value)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([k, v]) => [k, canonical(v)]),
+        )
+      : value;
+
 await mkdir(out, { recursive: true });
 const data = await mkdtemp(join(tmpdir(), "deepwork-workings-"));
 const exe = join(data, "deepwork.exe");
 await copyFile("target/release/deepwork.exe", exe);
+const executableSha256 = new Bun.CryptoHasher("sha256")
+  .update(await Bun.file(exe).arrayBuffer())
+  .digest("hex");
 const portServer = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
@@ -87,6 +103,62 @@ try {
     throw new Error(
       `Stress fixture rejected: ${await page.locator("body").innerText()}`,
     );
+  let measurementStartSequence = imported.last_sequence;
+  if (priorityOrder) {
+    const observed = await page.evaluate(
+      ({ campaignId, sequence, policy }) =>
+        (window as any).__TAURI_INTERNALS__.invoke("command", {
+          campaignId,
+          action: { sequence, kind: "policy", target: policy, value: 0 },
+        }),
+      {
+        campaignId: imported.campaign_id,
+        sequence: imported.last_sequence + 1,
+        policy: imported.policy,
+      },
+    );
+    const at = observed.workings.passages[observed.workings.active].feet;
+    let best: { point: [number, number]; score: number } | undefined;
+    for (const [chunk, values] of Object.entries(observed.terrain.visible) as [
+      string,
+      number[],
+    ][]) {
+      const [x, y] = chunkOrigin(Number(chunk));
+      const mask = observed.terrain.chunks[chunk] ?? [];
+      for (let i = 0; i < values.length; i++) {
+        if (
+          values[i]! <= 1 ||
+          values[i] === 255 ||
+          (mask[i >> 3] ?? 0) & (1 << i % 8)
+        )
+          continue;
+        const point: [number, number] = [x + (i % 64), y + Math.floor(i / 64)];
+        const score = Math.abs(point[0] - at[0]) + Math.abs(point[1] - at[1]);
+        if (!best || score > best.score) best = { point, score };
+      }
+    }
+    if (!best) throw new Error("No public surveyed ore in fixture");
+    const ordered = await page.evaluate(
+      ({ campaignId, sequence, point }) =>
+        (window as any).__TAURI_INTERNALS__.invoke("command", {
+          campaignId,
+          action: {
+            sequence,
+            kind: "target_vein",
+            target: point.join(","),
+            value: 0,
+          },
+        }),
+      {
+        campaignId: imported.campaign_id,
+        sequence: observed.last_sequence + 1,
+        point: best.point,
+      },
+    );
+    if (!ordered.selected_vein?.known_cells || !ordered.workings.target_deposit)
+      throw new Error("Whole-vein order did not expose a public outline");
+    measurementStartSequence = ordered.last_sequence;
+  }
   await page.getByRole("button", { name: "Operations", exact: true }).click();
   await page.getByRole("button", { name: "Follow crew", exact: true }).click();
   await page
@@ -221,9 +293,12 @@ try {
         passed: true,
         duration,
         inputLocked,
+        priorityOrder,
+        executableSha256,
+        setupCommands: measurementStartSequence - fixtureState.last_sequence,
         saveBytes: Buffer.byteLength(save),
         fixtureWorkers: fixtureState.workers,
-        gameplayCommands: g.last_sequence - fixtureState.last_sequence,
+        gameplayCommands: g.last_sequence - measurementStartSequence,
         touchSurvey: true,
         passages: g.workings.passages.length,
         scenarioChanges: [
@@ -240,7 +315,9 @@ try {
           "enabled_recipes",
           "paused_recipes",
         ].filter(
-          (key) => JSON.stringify(g[key]) !== JSON.stringify(fixtureState[key]),
+          (key) =>
+            JSON.stringify(canonical(g[key])) !==
+            JSON.stringify(canonical(fixtureState[key])),
         ),
         transportControlsChanged:
           g.transport.express !== fixtureState.transport.express ||
