@@ -519,7 +519,7 @@ impl Workings {
             let access_blocked = depth_limit <= deepest + 17;
             let development = policy == "depth" && !access_blocked;
             let nearest_distance = |p: Point| {
-                if access_blocked {
+                if access_blocked || self.target.is_some() {
                     // Reuse older surveyed workings when the next equipment gate stops
                     // access development. The derived spatial index bounds this lookup.
                     let tx = p[0].div_euclid(64);
@@ -1158,6 +1158,50 @@ mod tests {
             .all(|p| terrain.contains(p[0], p[1])));
         terrain.rebuild().unwrap();
         assert!(w.valid());
+    }
+    #[test]
+    fn selected_vein_reuses_old_passages_beyond_recent_planning_window() {
+        let mut terrain = Terrain::default();
+        let mut w = Workings::default();
+        w.initialise();
+        let mut destinations = vec![([256, 63], true)];
+        destinations.extend((1..200).map(|i| ([256 + i * 16, 63], false)));
+        for (to, lift) in destinations {
+            let from = w.passages.last().unwrap().feet;
+            let mut pending = cut_cells(from, to, lift);
+            while !pending.is_empty() {
+                let before = pending.len();
+                pending.retain(|p| !terrain.contains(p[0], p[1]) && !terrain.excavate(p[0], p[1]));
+                assert!(pending.len() < before);
+            }
+            w.passages.push(Passage {
+                feet: to,
+                parent: w.passages.len() - 1,
+                lift,
+                supported: true,
+                column: true,
+            });
+        }
+        w.active = w.passages.len() - 1;
+        let goal = [230, 63];
+        terrain.reveal(42, 0, goal[0], goal[1], 0, &crate::materials());
+        terrain
+            .visible
+            .get_mut(&crate::geometry::chunk_id(goal[0], goal[1]))
+            .unwrap()[crate::geometry::bit_index(goal[0], goal[1])] = 3;
+        w.target = Some(goal);
+        w.target_cells = vec![goal];
+        for _ in 0..100 {
+            w.advance(&terrain, &[3], "vein", 1200, 1, 0);
+            if w.section.is_some() {
+                break;
+            }
+        }
+        let section = w
+            .section
+            .expect("older connected vein must remain selectable");
+        assert!(section.from < 128);
+        assert!(section.to[0] < 256);
     }
     #[test]
     fn deposit_order_survives_selected_cell_and_save_without_leaking_geometry() {

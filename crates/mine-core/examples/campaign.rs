@@ -37,7 +37,21 @@ fn pinned_feeds(g: &Game) -> Vec<usize> {
         .and_then(|id| requirements().iter().find(|u| u.id == *id));
     let mut pending: Vec<(String, u64)> = requirement
         .map(|u| u.inputs.iter().map(|(p, n)| (p.clone(), *n)).collect())
-        .unwrap_or_default();
+        .unwrap_or_else(|| {
+            if BUILD_ORDER.iter().all(|id| g.level(id) > 0) {
+                [
+                    "advanced_structure",
+                    "precision_controls",
+                    "magnets",
+                    "batteries",
+                ]
+                .into_iter()
+                .map(|p| (p.into(), 10 * mine_core::geometry::UNITS))
+                .collect()
+            } else {
+                Vec::new()
+            }
+        });
     let cat = materials();
     let mut visited = std::collections::BTreeSet::new();
     let mut feeds = std::collections::BTreeSet::new();
@@ -84,25 +98,6 @@ fn pinned_feeds(g: &Game) -> Vec<usize> {
 }
 
 fn strategy(g: &mut Game, style: &str, attentive: bool) {
-    if attentive && g.ticks % 100 == 0 {
-        // Strategy intervention, not a production multiplier: redirect crews to
-        // publicly revealed feed required by the currently pinned investment.
-        let needed = pinned_feeds(g);
-        let target = g
-            .terrain
-            .ore_frontiers
-            .iter()
-            .filter(|(id, _)| needed.contains(id))
-            .flat_map(|(_, faces)| faces.iter())
-            .next()
-            .copied()
-            .map(mine_core::geometry::cell_point);
-        if let Some(p) = target {
-            if g.workings.target.is_none() {
-                act(g, "target_vein", &format!("{},{}", p[0], p[1]), 0);
-            }
-        }
-    }
     if g.workers == 3 {
         act(g, "buy", "worker", 0);
     }
@@ -303,6 +298,9 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
             .saturating_sub(g.pinned.as_ref().map(|id| g.cost(id)).unwrap_or(0))
     };
     if g.level("shaft") > 0 {
+        if g.level("survey") < 2 && spendable(g) > g.cost("survey") * 2 {
+            act(g, "buy", "survey", 0);
+        }
         let target_drill = (g.depth() / 300 + 1).min(5) * 10;
         if g.level("drill") < target_drill && spendable(g) > g.cost("drill") * 3 {
             act(g, "buy", "drill", 0);
@@ -384,6 +382,58 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
         policy
     };
     act(g, "policy", policy, 0);
+    if g.ticks % if attentive { 100 } else { 600 } == 0 {
+        direct_known_feed(
+            g,
+            &pinned_feeds(g),
+            equipment_limit as i64 * mine_core::geometry::CELLS_PER_METRE,
+        );
+    }
+}
+/// Choose from the same revealed cells exposed by IPC, including surveyed ore
+/// which is not yet an excavation face. Never inspect generated hidden geology.
+fn direct_known_feed(g: &mut Game, feeds: &[usize], depth_limit: i64) {
+    if let Some(anchor) = g.workings.target {
+        let wanted = g
+            .terrain
+            .known_material(anchor[0], anchor[1])
+            .is_some_and(|id| feeds.contains(&id));
+        let remaining = g
+            .workings
+            .order_view(&g.terrain)
+            .is_some_and(|v| v.known_cells > 0);
+        if wanted && remaining {
+            return;
+        }
+        act(g, "clear_vein", "", 0);
+    }
+    if feeds.is_empty() {
+        return;
+    }
+    let at = g.work_route().first().copied().unwrap_or([256, 0]);
+    let mut best = None;
+    for (&chunk, visible) in &g.terrain.visible {
+        let (cx, cy) = mine_core::geometry::chunk_origin(chunk);
+        if cy >= depth_limit {
+            continue;
+        }
+        for (index, &id) in visible.iter().enumerate() {
+            if !feeds.contains(&(id as usize)) {
+                continue;
+            }
+            let p = [cx + index as i64 % 64, cy + index as i64 / 64];
+            if p[1] >= depth_limit || g.terrain.contains(p[0], p[1]) {
+                continue;
+            }
+            let distance = p[0].abs_diff(at[0]) + p[1].abs_diff(at[1]);
+            if best.is_none_or(|(score, _)| distance < score) {
+                best = Some((distance, p));
+            }
+        }
+    }
+    if let Some((_, p)) = best {
+        act(g, "target_vein", &format!("{},{}", p[0], p[1]), 0);
+    }
 }
 fn record(g: &Game, wall: u64, events: &mut BTreeMap<String, u64>) {
     for (name, reached) in [
@@ -484,6 +534,11 @@ fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
             )
             .unwrap();
         }
+        std::fs::write(
+            format!("target/campaign-state-{seed}.json"),
+            serde_json::to_vec(&g).unwrap(),
+        )
+        .unwrap();
         std::fs::write(format!("target/campaign-{seed}.json"), serde_json::to_vec_pretty(&json!({"seed":seed,"visit":visit+1,"events":events,"site":g.site,"depth":g.depth(),"next":g.pinned,"products":g.products,"trace":g.trace_feed,"levels":g.levels,"recipes":g.enabled_recipes,"paused_recipes":g.paused_recipes,"credits":g.credits,"ranks":g.ranks,"research":g.research,"invested":g.research_invested(),"shaft_blocker":g.purchase_blocker("shaft")})).unwrap()).unwrap();
         if std::env::var_os("DEEPWORK_CAMPAIGN_DIAGNOSTIC").is_some() {
             let _ = std::fs::write(
@@ -643,7 +698,7 @@ mod strategy_tests {
             .ore_frontiers
             .entry(3)
             .or_default()
-            .insert(800 * mine_core::geometry::WIDTH + 256);
+            .insert(mine_core::geometry::cell_key(256, 800));
         strategy(&mut g, "bulk", false);
         assert_eq!(g.policy, "vein");
     }
@@ -723,6 +778,33 @@ mod strategy_tests {
         assert_eq!(
             g.site, 3,
             "Resume voluntary research retirement after first output"
+        );
+    }
+    #[test]
+    fn public_surveyed_cells_can_direct_a_whole_vein_before_exposure() {
+        let mut g = Game::new(42, 1);
+        let cat = materials();
+        let p = (210..260)
+            .map(|x| [x, 24])
+            .find(|p| g.cell(p[0], p[1], cat) == 3)
+            .unwrap();
+        direct_known_feed(&mut g, &[3], 1200);
+        assert!(
+            g.workings.target.is_none(),
+            "hidden reserves cannot be targeted"
+        );
+        g.terrain.reveal(g.seed, g.profile, p[0], p[1], 0, cat);
+        assert!(!g
+            .terrain
+            .frontier
+            .contains(&mine_core::geometry::cell_key(p[0], p[1])));
+        direct_known_feed(&mut g, &[3], 1200);
+        assert_eq!(g.workings.target, Some(p));
+        assert!(g.workings.target_deposit.is_some());
+        direct_known_feed(&mut g, &[], 1200);
+        assert!(
+            g.workings.target.is_none(),
+            "fulfilled investment releases its order"
         );
     }
     #[test]
