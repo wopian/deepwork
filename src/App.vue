@@ -383,10 +383,14 @@ onMounted(start);
             <ProcessingPanel v-if="panel === 'Processing'" />
             <div v-if="panel === 'Crew'">
               <div class="selected-order" v-if="state?.selected_vein">
-                <strong>Following selected vein</strong>
+                <strong>Selected vein</strong>
                 <p>
                   {{ state.selected_vein.known_cells }} revealed cells remain.
                   White edges mark your order.
+                </p>
+                <p>
+                  Crews prioritize reachable ore. Rock needed for floors and
+                  support columns stays in place.
                 </p>
                 <p v-if="!state.selected_vein.known_cells">
                   No revealed ore remains. Prospect further or choose another
