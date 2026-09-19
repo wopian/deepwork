@@ -103,9 +103,12 @@ pub fn requirements() -> &'static [UpgradeRequirement] {
         entries
     })
 }
-pub fn materials() -> Vec<Material> {
-    serde_json::from_str(include_str!("../../../content/materials.json"))
-        .expect("valid material catalogue")
+pub fn materials() -> &'static [Material] {
+    static DATA: std::sync::OnceLock<Vec<Material>> = std::sync::OnceLock::new();
+    DATA.get_or_init(|| {
+        serde_json::from_str(include_str!("../../../content/materials.json"))
+            .expect("valid material catalogue")
+    })
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Cell {

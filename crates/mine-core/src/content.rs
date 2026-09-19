@@ -30,7 +30,7 @@ pub fn validate() -> Result<(), String> {
             return Err("Invalid trace feed".into());
         }
     }
-    for feed in &cat {
+    for feed in cat {
         if traces()
             .iter()
             .filter(|t| t.feed == feed.id)
