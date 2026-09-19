@@ -74,7 +74,16 @@ fn main() {
             if g.collection.contains("iron") {
                 first_iron.get_or_insert(second);
             }
-            if g.workings.passages.iter().any(|p| p.feet[0] != 256) {
+            // An angled access drive alone is not an underground branch.
+            let mut children = vec![0; g.workings.passages.len()];
+            for passage in g.workings.passages.iter().skip(1) {
+                children[passage.parent] += 1;
+            }
+            if children
+                .iter()
+                .enumerate()
+                .any(|(i, &count)| count >= 2 && g.workings.passages[i].feet[1] > 0)
+            {
                 branch.get_or_insert(second);
             }
         }
