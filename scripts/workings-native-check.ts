@@ -201,6 +201,13 @@ try {
     });
   }
   const samples = [];
+  const nativeMemory = [];
+  const measurementState = JSON.parse(
+    await page.evaluate(() =>
+      (window as any).__TAURI_INTERNALS__.invoke("export_save"),
+    ),
+  );
+  const measurementStarted = Date.now();
   for (let n = 0; n < duration; n++) {
     if (n % 5 === 0)
       samples.push(
@@ -214,14 +221,34 @@ try {
         })),
       );
     if (n % 60 === 0) {
+      const memory = Bun.spawn(
+        [
+          "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          `$p=Get-Process -Id ${app.pid}; [pscustomobject]@{workingSetBytes=$p.WorkingSet64;privateBytes=$p.PrivateMemorySize64;peakWorkingSetBytes=$p.PeakWorkingSet64} | ConvertTo-Json -Compress`,
+        ],
+        { stdout: "pipe", stderr: "pipe" },
+      );
+      const memoryText = await new Response(memory.stdout).text();
+      if ((await memory.exited) !== 0)
+        throw new Error("Native process memory sample failed");
+      nativeMemory.push({ seconds: n, ...JSON.parse(memoryText) });
       await writeFile(
         join(out, "progress.json"),
-        JSON.stringify({ seconds: n, samples, errors }),
+        JSON.stringify({ seconds: n, samples, nativeMemory, errors }),
       );
       console.log(`Native workings stress: ${n}/${duration} seconds`);
     }
     await page.waitForTimeout(1000);
   }
+  const measurementEnded = Date.now();
+  const measuredState = JSON.parse(
+    await page.evaluate(() =>
+      (window as any).__TAURI_INTERNALS__.invoke("export_save"),
+    ),
+  );
   await page.evaluate(() => {
     (window as any).__deepworkUnlockPerformanceInput?.();
     document.getElementById("automation-marker")?.remove();
@@ -324,6 +351,9 @@ try {
         inputLocked,
         priorityOrder,
         executableSha256,
+        measurementWallSeconds: (measurementEnded - measurementStarted) / 1000,
+        simulationSeconds: (measuredState.ticks - measurementState.ticks) / 20,
+        nativeMemory,
         setupCommands: measurementStartSequence - fixtureState.last_sequence,
         saveBytes: Buffer.byteLength(save),
         fixtureWorkers: fixtureState.workers,
