@@ -37,6 +37,7 @@ fn main() {
     let mut first_iron = false;
     let mut tactics = false;
     let mut specialised = false;
+    let mut retirement_ready = false;
     g.policy = policy.into();
     for second in 0..14400 {
         if target < plan.len() {
@@ -77,8 +78,15 @@ fn main() {
             milestones.push(serde_json::json!({"seconds":second+1,"specialisation":"bulk"}));
         }
         if g.depth() >= 300 && g.steel_made {
-            milestones.push(serde_json::json!({"seconds":second,"retirement_ready":true,"credits":g.credits,"cells":g.excavated}));
-            break;
+            if !retirement_ready {
+                milestones.push(serde_json::json!({"seconds":second,"retirement_ready":true,"credits":g.credits,"cells":g.excavated}));
+                retirement_ready = true;
+            }
+            // Basic access can retire without the improved lift. Continue until
+            // that independent early milestone is measured too.
+            if g.level("shaft") > 0 {
+                break;
+            }
         }
     }
     println!(
