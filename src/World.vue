@@ -59,6 +59,12 @@ function draw() {
   if (!app) return;
   const g = state.value;
   const scale = (app.screen.width / 1100) * zoom;
+  if (host.value) {
+    host.value.dataset.cameraZoom = String(zoom);
+    host.value.dataset.cameraX = String(offsetX);
+    host.value.dataset.cameraY = String(offsetY);
+    host.value.dataset.cameraFollow = String(follow || followCrew);
+  }
   const groundLeft = Math.floor(-offsetX / scale) - 1100;
   const W = Math.ceil(app.screen.width / scale) + 2200;
   const first = Math.max(

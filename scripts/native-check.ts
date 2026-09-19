@@ -333,6 +333,79 @@ try {
     )
   )
     throw new Error("Portrait page overflows viewport");
+  const camera = () =>
+    page.locator(".world").evaluate((el) => {
+      const d = (el as HTMLElement).dataset;
+      return {
+        zoom: Number(d.cameraZoom),
+        x: Number(d.cameraX),
+        y: Number(d.cameraY),
+        follow: d.cameraFollow,
+      };
+    });
+  const beforeGesture = await camera();
+  const worldBox = (await page.locator("canvas").boundingBox())!;
+  const centre = {
+    x: worldBox.x + worldBox.width / 2,
+    y: worldBox.y + worldBox.height * 0.52,
+  };
+  const pinchPoints = (distance: number) => [
+    { id: 1, x: centre.x - distance, y: centre.y },
+    { id: 2, x: centre.x + distance, y: centre.y },
+  ];
+  await portrait.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: pinchPoints(30),
+  });
+  await portrait.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: pinchPoints(65),
+  });
+  await portrait.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
+  await page.waitForTimeout(150);
+  const zoomed = await camera();
+  if (!(zoomed.zoom > beforeGesture.zoom * 1.7) || zoomed.follow !== "false")
+    throw new Error(
+      `Touch pinch did not zoom and release follow: ${JSON.stringify({ beforeGesture, zoomed })}`,
+    );
+  const local = { x: centre.x - worldBox.x, y: centre.y - worldBox.y };
+  for (const axis of ["x", "y"] as const)
+    if (
+      Math.abs(
+        (local[axis] - beforeGesture[axis]) / beforeGesture.zoom -
+          (local[axis] - zoomed[axis]) / zoomed.zoom,
+      ) > 2
+    )
+      throw new Error(`Pinch lost its ${axis} world anchor`);
+  await portrait.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ id: 1, ...centre }],
+  });
+  await portrait.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: [{ id: 1, x: centre.x + 35, y: centre.y - 40 }],
+  });
+  await portrait.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
+  await page.waitForTimeout(150);
+  const panned = await camera();
+  if (
+    Math.abs(panned.x - zoomed.x - 35) > 2 ||
+    Math.abs(panned.y - zoomed.y + 40) > 2
+  )
+    throw new Error(
+      `Touch two-axis pan failed: ${JSON.stringify({ zoomed, panned })}`,
+    );
+  await writeFile(
+    join(output, "touch-camera.json"),
+    JSON.stringify({ beforeGesture, zoomed, panned }, null, 2),
+  );
+  await tap("Surface ↑");
   const transportBefore = JSON.parse(await invoke("export_save"));
   await tap("Logistics");
   await page.locator(".transport-cargo").first().waitFor({ state: "visible" });
