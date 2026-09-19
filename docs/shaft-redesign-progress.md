@@ -63,3 +63,9 @@ Candidate regression: 111 core, 13 native and 17 campaign tests pass; 30 Bun tes
 Snapshots now strip persistence-only deposit identities, which encode private descriptor centres. Whole-vein save state remains intact; the existing native privacy regression verifies both boundaries. ARM64 APK rebuilt on a2354e3. The tracked Bun ELF guard passes the packaged native library and rejects a 4 KB-aligned negative fixture; signatures and 16 KB ZIP alignment also pass.
 
 The deep browser check can now include real revealed terrain with --terrain. Desktop and portrait retain all 4,856 passage endpoints in frame while holding the 768-texture cap. Short frame samples were 58/30 FPS respectively, with lift-preview readability checks passing. This is static browser rendering evidence, not native endurance or Android device validation.
+
+## Allocation-aware campaign validation
+
+Strategy regression now verifies that completed headquarters component lines stop consuming shared feeds and restart when stock falls. This fixes a benchmark decision defect, not game rewards: the preceding lift-400 run kept making surplus magnets while iron-starved lift upgrades blocked exploration. Its 12 completed runs and all seed observations are preserved as superseded diagnostics. All 30 seeds restart fresh on gameplay 7c1c0ca and strategy dcca9cf, with unchanged windows and no mixed checkpoints. Eighteen campaign tests pass.
+
+An additional 30-seed deliberate-sale opening diagnostic spends starter iron on a contract before repinning the lift. Public survey, vein selection and renewed exploration recover all 30; 29 finish within one hour and the remaining seed at 90:17. Passive and intermediate failed strategies remain recorded. This demonstrates recovery, not fast recovery after selling construction stock.
