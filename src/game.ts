@@ -82,6 +82,8 @@ export interface Game {
   cargo_policy: string;
   workings_offset: number;
   workings: {
+    target: [number, number] | null;
+    target_deposit: string | null;
     revision: number;
     status: string;
     active: number;

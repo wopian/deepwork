@@ -764,7 +764,10 @@ function fitWorkings() {
       <button
         @click="inspectedCell && act('target_vein', inspectedCell.join(','))"
       >
-        Direct crew here
+        Prioritise whole vein
+      </button>
+      <button v-if="state?.workings?.target" @click="act('clear_vein')">
+        Clear vein order
       </button>
       <button @click="act('priority', '', inspected)">
         {{

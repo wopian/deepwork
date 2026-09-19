@@ -110,6 +110,12 @@ pub struct Workings {
     pub veins: BTreeMap<String, VeinSurvey>,
     #[serde(default)]
     pub target: Option<Point>,
+    /// Stable deposit order; anchor survives excavation of the selected cell.
+    #[serde(default)]
+    pub target_deposit: Option<String>,
+    /// Derived private geometry. Rebuilt after load; never sent to the client.
+    #[serde(skip)]
+    pub target_cells: Vec<Point>,
     pub passages: Vec<Passage>,
     #[serde(default)]
     pub chambers: BTreeMap<usize, u32>,
@@ -140,6 +146,15 @@ pub struct VeinSurvey {
     pub stage: u32,
 }
 impl Workings {
+    pub fn prepare_deposit_order(&mut self, seed: u64, profile: usize, cat: &[crate::Material]) {
+        if self.target_cells.is_empty() {
+            if let Some(anchor) = self.target {
+                self.target_deposit = crate::geology::deposit_id(seed, profile, anchor, cat);
+                self.target_cells = crate::geology::deposit_cells(seed, profile, anchor, cat);
+            }
+        }
+    }
+
     /// Reveal the facing edge at accuracy one, the remaining deposit at accuracy two.
     /// One descriptor per survey cycle bounds foreground work and snapshot changes.
     pub fn refine_survey(
@@ -463,13 +478,15 @@ impl Workings {
                 }
             };
             let mut candidates: Vec<(i64, Point)> = vec![];
-            if let Some(p) = self.target {
-                if terrain.contains(p[0], p[1]) {
-                    self.target = None;
-                } else if p[1] < depth_limit
+            // A deposit order persists across individual cuts. Unknown cells never
+            // enter the planner, even when they belong to the selected descriptor.
+            for &p in &self.target_cells {
+                if !terrain.contains(p[0], p[1])
+                    && p[1] < depth_limit
                     && terrain.known_material(p[0], p[1]).is_some_and(|id| id > 1)
                     && !self.deferred.contains(&area(p))
                     && !protected(&self.floor_index, p, &[])
+                    && nearest_distance(p) <= settings().search_radius
                 {
                     candidates.push((-10000 + nearest_distance(p) as i64, p));
                 }
@@ -801,7 +818,11 @@ impl Workings {
         }
     }
     pub fn valid(&self) -> bool {
-        if self.veins.len() > 25000
+        if self
+            .target_deposit
+            .as_ref()
+            .is_some_and(|id| id.len() > 128)
+            || self.veins.len() > 25000
             || self.veins.iter().any(|(id, v)| {
                 id.len() > 128 || v.anchor[0] >= WIDTH || v.anchor[1] >= MAX_ROWS || v.stage > 2
             })
@@ -935,6 +956,37 @@ pub fn cut_cells(a: Point, b: Point, lift: bool) -> Vec<Point> {
 mod tests {
     use super::*;
     const PIT_ROWS: u32 = 192;
+    #[test]
+    fn deposit_order_survives_selected_cell_and_save_without_leaking_geometry() {
+        let cat = crate::materials();
+        let mut w = Workings::default();
+        let anchor = (220..250)
+            .map(|x| [x, 24])
+            .find(|p| crate::geology::sample(42, 0, p[0], p[1], &cat) == 3)
+            .unwrap();
+        w.target = Some(anchor);
+        w.prepare_deposit_order(42, 0, &cat);
+        assert!(w.target_cells.len() > 100);
+        let identity = w.target_deposit.clone();
+        let encoded = serde_json::to_string(&w).unwrap();
+        assert!(!encoded.contains("target_cells"));
+        let mut restored: Workings = serde_json::from_str(&encoded).unwrap();
+        assert!(restored.target_cells.is_empty());
+        restored.prepare_deposit_order(42, 0, &cat);
+        assert_eq!(restored.target_deposit, identity);
+        assert_eq!(restored.target_cells, w.target_cells);
+        let mut t = Terrain::default();
+        for y in 0..=anchor[1] {
+            assert!(t.excavate(anchor[0], y));
+        }
+        restored.initialise();
+        restored.advance(&t, &[], "vein", 1200, 1, 0);
+        assert_eq!(restored.target, Some(anchor));
+        // No private target cell may become a search goal before revelation.
+        if let Some(search) = &restored.search {
+            assert!(!restored.target_cells.contains(&search.goal));
+        }
+    }
     #[test]
     fn accuracy_reveals_facing_edge_then_only_remaining_deposit() {
         let cat = crate::materials();

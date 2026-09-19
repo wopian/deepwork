@@ -800,6 +800,8 @@ impl Game {
             } else {
                 200000
             }) * geometry::CELLS_PER_METRE;
+            self.workings
+                .prepare_deposit_order(self.seed, self.profile, cat);
             self.workings.advance(
                 &self.terrain,
                 &self.priorities,
@@ -1617,6 +1619,14 @@ impl Game {
                 }
                 self.cargo_policy = a.target;
             }
+            "clear_vein" => {
+                self.workings.target = None;
+                self.workings.target_deposit = None;
+                self.workings.target_cells.clear();
+                self.workings.search = None;
+                self.workings.blocked_at = None;
+                self.workings.revision += 1;
+            }
             "target_vein" => {
                 let coordinates: Vec<_> = a
                     .target
@@ -1639,6 +1649,9 @@ impl Game {
                     return Err("Select surveyed, unmined ore".into());
                 }
                 self.workings.target = Some(p);
+                self.workings.target_cells.clear();
+                self.workings
+                    .prepare_deposit_order(self.seed, self.profile, &materials());
                 self.workings.search = None;
                 self.workings.blocked_at = None;
                 self.workings.deferred.clear();
