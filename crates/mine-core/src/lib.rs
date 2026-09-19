@@ -1,5 +1,6 @@
 pub mod columns;
 pub mod content;
+pub mod fronts;
 pub mod geology;
 pub mod geometry;
 pub mod logistics;
@@ -13,7 +14,7 @@ pub use geometry::WIDTH;
 use geometry::{CELL_MASS, UNITS};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-pub const VERSION: u32 = 9;
+pub const VERSION: u32 = 10;
 /// Deterministic fractional throughput without storing idle production credit.
 /// `rate` is thousandths of one work unit per tick; no multiplication by full age.
 fn work_budget(rate: u64, tick: u64) -> u64 {
@@ -185,6 +186,8 @@ pub struct Game {
     pub terrain: terrain::Terrain,
     #[serde(default)]
     pub workings: workings::Workings,
+    #[serde(default)]
+    pub mining_fronts: Vec<fronts::MiningFront>,
     pub removed: Vec<Cell>,
     pub ore: BTreeMap<usize, u64>,
     pub hauled: BTreeMap<usize, u64>,
@@ -347,6 +350,7 @@ impl Game {
             heights: columns::ColumnDepths::default(),
             terrain: terrain::Terrain::default(),
             workings: workings::Workings::default(),
+            mining_fronts: vec![],
             removed: vec![],
             ore: BTreeMap::new(),
             hauled: BTreeMap::new(),
@@ -584,6 +588,12 @@ impl Game {
                     .sum::<u64>();
                 let buffered = self.ore.get(&id).copied().unwrap_or(0)
                     + self
+                        .mining_fronts
+                        .iter()
+                        .filter(|front| front.material == id)
+                        .map(|front| front.stockpile)
+                        .sum::<u64>()
+                    + self
                         .transport
                         .stations
                         .iter()
@@ -612,6 +622,16 @@ impl Game {
                     output_rate: flow[1] as f64 / UNITS as f64 / seconds,
                     recovery_percent: (65i32
                         + 3 * self.level("recovery") as i32
+                        + if self.ranks.get("metallurgy").copied().unwrap_or(0) >= 6 {
+                            5
+                        } else {
+                            0
+                        }
+                        + if self.ranks.get("reclamation").copied().unwrap_or(0) >= 6 {
+                            5
+                        } else {
+                            0
+                        }
                         + match self.specialisation.as_deref() {
                             Some("bulk") => -5,
                             Some("precision") => 10,
@@ -663,6 +683,12 @@ impl Game {
             + p.chemical_demand * self.level("chemical")
             + p.electrolysis_demand * self.level("electrolytic")
             + p.trace_demand * self.level("trace")) as f64;
+        let industry = industry
+            * if self.ranks.get("metallurgy").copied().unwrap_or(0) >= 10 {
+                0.8
+            } else {
+                1.
+            };
         let logistics: u32 = self.transport.segments.iter().map(|s| s.demand).sum();
         ((p.base_power + p.power_per_level * self.level("power")) as f64
             / (industry + logistics as f64))
@@ -676,13 +702,11 @@ impl Game {
             1.
         } / sites()[self.profile].haul;
         let (legs, _) = logistics::route(&self.haul_path, &self.levels, factor);
-        let rate = pacing::get().haul_rate
-            * self.crew.haulers as f64
-            * self.throughput("conveyor")
-            * if self.level("conveyor") > 0 { 3. } else { 1. }
-            * (1. + 0.05 * self.ranks.get("logistics").copied().unwrap_or(0) as f64);
+        let rate = self.branch_rate(self.crew.haulers) as f64 / UNITS as f64;
+        let buffer_level = self.level("capacity")
+            + u32::from(self.ranks.get("logistics").copied().unwrap_or(0) >= 6) * 2;
         self.transport
-            .configure(&legs, (rate * UNITS as f64) as u64, self.level("capacity"));
+            .configure(&legs, (rate * UNITS as f64) as u64, buffer_level);
         let power = self.power_factor(true);
         let haul = self
             .transport
@@ -703,7 +727,7 @@ impl Game {
             pacing::get().refining_rate
                 * self.throughput("furnace")
                 * (1. + 0.15 * self.crew.operators.saturating_sub(1) as f64)
-                * (1. + 0.05 * self.ranks.get("metallurgy").copied().unwrap_or(0) as f64)
+                * (1. + 0.04 * self.ranks.get("metallurgy").copied().unwrap_or(0) as f64)
                 * power
                 * if self.specialisation.as_deref() == Some("reclamation") {
                     0.85
@@ -791,8 +815,8 @@ impl Game {
         let n = self.level(k);
         (1. + 0.12 * n as f64) * 1.5f64.powi((n / 10) as i32)
     }
-    fn dig_rate(&self, _offline: bool) -> u64 {
-        ((self.crew.diggers as f64 * self.throughput("drill")
+    fn dig_rate_for(&self, diggers: u32) -> u64 {
+        ((diggers as f64 * self.throughput("drill")
             / sites()[self.profile].hardness
             / if self.challenge == "hard_rock" {
                 1.5
@@ -805,9 +829,64 @@ impl Game {
                 Some("precision") => 0.8,
                 _ => 1.,
             }
-            * (1. + 0.05 * self.ranks.get("excavation").copied().unwrap_or(0) as f64))
+            * (1. + 0.04 * self.ranks.get("excavation").copied().unwrap_or(0) as f64))
             * UNITS as f64
             * pacing::get().worker_rate) as u64
+    }
+    fn dig_rate(&self, _offline: bool) -> u64 {
+        self.dig_rate_for(self.crew.diggers)
+    }
+    fn max_mining_fronts(&self) -> usize {
+        8 + usize::from(self.ranks.get("excavation").copied().unwrap_or(0) >= 6) * 2
+            + usize::from(self.ranks.get("excavation").copied().unwrap_or(0) >= 10) * 2
+    }
+    fn required_front_materials(&self, cat: &[Material]) -> BTreeSet<usize> {
+        let mut products = BTreeSet::new();
+        if let Some(id) = &self.pinned {
+            if let Some(upgrade) = requirements().iter().find(|upgrade| &upgrade.id == id) {
+                for (product, amount) in &upgrade.inputs {
+                    if self.products.get(product).copied().unwrap_or(0) < *amount {
+                        products.insert(product.as_str());
+                    }
+                }
+            }
+        }
+        for recipe in recipes().iter().filter(|recipe| {
+            self.level(&recipe.building) > 0
+                && !self.paused_recipes.contains(&recipe.id)
+                && (recipe.id == "steel"
+                    || recipe.id == "aluminium"
+                    || self.enabled_recipes.contains(&recipe.id))
+        }) {
+            for input in recipe.inputs.keys() {
+                products.insert(input.as_str());
+            }
+        }
+        // Manufactured feeds recurse to their practical mine inputs.
+        if products.contains("steel") {
+            products.extend(["iron", "coke", "lime"]);
+        }
+        if products.contains("wiring") {
+            products.insert("copper");
+        }
+        if products.contains("batteries") {
+            products.extend(["lithium_carbonate", "graphite", "nickel", "cobalt"]);
+        }
+        cat.iter()
+            .filter(|material| products.contains(material.product.as_str()))
+            .map(|material| material.id)
+            .collect()
+    }
+    fn branch_rate(&self, haulers: u32) -> u64 {
+        let rank = 1. + 0.04 * self.ranks.get("logistics").copied().unwrap_or(0) as f64;
+        let units = if self.level("conveyor") > 0 {
+            4. * self.throughput("conveyor")
+        } else if self.level("wheelbarrow") > 0 {
+            2. * self.throughput("wheelbarrow") * haulers as f64
+        } else {
+            haulers as f64
+        };
+        (units * rank * UNITS as f64) as u64
     }
     pub fn work_route(&self) -> &[[i64; 2]] {
         &self.haul_path
@@ -817,9 +896,18 @@ impl Game {
     }
     /// No input, pending arrival, eligible recipe or reachable excavation event can fire.
     fn quiescent(&self, cat: &[Material]) -> bool {
-        self.quiet_pipeline(cat) && self.next_frontier(cat).is_none() && self.transport.mass() == 0
+        self.quiet_pipeline(cat)
+            && self.next_frontier(cat).is_none()
+            && self.transport.mass() == 0
+            && self
+                .mining_fronts
+                .iter()
+                .all(|front| front.crew == 0 && front.stockpile == 0)
     }
     fn quiet_pipeline(&self, cat: &[Material]) -> bool {
+        if self.mining_fronts.iter().any(|front| front.stockpile > 0) {
+            return false;
+        }
         if self.workings.blocked_at.is_none() {
             return false;
         }
@@ -869,6 +957,13 @@ impl Game {
         })
     }
     fn stationary_pipeline(&self, cat: &[Material]) -> bool {
+        if self
+            .mining_fronts
+            .iter()
+            .any(|front| front.crew > 0 || front.stockpile > 0)
+        {
+            return false;
+        }
         if self.workings.blocked_at.is_none() {
             return false;
         }
@@ -952,7 +1047,9 @@ impl Game {
         self.crew = logistics::Crew::prioritise(self.workers, &self.levels, &self.crew_priority);
         {
             self.workings.initialise();
-            self.workings.survey_work += 1 + self.crew.prospectors as u64 * 3;
+            self.workings.survey_work += (1 + self.crew.prospectors as u64 * 3)
+                * (100 + 5 * self.ranks.get("prospecting").copied().unwrap_or(0) as u64)
+                / 100;
             if self.workings.survey_work >= 200 || self.workings.surveyed.is_empty() {
                 self.workings.survey_work %= 200;
                 let upgraded = self.level("survey") > 0;
@@ -964,13 +1061,23 @@ impl Game {
                     upgraded,
                     false,
                 );
-                found.extend(self.workings.refine_survey(
-                    &mut self.terrain,
-                    self.seed,
-                    self.profile,
-                    cat,
-                    self.levels.get("survey").copied().unwrap_or(0) as i64,
-                ));
+                let prospecting_rank = self.ranks.get("prospecting").copied().unwrap_or(0);
+                let refinements = if prospecting_rank >= 6 { 2 } else { 1 };
+                let accuracy =
+                    self.levels
+                        .get("survey")
+                        .copied()
+                        .unwrap_or(0)
+                        .max(u32::from(prospecting_rank >= 10) * 2) as i64;
+                for _ in 0..refinements {
+                    found.extend(self.workings.refine_survey(
+                        &mut self.terrain,
+                        self.seed,
+                        self.profile,
+                        cat,
+                        accuracy,
+                    ));
+                }
                 for id in found {
                     if self.discoveries.insert(id) {
                         self.site_discoveries += 1;
@@ -980,12 +1087,17 @@ impl Game {
             let limit = self.equipment_depth_limit() as i64 * geometry::CELLS_PER_METRE;
             self.workings
                 .prepare_deposit_order(self.seed, self.profile, cat);
+            let engineers = if self.ranks.get("excavation").copied().unwrap_or(0) >= 10 {
+                (self.crew.engineers as i64 * 3 + 1) / 2
+            } else {
+                self.crew.engineers as i64
+            };
             self.workings.advance(
                 &self.terrain,
                 &self.priorities,
                 &self.policy,
                 limit,
-                self.crew.engineers as i64,
+                engineers,
                 self.level("supports") as i64,
             );
         }
@@ -1001,11 +1113,35 @@ impl Game {
                 }
             }
         }
-        let cap = 20 * UNITS + 5 * UNITS * self.level("capacity") as u64;
+        let cap = self.raw_stock_capacity();
         let ore_total: u64 = self.ore.values().sum();
-        let mut mined = 0;
+        let required = self.required_front_materials(cat);
+        let max_fronts = self.max_mining_fronts();
+        let buffer_level = self.level("capacity");
+        if self.ticks % 100 == 1 || self.mining_fronts.is_empty() {
+            fronts::refresh(
+                &mut self.mining_fronts,
+                &self.terrain,
+                &self.workings,
+                self.seed,
+                self.profile,
+                cat,
+                &required,
+                &self.priorities,
+                max_fronts,
+                buffer_level,
+            );
+        }
+        let access_pending = self.workings.next_cell(&self.terrain).is_some();
+        let access_crew = fronts::assign(
+            &mut self.mining_fronts,
+            self.crew.diggers,
+            self.crew.haulers,
+            access_pending,
+        );
+        let mut mined = 0u64;
         let mut mined_cargo = BTreeMap::<usize, u64>::new();
-        let dig_rate = self.dig_rate(offline);
+        let dig_rate = self.dig_rate_for(access_crew);
         let work = dig_rate + self.dig_remainder;
         self.dig_progress += work / 20;
         self.dig_remainder = work % 20;
@@ -1013,7 +1149,7 @@ impl Game {
         self.dig_progress %= 1000;
         let depth_limit = self.lift_depth_limit();
         for _ in 0..digs.min(12800) {
-            if ore_total + (mined + 1) * CELL_MASS > cap {
+            if self.ore.values().sum::<u64>() + (mined + 1) * CELL_MASS > cap {
                 break;
             }
             let target = self.next_frontier(cat);
@@ -1038,6 +1174,62 @@ impl Game {
             mined += 1;
             if self.discoveries.insert(id) {
                 self.site_discoveries += 1;
+            }
+        }
+
+        // Every extraction front owns progress and stockpile. One blocked vein
+        // pauses locally while other crews continue mining different feeds.
+        let mut claimed: BTreeSet<_> = self.mining_fronts.iter().map(|front| front.face).collect();
+        for index in 0..self.mining_fronts.len() {
+            let crew = self.mining_fronts[index].crew;
+            if crew == 0 {
+                continue;
+            }
+            let work = self.dig_rate_for(crew);
+            let front = &mut self.mining_fronts[index];
+            let work = work + front.work_remainder;
+            front.progress += work / 20;
+            front.work_remainder = work % 20;
+            let digs = (front.progress / 1000).min(512) as usize;
+            front.progress %= 1000;
+            for _ in 0..digs {
+                if front.stockpile + CELL_MASS > front.capacity {
+                    front.status = "Paused".into();
+                    front.blocker = "Work-face stockpile full".into();
+                    break;
+                }
+                let [x, y] = front.face;
+                if self.terrain.known_material(x, y) != Some(front.material)
+                    || !self.terrain.excavate(x, y)
+                {
+                    break;
+                }
+                self.heights.excavate_to(x, y + 1);
+                self.removed.push(Cell {
+                    x,
+                    y,
+                    material: front.material,
+                });
+                if self.removed.len() > 512 {
+                    self.removed.drain(..256);
+                }
+                front.stockpile += CELL_MASS;
+                self.terrain.reveal(self.seed, self.profile, x, y, 1, cat);
+                self.excavated += 1;
+                mined += 1;
+                if self.discoveries.insert(front.material) {
+                    self.site_discoveries += 1;
+                }
+                claimed.remove(&front.face);
+                let next =
+                    fronts::next_face(front, &self.terrain, self.seed, self.profile, cat, &claimed);
+                let Some(next) = next else {
+                    front.status = "Deposit exhausted".into();
+                    front.crew = 0;
+                    break;
+                };
+                front.face = next;
+                claimed.insert(next);
             }
         }
 
@@ -1084,16 +1276,77 @@ impl Game {
             .0;
             self.haul_levels = self.levels.clone();
         }
-        let haul_rate = (UNITS as f64
-            * pacing::get().haul_rate
-            * self.crew.haulers as f64
-            * self.throughput("conveyor")
-            * (1. + 0.05 * self.ranks.get("logistics").copied().unwrap_or(0) as f64)
-            * (if self.level("conveyor") > 0 { 3. } else { 1. })) as u64;
+        let haul_rate = self.branch_rate(self.crew.haulers)
+            * if self.challenge == "long_haul" { 2 } else { 3 }
+            / 2;
         self.transport
             .configure(&self.haul_legs, haul_rate, self.level("capacity"));
         for (id, q) in mined_cargo {
             self.transport.register_source(id, q);
+        }
+        // Register each work face against its own persisted itinerary before
+        // moving cargo into shared underground transfer. Route ownership then
+        // survives partial loads, save/load, and downstream backpressure.
+        let levels = self.levels.clone();
+        let capacity_level = self.level("capacity")
+            + u32::from(self.ranks.get("logistics").copied().unwrap_or(0) >= 6) * 2;
+        for front in &mut self.mining_fronts {
+            if front.stockpile == 0 || front.route.is_empty() {
+                continue;
+            }
+            let (legs, _) =
+                logistics::route_registered(&front.route, &levels, terrain_factor, &self.workings);
+            if legs.is_empty() {
+                front.status = "Blocked".into();
+                front.blocker = "No commissioned route to surface".into();
+                continue;
+            }
+            if front.route_id == 0 || !self.transport.has_route(front.route_id) {
+                self.transport.configure(&legs, haul_rate, capacity_level);
+                front.route_id = self.transport.current_route;
+            }
+            let rate = if levels.get("conveyor").copied().unwrap_or(0) > 0 {
+                (4. * (1. + 0.12 * levels["conveyor"] as f64)
+                    * 1.5f64.powi((levels["conveyor"] / 10) as i32)
+                    * UNITS as f64) as u64
+            } else if levels.get("wheelbarrow").copied().unwrap_or(0) > 0 {
+                (2. * front.haulers as f64
+                    * (1. + 0.12 * levels["wheelbarrow"] as f64)
+                    * UNITS as f64) as u64
+            } else {
+                front.haulers as u64 * UNITS
+            };
+            front.transfer_remainder += rate;
+            let budget = front.transfer_remainder / 20;
+            front.transfer_remainder %= 20;
+            let room = cap.saturating_sub(self.ore.values().sum());
+            let amount = front.stockpile.min(budget).min(room);
+            if amount > 0 {
+                front.stockpile -= amount;
+                *self.ore.entry(front.material).or_default() += amount;
+                self.transport
+                    .register_source_route(front.material, amount, front.route_id);
+            } else if front.stockpile > 0 && rate == 0 {
+                front.status = "Waiting for haul crew".into();
+                front.blocker = "No haul crew assigned".into();
+            } else if front.stockpile > 0 && room == 0 {
+                front.status = "Blocked".into();
+                front.blocker = "Underground transfer full".into();
+            }
+        }
+        // Keep public camera route attached to an active extraction face.
+        if let Some(front) = self
+            .mining_fronts
+            .iter()
+            .find(|front| front.crew > 0 && !front.route.is_empty())
+        {
+            self.haul_path = front.route.clone();
+        }
+        // Shared telemetry and capacity use current active route; individual
+        // lots retain their source route identity above.
+        if !self.haul_legs.is_empty() {
+            self.transport
+                .configure(&self.haul_legs, haul_rate, capacity_level);
         }
         let power = (self.power_factor(offline) * 1000.) as u64;
         let mut inaccessible = BTreeMap::new();
@@ -1164,7 +1417,7 @@ impl Game {
             * (pacing::get().refining_rate * UNITS as f64)
             * self.throughput("furnace")
             * (1. + 0.15 * self.crew.operators.saturating_sub(1) as f64)
-            * (1. + 0.05 * self.ranks.get("metallurgy").copied().unwrap_or(0) as f64))
+            * (1. + 0.04 * self.ranks.get("metallurgy").copied().unwrap_or(0) as f64))
             as u64;
         let process_rate = process_rate / 20;
         let mut left = process_rate;
@@ -1227,6 +1480,16 @@ impl Game {
             }
             let recovery = (65i32
                 + 3 * self.levels.get("recovery").copied().unwrap_or(0) as i32
+                + if self.ranks.get("metallurgy").copied().unwrap_or(0) >= 6 {
+                    5
+                } else {
+                    0
+                }
+                + if self.ranks.get("reclamation").copied().unwrap_or(0) >= 6 {
+                    5
+                } else {
+                    0
+                }
                 + match self.specialisation.as_deref() {
                     Some("bulk") => -5,
                     Some("precision") => 10,
@@ -1285,7 +1548,7 @@ impl Game {
             let rate = (12500.
                 * power_factor
                 * self.throughput(&recipe.building)
-                * (1. + 0.05 * self.ranks.get("metallurgy").copied().unwrap_or(0) as f64))
+                * (1. + 0.04 * self.ranks.get("metallurgy").copied().unwrap_or(0) as f64))
                 as u64;
             let recipe_budget = work_budget(rate, self.ticks);
             if recipe.id.starts_with("separate_") {
@@ -1458,14 +1721,28 @@ impl Game {
                 }
             }
         }
+        let front_stock = self
+            .mining_fronts
+            .iter()
+            .map(|front| front.stockpile)
+            .sum::<u64>();
+        let front_capacity = self
+            .mining_fronts
+            .iter()
+            .map(|front| front.capacity)
+            .sum::<u64>();
         self.stages = vec![
             Stage {
                 name: "Digging".into(),
                 rate: self.flow_window[0] as f64 / UNITS as f64 / seconds,
-                buffer: self.ore.values().sum(),
-                capacity: cap,
-                blocker: if ore_total + CELL_MASS > cap {
-                    "Hauling buffer full"
+                buffer: self.ore.values().sum::<u64>() + front_stock,
+                capacity: cap + front_capacity,
+                blocker: if let Some(front) = self
+                    .mining_fronts
+                    .iter()
+                    .find(|front| !front.blocker.is_empty())
+                {
+                    &front.blocker
                 } else if self.workings.status == "Waiting for supports" {
                     "Building local supports"
                 } else if self.workings.search.is_some() {
@@ -1484,7 +1761,7 @@ impl Game {
                 } else {
                     "Working"
                 }
-                .into(),
+                .to_string(),
             },
             Stage {
                 name: "Hauling".into(),
@@ -1581,7 +1858,19 @@ impl Game {
                 } else {
                     u64::MAX
                 };
-                left.min(dig).saturating_sub(1)
+                let front_dig = self
+                    .mining_fronts
+                    .iter()
+                    .filter(|front| front.crew > 0 && front.stockpile < front.capacity)
+                    .filter_map(|front| {
+                        let rate = self.dig_rate_for(front.crew);
+                        (rate > 0).then(|| {
+                            ((1000 - front.progress) * 20 - front.work_remainder).div_ceil(rate)
+                        })
+                    })
+                    .min()
+                    .unwrap_or(u64::MAX);
+                left.min(dig.min(front_dig)).saturating_sub(1)
             } else {
                 0
             };
@@ -1589,6 +1878,19 @@ impl Game {
                 let work = self.dig_rate(true) * skip + self.dig_remainder;
                 self.dig_progress = (self.dig_progress + work / 20) % 1000;
                 self.dig_remainder = work % 20;
+                let front_rates: Vec<_> = self
+                    .mining_fronts
+                    .iter()
+                    .map(|front| self.dig_rate_for(front.crew))
+                    .collect();
+                for (front, rate) in self.mining_fronts.iter_mut().zip(front_rates) {
+                    if front.crew == 0 || front.stockpile >= front.capacity {
+                        continue;
+                    }
+                    let work = rate * skip + front.work_remainder;
+                    front.progress = (front.progress + work / 20) % 1000;
+                    front.work_remainder = work % 20;
+                }
                 if (self.ticks - 1) / 20 != (self.ticks + skip - 1) / 20 {
                     self.flow_window = [0; 5];
                     self.processing_window.clear();
@@ -1605,7 +1907,11 @@ impl Game {
                 }
                 if !self.workings.passages.is_empty() {
                     self.workings.survey_work = (self.workings.survey_work
-                        + (1 + self.crew.prospectors as u64 * 3) * skip)
+                        + (1 + self.crew.prospectors as u64 * 3)
+                            * (100
+                                + 5 * self.ranks.get("prospecting").copied().unwrap_or(0) as u64)
+                            / 100
+                            * skip)
                         % 200;
                 }
                 self.ticks += skip;
@@ -2110,6 +2416,13 @@ impl Game {
         if !self.workings.valid() {
             return Err("Invalid underground workings".into());
         }
+        if !fronts::valid(
+            &self.mining_fronts,
+            materials().len(),
+            self.max_mining_fronts(),
+        ) {
+            return Err("Invalid mining fronts".into());
+        }
         if !self.transport.valid(materials().len()) || !self.transport.sources_match(&self.ore) {
             return Err("Invalid transport network".into());
         }
@@ -2204,6 +2517,7 @@ impl Game {
             .products
             .values()
             .chain(self.ore.values())
+            .chain(self.mining_fronts.iter().map(|front| &front.stockpile))
             .chain(self.hauled.values())
             .chain(self.concentrate.values())
             .chain(self.raw_stock.values())
@@ -2370,6 +2684,10 @@ mod accounting_tests {
             g.second(&cat, false);
         }
         let mass: u64 = g.ore.values().sum::<u64>()
+            + g.mining_fronts
+                .iter()
+                .map(|front| front.stockpile)
+                .sum::<u64>()
             + g.hauled.values().sum::<u64>()
             + g.concentrate.values().sum::<u64>()
             + g.trace_feed.values().sum::<u64>()
@@ -2435,12 +2753,12 @@ mod pipeline_tests {
     #[test]
     fn refinery_backpressure_stops_sorting() {
         let mut g = Game::default();
-        g.concentrate.insert(2, 20000 * 64);
+        g.concentrate.insert(2, g.raw_stock_capacity());
         g.hauled.insert(2, 1000 * 64);
         g.tick(&materials(), false);
         assert_eq!(g.flow_window[2], 0);
         assert_eq!(g.hauled[&2], 1000 * 64);
-        assert!(g.concentrate[&2] < 20 * UNITS);
+        assert!(g.concentrate[&2] < g.raw_stock_capacity());
         g.tick(&materials(), false);
         assert!(g.flow_window[2] > 0);
     }
@@ -2572,8 +2890,9 @@ mod progression_tests {
         let mut g = Game::default();
         g.ranks.insert("logistics".into(), 6);
         g.apply_headquarters();
-        assert_eq!(g.level("conveyor"), 1);
-        assert_eq!(g.level("minecart"), 1);
+        assert_eq!(g.level("wheelbarrow"), 1);
+        assert_eq!(g.level("conveyor"), 0);
+        assert_eq!(g.level("minecart"), 0);
         assert_eq!(g.level("train"), 0);
     }
     #[test]
@@ -2688,13 +3007,17 @@ mod throughput_tests {
             y: 1,
             material: 0,
         });
-        g.hauled.insert(0, 20000 * 64);
+        g.tick(&materials(), false);
+        g.flow_window[1] = 0;
+        g.hauled.insert(0, g.raw_stock_capacity());
         g.ore.insert(0, 1000 * 64);
-        g.transport.stations[0].cargo.insert(0, 4 * UNITS);
+        let station_capacity = g.transport.stations[0].capacity;
+        g.transport.stations[0].cargo.insert(0, station_capacity);
+        let segment_capacity = g.transport.segments[0].capacity;
         g.transport.segments[0].batches.push(transport::Batch {
-            route: 0,
+            route: g.transport.current_route,
             material: 0,
-            amount: 20 * UNITS,
+            amount: segment_capacity,
             remaining_ms: 10000,
             duration_ms: 10000,
             legs: vec![],
@@ -3363,10 +3686,13 @@ mod retired_start_tests {
             value: 0,
         })
         .unwrap();
-        assert_eq!(g.pinned.as_deref(), Some("steelworks"));
-        assert_eq!(g.level("power"), 1);
+        assert_eq!(g.pinned.as_deref(), Some("furnace"));
+        assert_eq!(g.level("sorter"), 1);
+        assert_eq!(g.level("power"), 0);
+        g.levels.insert("furnace".into(), 1);
+        g.pinned = Some("steelworks".into());
         g.last_saved = 1;
-        g.advance_offline(28801, &materials());
+        g.advance_offline(601, &materials());
         assert!(g.products.get("iron").copied().unwrap_or(0) >= 4 * UNITS);
         assert!(g.products.get("coke").copied().unwrap_or(0) >= UNITS);
         assert!(g.products.get("lime").copied().unwrap_or(0) >= UNITS);

@@ -392,6 +392,26 @@ impl Workings {
         }
         result
     }
+    pub fn route_near(&self, face: Point) -> Vec<Point> {
+        let Some((mut index, _)) = self
+            .passages
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, passage)| distance(passage.feet, face))
+        else {
+            return vec![];
+        };
+        let mut result = Vec::new();
+        loop {
+            let passage = &self.passages[index];
+            result.push(passage.feet);
+            if index == 0 {
+                break;
+            }
+            index = passage.parent;
+        }
+        result
+    }
     pub fn is_lift_edge(&self, a: Point, b: Point) -> bool {
         if a[0] != b[0] {
             return false;

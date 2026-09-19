@@ -77,7 +77,7 @@
   },
   {
     "id": "recovery",
-    "requires": "",
+    "requires": "sorter",
     "inputs": {}
   },
   {
@@ -87,7 +87,7 @@
   },
   {
     "id": "reclaimer",
-    "requires": "",
+    "requires": "recovery",
     "inputs": {}
   },
   {
@@ -144,7 +144,7 @@
   },
   {
     "id": "slagcrusher",
-    "requires": "",
+    "requires": "steelworks",
     "inputs": {}
   }
 ]

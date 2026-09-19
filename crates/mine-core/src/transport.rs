@@ -102,6 +102,10 @@ pub struct Network {
     pub current_route: u64,
     #[serde(skip)]
     configured_legs: Option<Vec<Leg>>,
+    #[serde(skip)]
+    configured_rate: u64,
+    #[serde(skip)]
+    configured_capacity: u32,
     pub stations: Vec<Station>,
     pub segments: Vec<Segment>,
     pub express: usize,
@@ -167,6 +171,8 @@ impl Default for Network {
             source: vec![],
             current_route: 0,
             configured_legs: None,
+            configured_rate: 0,
+            configured_capacity: 0,
             stations,
             segments,
             express: 0,
@@ -176,9 +182,10 @@ impl Default for Network {
 impl Network {
     pub fn configure(&mut self, legs: &[Leg], rate: u64, global_capacity: u32) {
         for (i, station) in self.stations.iter_mut().enumerate() {
-            station.capacity = (crate::pacing::get().station_units[i] * UNITS
-                + 5 * UNITS * global_capacity as u64)
-                * (4 + station.level as u64)
+            let seconds = [20, 30, 30, 30, 60][i];
+            station.capacity = (crate::pacing::get().station_units[i] * UNITS)
+                .max(rate.saturating_mul(seconds))
+                .saturating_mul(4 + global_capacity as u64 + station.level as u64)
                 / 4;
             station.quote = (crate::pacing::get().station_cost as f64
                 * crate::pacing::get()
@@ -187,17 +194,16 @@ impl Network {
             .ceil()
             .to_string();
         }
-        for segment in &mut self.segments {
-            segment.rate = rate;
-            segment.capacity =
-                (crate::pacing::get().transit_units + global_capacity as u64 * 5) * UNITS;
-        }
         if self.configured_legs.as_deref() == Some(legs)
+            && self.configured_rate == rate
+            && self.configured_capacity == global_capacity
             && self.routes.contains_key(&self.current_route)
         {
             return;
         }
         self.configured_legs = Some(legs.to_vec());
+        self.configured_rate = rate;
+        self.configured_capacity = global_capacity;
         for segment in &mut self.segments {
             segment.legs.clear();
             segment.demand = 0;
@@ -254,8 +260,30 @@ impl Network {
         }
         for segment in &mut self.segments {
             segment.duration_ms = 2000 + segment.legs.iter().map(|l| l.milliseconds).sum::<u32>();
-            segment.capacity =
-                (crate::pacing::get().transit_units + global_capacity as u64 * 5) * UNITS;
+            // Installed transport modes carry only their matching segment. Long
+            // routes receive enough in-transit ownership for 30% headroom over
+            // one full cycle instead of retaining a fixed shallow-mine cap.
+            let floor = segment
+                .legs
+                .iter()
+                .map(|leg| match leg.mode.as_str() {
+                    "train" => 12 * UNITS,
+                    "minecart" | "lift" => 8 * UNITS,
+                    "conveyor" => 4 * UNITS,
+                    "wheelbarrow" => 2 * UNITS,
+                    _ => UNITS,
+                })
+                .min()
+                .unwrap_or(rate);
+            segment.rate = rate.max(floor);
+            let cycle = segment
+                .rate
+                .saturating_mul(segment.duration_ms as u64)
+                .div_ceil(1000);
+            segment.capacity = (crate::pacing::get().transit_units * UNITS)
+                .max(cycle.saturating_mul(13).div_ceil(10))
+                .saturating_mul(4 + global_capacity as u64)
+                / 4;
         }
         let itinerary: Vec<_> = self.segments.iter().map(|s| s.legs.clone()).collect();
         if self.routes.get(&self.current_route) != Some(&itinerary) {
@@ -265,6 +293,14 @@ impl Network {
     }
     pub fn register_source(&mut self, material: usize, amount: u64) {
         put(&mut self.source, material, amount, self.current_route);
+    }
+    pub fn register_source_route(&mut self, material: usize, amount: u64, route: u64) {
+        if self.routes.contains_key(&route) {
+            put(&mut self.source, material, amount, route);
+        }
+    }
+    pub fn has_route(&self, route: u64) -> bool {
+        self.routes.contains_key(&route)
     }
     pub fn mass(&self) -> u64 {
         self.stations.iter().map(Station::stored).sum::<u64>()

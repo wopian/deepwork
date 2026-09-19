@@ -89,7 +89,6 @@ pub fn validate() -> Result<(), String> {
                 || grants.len() != 3
                 || grants.iter().zip([3, 6, 10]).any(|(grant, rank)| {
                     grant.rank != rank
-                        || grant.upgrades.is_empty()
                         || grant
                             .upgrades
                             .iter()

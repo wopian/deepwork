@@ -1,11 +1,11 @@
 {
-  "starting_credits": 95,
+  "starting_credits": 120,
   "costs": {
     "worker": 25,
     "housing": 90,
-    "drill": 100,
+    "drill": 75,
     "conveyor": 45,
-    "sorter": 100,
+    "sorter": 60,
     "furnace": 35,
     "shaft": 140,
     "steelworks": 200,
@@ -14,16 +14,16 @@
     "electrolytic": 2200,
     "trace": 3500,
     "recovery": 100,
-    "capacity": 100,
+    "capacity": 60,
     "reclaimer": 100,
     "manufacturing": 100,
     "supports": 100,
     "pump": 100,
     "ventilation": 100,
-    "wheelbarrow": 100,
+    "wheelbarrow": 45,
     "minecart": 100,
     "train": 100,
-    "survey": 100,
+    "survey": 60,
     "slagcrusher": 100
   },
   "worker_growth": 1.15,
@@ -36,64 +36,22 @@
   "refining_rate": 2.0,
   "research_base": 5,
   "starter_hold_units": 3,
-  "station_units": [
-    4,
-    8,
-    8,
-    12,
-    20
-  ],
+  "station_units": [4, 8, 8, 12, 20],
   "transit_units": 20,
   "station_cost": 60,
   "windows": {
-    "worker": [
-      0,
-      60
-    ],
-    "conveyor": [
-      30,
-      180
-    ],
-    "furnace": [
-      0,
-      300
-    ],
-    "shaft": [
-      1500,
-      2100
-    ],
-    "specialisation": [
-      900,
-      3600
-    ],
-    "retirement": [
-      43200,
-      259200
-    ],
-    "power": [
-      129600,
-      604800
-    ],
-    "chemical": [
-      432000,
-      1209600
-    ],
-    "precision": [
-      1209600,
-      1814400
-    ],
-    "rare_earth": [
-      1814400,
-      2419200
-    ],
-    "headquarters": [
-      2419200,
-      3628800
-    ],
-    "tactics": [
-      0,
-      60
-    ]
+    "worker": [0, 60],
+    "conveyor": [30, 180],
+    "furnace": [0, 300],
+    "shaft": [1500, 2100],
+    "specialisation": [900, 3600],
+    "retirement": [43200, 259200],
+    "power": [129600, 604800],
+    "chemical": [432000, 1209600],
+    "precision": [1209600, 1814400],
+    "rare_earth": [1814400, 2419200],
+    "headquarters": [2419200, 3628800],
+    "tactics": [0, 60]
   },
   "foundation_upgrades": [
     "supports",
@@ -117,102 +75,71 @@
     "excavation": [
       {
         "rank": 3,
-        "upgrades": [
-          "drill"
-        ]
+        "upgrades": ["drill"]
       },
       {
         "rank": 6,
-        "upgrades": [
-          "supports"
-        ]
+        "upgrades": []
       },
       {
         "rank": 10,
-        "upgrades": [
-          "shaft"
-        ]
+        "upgrades": []
       }
     ],
     "logistics": [
       {
         "rank": 3,
-        "upgrades": [
-          "conveyor"
-        ]
+        "upgrades": ["wheelbarrow"]
       },
       {
         "rank": 6,
-        "upgrades": [
-          "minecart"
-        ]
+        "upgrades": []
       },
       {
         "rank": 10,
-        "upgrades": [
-          "train"
-        ]
+        "upgrades": ["conveyor"]
       }
     ],
     "metallurgy": [
       {
         "rank": 3,
-        "upgrades": [
-          "furnace",
-          "power"
-        ]
+        "upgrades": ["sorter"]
       },
       {
         "rank": 6,
-        "upgrades": [
-          "chemical"
-        ]
+        "upgrades": []
       },
       {
         "rank": 10,
-        "upgrades": [
-          "electrolytic"
-        ]
+        "upgrades": []
       }
     ],
     "prospecting": [
       {
         "rank": 3,
-        "upgrades": [
-          "survey"
-        ]
+        "upgrades": ["survey"]
       },
       {
         "rank": 6,
-        "upgrades": [
-          "pump"
-        ]
+        "upgrades": []
       },
       {
         "rank": 10,
-        "upgrades": [
-          "trace"
-        ]
+        "upgrades": []
       }
     ],
     "reclamation": [
       {
         "rank": 3,
-        "upgrades": [
-          "recovery"
-        ]
+        "upgrades": ["recovery"]
       },
       {
         "rank": 6,
-        "upgrades": [
-          "reclaimer"
-        ]
+        "upgrades": []
       },
       {
         "rank": 10,
-        "upgrades": [
-          "slagcrusher"
-        ]
+        "upgrades": []
       }
     ]
   }
