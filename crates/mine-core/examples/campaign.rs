@@ -18,6 +18,8 @@ struct Checkpoint {
 fn content_fingerprint() -> u64 {
     let mut hash = 0xcbf29ce484222325_u64;
     for text in [
+        // Never resume an older decision policy as if it were the same strategy.
+        include_str!("campaign.rs"),
         include_str!("../../../content/pacing.json"),
         include_str!("../../../content/upgrades.json"),
         include_str!("../../../content/materials.json"),
@@ -85,26 +87,31 @@ fn pinned_feeds(g: &Game) -> Vec<usize> {
         .and_then(|id| requirements().iter().find(|u| u.id == *id));
     let mut pending: Vec<(String, u64)> = requirement
         .map(|u| u.inputs.iter().map(|(p, n)| (p.clone(), *n)).collect())
-        .unwrap_or_else(|| {
-            if BUILD_ORDER.iter().all(|id| g.level(id) > 0) {
-                [
-                    "advanced_structure",
-                    "precision_controls",
-                    "magnets",
-                    "batteries",
-                ]
-                .into_iter()
-                .map(|p| (p.into(), 10 * mine_core::geometry::UNITS))
-                .collect()
-            } else {
-                Vec::new()
-            }
-        });
+        .unwrap_or_default();
+    if BUILD_ORDER.iter().all(|id| g.level(id) > 0) {
+        // A pinned lift must not hide the feeds for the commissioned industry.
+        pending.extend(
+            [
+                "advanced_structure",
+                "precision_controls",
+                "magnets",
+                "batteries",
+            ]
+            .into_iter()
+            .map(|p| (p.into(), 10 * mine_core::geometry::UNITS)),
+        );
+    }
     let cat = materials();
     let mut visited = std::collections::BTreeSet::new();
     let mut feeds = std::collections::BTreeSet::new();
     while let Some((product, target)) = pending.pop() {
-        let available = g.products.get(&product).copied().unwrap_or(0);
+        let available = if product.ends_with("_residue") {
+            g.trace_feed.get(&product)
+        } else {
+            g.products.get(&product)
+        }
+        .copied()
+        .unwrap_or(0);
         if available >= target || !visited.insert(product.clone()) {
             continue;
         }
@@ -127,6 +134,18 @@ fn pinned_feeds(g: &Game) -> Vec<usize> {
                         },
                     );
                 pending.push((input.clone(), batches * quantity + committed));
+            }
+        } else if let Some(output) = product.strip_suffix("_residue") {
+            let sources: Vec<_> = mine_core::traces()
+                .iter()
+                .filter(|rule| rule.output == output)
+                .collect();
+            if let Some(source) = sources
+                .iter()
+                .find(|rule| g.discoveries.contains(&rule.feed))
+                .or_else(|| sources.first())
+            {
+                feeds.insert(source.feed);
             }
         } else {
             let matches = |m: &&mine_core::Material| {
@@ -547,17 +566,32 @@ impl Advancement {
                 .collect()
             });
         let mut stocks = BTreeMap::new();
+        if game.pinned.is_some() && BUILD_ORDER.iter().all(|id| game.level(id) > 0) {
+            pending.extend(
+                [
+                    "advanced_structure",
+                    "precision_controls",
+                    "magnets",
+                    "batteries",
+                ]
+                .into_iter()
+                .map(String::from),
+            );
+        }
         while let Some(product) = pending.pop() {
             if stocks.contains_key(&product) {
                 continue;
             }
             stocks.insert(
                 product.clone(),
-                game.products
-                    .get(&product)
-                    .copied()
-                    .unwrap_or(0)
-                    .min(16 * mine_core::geometry::UNITS),
+                (if product.ends_with("_residue") {
+                    game.trace_feed.get(&product)
+                } else {
+                    game.products.get(&product)
+                })
+                .copied()
+                .unwrap_or(0)
+                .min(16 * mine_core::geometry::UNITS),
             );
             if let Some(recipe) = recipes().iter().find(|r| r.output == product) {
                 pending.extend(recipe.inputs.keys().cloned());
@@ -899,6 +933,44 @@ mod strategy_tests {
         assert_eq!(
             serde_json::to_value(&original.game).unwrap(),
             serde_json::to_value(&restored.game).unwrap()
+        );
+    }
+    #[test]
+    fn commissioned_industry_prioritises_trace_sources_while_lift_is_pinned() {
+        let mut game = Game::new(42, 1);
+        for id in BUILD_ORDER {
+            game.levels.insert((*id).into(), 1);
+        }
+        game.pinned = Some("shaft".into());
+        for product in [
+            "advanced_structure",
+            "precision_controls",
+            "batteries",
+            "iron",
+            "borate",
+        ] {
+            game.products
+                .insert(product.into(), 16 * mine_core::geometry::UNITS);
+        }
+        assert_eq!(pinned_feeds(&game), vec![53]);
+        game.discoveries.insert(54);
+        assert_eq!(pinned_feeds(&game), vec![54]);
+        assert!(
+            game.terrain.revealed.is_empty(),
+            "Catalogue priorities must not expose hidden geology"
+        );
+        let before = Advancement::read(&game);
+        for residue in ["neodymium_residue", "praseodymium_residue"] {
+            game.trace_feed
+                .insert(residue.into(), 2 * mine_core::geometry::UNITS);
+        }
+        assert!(
+            pinned_feeds(&game).is_empty(),
+            "Available residues already cover magnet inputs"
+        );
+        assert!(
+            before.advanced_to(&Advancement::read(&game)),
+            "Residue production prevents premature site abandonment"
         );
     }
     #[test]

@@ -19,7 +19,7 @@ Current saves use **version 9 / generator 5**. Older campaigns are archived befo
 ## Verified in this milestone
 
 - **110 Rust core tests**, including signed route/save validation, cross-boundary geology, hidden-ore privacy, whole-vein selection, connected negative-coordinate branches, lateral depth-gate recovery and exact offline/stepped accounting. Pending vein-accuracy work prevents idle skipping; its blocked-network regression reproduces the original failure and now matches stepped revelation.
-- **13 campaign-strategy/checkpoint tests** include selecting surveyed but unexposed cells without reading hidden geology. Baseline strategies now purchase survey accuracy and keep orders tied to missing equipment or headquarters feed without switching away between survey decisions.
+- **14 campaign-strategy/checkpoint tests** include selecting surveyed but unexposed cells without reading hidden geology. Baseline strategies now purchase survey accuracy and keep orders tied to missing equipment or headquarters feed without switching away between survey decisions.
 - **13 native persistence/lifecycle/snapshot tests** cover checkpoint failure, duplicate events, stale ordering and native ownership over WebView signals.
 - **27 Bun tests** pass. Vue/TypeScript checking and production frontend builds run on Windows **Bun 1.4.0**, without WSL dependency installation.
 - Guided opening: **30/30 seeds** sell within 17 seconds, first refined iron in 17–290 seconds (median 23), conveyor in 33–159 seconds (median 123.5). A stronger junction check confirms actual underground forks in 22–95 seconds on all 30 seeds.
@@ -50,7 +50,9 @@ The current campaign retune raises electrolysis research from 275 to 300 and mak
 
 The preserved 275-research baseline completed five headquarters campaigns at days 29.0, 30.5, 31.0, 31.5 and 40.0 before being stopped for retuning. These are diagnostic samples, not 30-seed acceptance. Its other checkpoints include a prolonged missing-insulation stall that motivated the recovery strategy fix.
 
-**All 30 final seeds (42–71) now start fresh on `5ddf8cc`**, using two daily 12-minute visits, the existing offline cap, all three specialisations and a 56-day observation limit. No older-content checkpoints are resumed. `retuned-run-manifest.json` records the executable and parameters. Headquarters remains targeted at 28–42 days; final campaign acceptance is pending.
+The 300-research run completed four diagnostic headquarters campaigns at days 29.0, 30.5, 31.0 and 31.5. Its exact-state-equivalent dispatch continuation reproduced the first completed report, excluding only compute time and resume metadata. Investigation then found a benchmark strategy gap: trace residues were not mapped to eligible source ores, and a pinned lift hid headquarters ingredient priorities. Those public-catalogue decisions are now corrected; existing residue stock and progress are respected. Checkpoint fingerprints include strategy source to reject mixed decision policies.
+
+**All 30 final seeds (42–71) restart fresh with the source-aware strategy**, using two daily 12-minute visits, the existing offline cap, all three specialisations and a 56-day observation limit. Earlier runs remain diagnostics. Headquarters remains targeted at 28–42 days; final campaign acceptance is pending.
 
 The selected-vein endurance case also passed: 58 FPS median, 76.7 MiB peak JavaScript heap, 29 resident textures, 348,524-byte save, 636 added passages and 21,520 excavated cells. A third shallower case passed at 58 FPS median, 80.1 MiB peak JavaScript heap, 39.4 MiB native working set and 12.1 MiB native private memory. It advanced 1,819.3 simulation seconds during 1,819.293 wall seconds with zero gameplay commands. Native memory excludes WebView/GPU processes. Mouse and touch whole-vein selection and portrait camera preservation pass in their recorded packaged builds.
 
