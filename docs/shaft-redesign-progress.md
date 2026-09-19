@@ -69,3 +69,9 @@ The deep browser check can now include real revealed terrain with --terrain. Des
 Strategy regression now verifies that completed headquarters component lines stop consuming shared feeds and restart when stock falls. This fixes a benchmark decision defect, not game rewards: the preceding lift-400 run kept making surplus magnets while iron-starved lift upgrades blocked exploration. Its 12 completed runs and all seed observations are preserved as superseded diagnostics. All 30 seeds restart fresh on gameplay 7c1c0ca and strategy dcca9cf, with unchanged windows and no mixed checkpoints. Eighteen campaign tests pass.
 
 An additional 30-seed deliberate-sale opening diagnostic spends starter iron on a contract before repinning the lift. Public survey, vein selection and renewed exploration recover all 30; 29 finish within one hour and the remaining seed at 90:17. Passive and intermediate failed strategies remain recorded. This demonstrates recovery, not fast recovery after selling construction stock.
+
+## Checkpoint edge cases
+
+Clock rollback retains the last accounted timestamp across offline advancement, background events, autosaves and commands. Restoring the clock cannot re-award the consumed interval. The foreground suspension fallback now saves a cloned candidate before replacing live state; failed saves preserve the original state and retry without publishing rewards. Tests pass: 112 core, 14 native, 18 campaign. Normal forward-clock simulation is unchanged; the active campaign executable remains valid for the balance gate.
+
+ARM64 APK rebuilt on bb66756; v2/v3 signatures, 16 KB ZIP alignment and all three packaged ELF load segments pass. SHA-256: 5dbe2eceeeb4f0ebd60ef9cf969d08436d44fc4abd728c886f8e2d157f5fe011. Physical Android checks remain pending.
