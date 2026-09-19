@@ -100,6 +100,8 @@ This gate rejects incomplete campaigns, missing milestones, duplicate seeds and 
 
 The 56-day observation horizon checks late-but-completable seeds. Headquarters median target remains 28–42 days; the acceptance checker reads that unchanged target from content.
 
+The [recorded shaft-first cohort](docs/balance/README.md) completes all 30 seeds and passes all six overall median gates. Headquarters median is 39.000 days, with individual results from 30.006 to 51.500 days. Per-specialisation timing differences and every observation remain available in that report.
+
 ## Natural underground workings
 
 The foreman starts at the surface shaft and builds toward local survey signals and exposed ore. Survey accuracy reveals the nearest facing arc, then the full remaining vein. Click or tap revealed ore to prioritise its entire deposit; the order survives individual cuts and save/load. Unknown portions never become planner targets or client mineral tooltips.

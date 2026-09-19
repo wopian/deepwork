@@ -48,7 +48,28 @@ Checkpoint handling now retains the highest recorded timestamp across clock roll
 
 Three one-hour simulations with identical upgraded equipment compared fixed depth policy against priorities based only on discovered commodity prices. Credit changes were **+58.0%, −15.0%, and −20.5%**; the vein policy reached 174–360 metres versus 2,796–3,200 metres for depth policy. These fixture runs demonstrate a production/access tradeoff, not a guaranteed active-play bonus or campaign acceptance. No timed power multiplier is involved.
 
-## Measurements in progress
+## Full campaign acceptance
+
+The fresh 30-seed cohort **passes all six existing overall median gates**, with **30/30 headquarters completions**. Seeds 42–71 cover ten bulk, ten precision and ten reclamation strategies. Each receives two 12-minute visits per day, 50% offline rate and the eight-real-hour cap. The observation horizon remains 56 days; no seed, failure or slow observation was excluded.
+
+All values below are simulated calendar days. Individual outliers include observations earlier as well as later than the authored window; classification uses unrounded seconds.
+
+| Milestone | Median | Target | Individual range | Outside window |
+|---|---:|---:|---:|---:|
+| Retirement | 0.503 | 0.5–3 | 0.500–1.000 | 0 |
+| Power | 1.505 | 1.5–7 | 1.500–2.500 | 0 |
+| Chemical | 6.752 | 5–14 | 4.504–10.500 | 2 |
+| Precision | 16.252 | 14–21 | 12.000–25.502 | 20 |
+| Rare Earth | 27.750 | 21–28 | 22.000–40.000 | 12 |
+| Headquarters | 39.000 | 28–42 | 30.006–51.500 | 10 |
+
+Headquarters medians by strategy: **bulk 43.753 days**, **precision 39.750 days**, **reclamation 31.006 days**. Overall acceptance is not a claim that every specialisation meets every median window independently: bulk headquarters exceeds six weeks, precision's first aluminium median is 23.003 days, and reclamation reaches aluminium earlier at 12.001 days. Ten individual headquarters observations exceed 42 days, including one by a single second; the slowest finishes at 51.500 days. These differences remain disclosed rather than rounded away.
+
+The run used gameplay `7c1c0ca`, strategy `dcca9cf`, save version 9 and generator 5. It completed in 10,192 wall seconds on the loaded Windows host with 12 CPU workers. This is deterministic strategy evidence, not a human playtest or Android performance result. Subsequent clock/checkpoint edge-case and snapshot/UI fixes leave ordinary forward-clock simulation unchanged.
+
+The [committed cohort and reproduction notes](docs/balance/README.md) retain every observation. The Windows Bun-only build also passes with Node removed from process PATH.
+
+## Performance and historical balance measurements
 
 A 30-minute expanded-terrain Windows run passed at median **58 FPS**, **86.7 MiB** peak JavaScript heap, **30** peak resident terrain textures and a **571,539-byte** compact save. Supported passages grew from 791 to 2,073 with 1,000 simulated workers represented by at most 250 sprites. Save/reload and portrait touch checks passed. The original harness falsely flagged equipment changes because JSON key order differed; recursive comparison confirms unchanged values and zero gameplay commands during measurement. Its report and corrected assessment are preserved separately.
 
@@ -62,9 +83,9 @@ The source-aware 300 m lift run was stopped after 18 headquarters completions (2
 
 Current candidate gives each lift upgrade **400 m of reach**, retaining free 300 m access and independent support, groundwater and heat gates. One authored value drives gameplay, upgrade previews and benchmark decisions. The benchmark also stops treating endless unrelated deepening as construction progress: public material tiers bound its search, while a revealed deeper required source can extend it. The observed trigger was a strategy digging beyond 7 km while missing aluminium feed.
 
-All 30 seeds (42–71) have restarted fresh on this candidate, with two daily 12-minute visits, the existing offline cap, all three specialisations and a 56-day observation limit. Headquarters remains targeted at 28–42 days; candidate campaign acceptance is pending.
+All 30 seeds (42–71) have restarted fresh on this candidate, with two daily 12-minute visits, the existing offline cap, all three specialisations and a 56-day observation limit. Headquarters remains targeted at 28–42 days; the completed allocation-aware cohort passes those overall median gates as recorded above.
 
-The first lift-400 cohort was superseded after 12 headquarters completions (31.0–51.5 days). Review found a strategy defect: completed headquarters component lines continued consuming shared feeds, including iron needed for lifts. The strategy now disables completed component chains and restarts them when reserved stock falls; its regression passes. All 30 seeds restart fresh with this allocation fix, identical gameplay content and unchanged acceptance windows. Original observations and checkpoints remain preserved; the incomplete superseded run is not acceptance.
+The first lift-400 cohort was superseded after 12 headquarters completions (31.0–51.5 days). Review found a strategy defect: completed headquarters component lines continued consuming shared feeds, including iron needed for lifts. The strategy now disables completed component chains and restarts them when reserved stock falls; its regression passes. All 30 seeds were restarted fresh with this allocation fix, identical gameplay content and unchanged acceptance windows. Original observations and checkpoints remain preserved; the incomplete superseded run is not acceptance.
 
 Candidate regression repeats all 30 guided openings and 30 adverse purchase orders successfully. Guided first iron remains 17–290 seconds (median 23); adverse lift purchases remain 891–1,552 seconds. All three first-site profiles pass the unchanged median gate, with the same 2,365-second slow lift outlier. The candidate deep offline replay advances 60,300 cells and earns 7,533 credits with exact full-state parity against stepped simulation; catch-up takes 98.8 seconds and stepped computation 95.1 seconds on the loaded host. These replace the older fixture timings for current build expectations, not the historical optimization comparisons. The ARM64 candidate APK is rebuilt and signature/alignment checks pass.
 

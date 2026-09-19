@@ -81,3 +81,29 @@ ARM64 APK rebuilt on bb66756; v2/v3 signatures, 16 KB ZIP alignment and all thre
 Snapshots expose the authoritative current depth limit and equipment needed to extend it. Ore inspection shows that limit, names required upgrades, and opens Equipment without rejecting a whole-vein order that still has accessible faces. Native tests cover simultaneous lift/support gates, drainage, heat and maximum lift reach. Desktop click and portrait tap identify the expected revealed mineral; the warning disappears when an authoritative snapshot raises access. Both views pass contrast/type/touch-target checks. The inspector scrolls within the mine viewport when space is limited.
 
 Current checks: 112 core, 15 native, 18 campaign strategy and 30 Bun tests. Frontend production build passes. ARM64 APK rebuilt on c52ce69; packaged ELF and ZIP alignment plus v2/v3 signatures pass. SHA-256: d17593b8a3c99c75ac8a1094252304888c96b7f13e14f4f2ad125ebb34dfabd9. The 30-seed allocation-aware campaign remains in progress.
+
+
+## Completed campaign cohort and delivery
+
+## Full campaign acceptance
+
+The fresh 30-seed cohort **passes all six existing overall median gates**, with **30/30 headquarters completions**. Seeds 42–71 cover ten bulk, ten precision and ten reclamation strategies. Each receives two 12-minute visits per day, 50% offline rate and the eight-real-hour cap. The observation horizon remains 56 days; no seed, failure or slow observation was excluded.
+
+All values below are simulated calendar days. Individual outliers include observations earlier as well as later than the authored window; classification uses unrounded seconds.
+
+| Milestone | Median | Target | Individual range | Outside window |
+|---|---:|---:|---:|---:|
+| Retirement | 0.503 | 0.5–3 | 0.500–1.000 | 0 |
+| Power | 1.505 | 1.5–7 | 1.500–2.500 | 0 |
+| Chemical | 6.752 | 5–14 | 4.504–10.500 | 2 |
+| Precision | 16.252 | 14–21 | 12.000–25.502 | 20 |
+| Rare Earth | 27.750 | 21–28 | 22.000–40.000 | 12 |
+| Headquarters | 39.000 | 28–42 | 30.006–51.500 | 10 |
+
+Headquarters medians by strategy: **bulk 43.753 days**, **precision 39.750 days**, **reclamation 31.006 days**. Overall acceptance is not a claim that every specialisation meets every median window independently: bulk headquarters exceeds six weeks, precision's first aluminium median is 23.003 days, and reclamation reaches aluminium earlier at 12.001 days. Ten individual headquarters observations exceed 42 days, including one by a single second; the slowest finishes at 51.500 days. These differences remain disclosed rather than rounded away.
+
+The run used gameplay `7c1c0ca`, strategy `dcca9cf`, save version 9 and generator 5. It completed in 10,192 wall seconds on the loaded Windows host with 12 CPU workers. This is deterministic strategy evidence, not a human playtest or Android performance result. Subsequent clock/checkpoint edge-case and snapshot/UI fixes leave ordinary forward-clock simulation unchanged.
+
+The committed compact report is [docs/balance/shaft-first-campaign.json](balance/shaft-first-campaign.json); [reproduction notes](balance/README.md) explain source provenance and strict outlier calculations. The gate passes against current pacing content.
+
+Final checks remain 112 core, 15 native, 18 campaign strategy and 30 Bun tests. The latest Windows Bun 1.4.0 frontend build also passes with Node absent from process PATH. APK source stays c52ce69 with SHA-256 d17593b8a3c99c75ac8a1094252304888c96b7f13e14f4f2ad125ebb34dfabd9; no runtime code changed during cohort measurement. Physical Android acceptance and the Defender-blocked deep Windows endurance run remain unverified as previously documented.
