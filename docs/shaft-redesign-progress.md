@@ -38,4 +38,6 @@ All 30 seeds restart fresh on `5ddf8cc` with unchanged pacing windows. Earlier c
 
 ## Deep offline parity
 
-The `offline_replay` example compares an exported campaign save under capped offline advancement and exact fixed steps. A 3.6 km save with 4,856 passages matched complete serialized state after eight real hours / four credited simulation hours, excluding only the report and checkpoint timestamp. Both paths excavated 30,436 cells and earned 6,098 credits. Local computation took 116.5 seconds offline and 115.0 seconds stepped; this proves accounting parity, not acceptable Android catch-up latency.
+The `offline_replay` example compares a raw campaign diagnostic state under capped offline advancement and exact fixed steps. A 3.6 km save with 4,856 passages matched complete serialized state after eight real hours / four credited simulation hours, excluding only the report and checkpoint timestamp. Both paths excavated 30,436 cells and earned 6,098 credits. Local computation took 116.5 seconds offline and 115.0 seconds stepped; this proves accounting parity, not acceptable Android catch-up latency.
+
+The native `save_roundtrip` example independently passes full-state equality for that fixture: 26,376,488 diagnostic bytes become a 3,512,879-byte compact save. Encoding/decoding takes 56/173 ms locally, excluding disk durability work.
