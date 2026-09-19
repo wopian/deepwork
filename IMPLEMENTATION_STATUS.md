@@ -36,6 +36,8 @@ The native `save_roundtrip` example accepts either native exports or raw diagnos
 
 A subsequent dispatch fast path skips reserve/price work for empty product entries while retaining those entries in saves. On the 3.6 km fixture, a profiled 1,200-second replay drops from 7.8 to 6.0 seconds; the production build measures 5.8 seconds. Complete serialized state matches the pre-optimization replay. All 110 core tests pass. The campaign continues on identical balance content; this optimization does not alter its commands or rewards.
 
+Repeating the full capped-offline comparison on `548a160` also passes exact state parity. Catch-up takes 89.5 seconds and equivalent stepped work 90.4 seconds, versus 116.5/115.0 seconds previously. Credits and excavated cells remain 6,098 and 30,436. Deep catch-up latency remains a practical limitation despite this improvement.
+
 ## Strategy intervention diagnostic
 
 Three one-hour simulations with identical upgraded equipment compared fixed depth policy against priorities based only on discovered commodity prices. Credit changes were **+58.0%, −15.0%, and −20.5%**; the vein policy reached 174–360 metres versus 2,796–3,200 metres for depth policy. These fixture runs demonstrate a production/access tradeoff, not a guaranteed active-play bonus or campaign acceptance. No timed power multiplier is involved.
