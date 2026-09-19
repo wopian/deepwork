@@ -772,6 +772,13 @@ fn run(seed: u64, style: &str, days: u64, mode: &str, resume: Option<&std::path:
     }
     json!({"seed":seed,"content_fingerprint":content_fingerprint().to_string(),"resumed_visit":resumed_visit,"compute_seconds":run_started.elapsed().as_secs(),"strategy":style,"mode":mode,"stalls":stalls,"complete":g.megaproject,"events":events,"sites":g.site,"depth":g.depth(),"credits":g.credits,"next_upgrade":g.pinned,"purchase_blocker":g.pinned.as_ref().and_then(|id|g.purchase_blocker(id)),"products":g.products,"levels":g.levels,"blockers":g.stages.iter().map(|f|&f.blocker).collect::<Vec<_>>(),"expanded_state_bytes":serde_json::to_vec(&g).unwrap().len()})
 }
+fn median_seconds(sorted: &[u64]) -> Option<f64> {
+    if sorted.is_empty() {
+        return None;
+    }
+    Some((sorted[(sorted.len() - 1) / 2] as f64 + sorted[sorted.len() / 2] as f64) / 2.0)
+}
+
 fn main() {
     let started = std::time::Instant::now();
     mine_core::content::validate().unwrap();
@@ -843,14 +850,14 @@ fn main() {
             .filter_map(|r| r["events"][name].as_u64())
             .collect();
         times.sort_unstable();
-        let median = times.get(times.len() / 2).copied();
+        let median = median_seconds(&times);
         let early = window[1] <= 3600;
         let comparable = if early {
             mode == "continuous"
         } else {
             mode != "continuous"
         };
-        medians.insert(name,json!({"median_seconds":median,"reached":times.len(),"target_seconds":window,"comparison_basis":if early { "continuous first-site play" } else { "two daily 12-minute visits" },"in_window":comparable.then(||median.is_some_and(|v|v>=window[0]&&v<=window[1]))}));
+        medians.insert(name,json!({"median_seconds":median,"reached":times.len(),"target_seconds":window,"comparison_basis":if early { "continuous first-site play" } else { "two daily 12-minute visits" },"in_window":comparable.then(||median.is_some_and(|v|v>=window[0] as f64&&v<=window[1] as f64))}));
     }
     println!(
         "{}",
@@ -866,6 +873,14 @@ fn main() {
 #[cfg(test)]
 mod strategy_tests {
     use super::*;
+    #[test]
+    fn report_medians_include_both_central_observations() {
+        assert_eq!(median_seconds(&[]), None);
+        assert_eq!(median_seconds(&[10]), Some(10.0));
+        assert_eq!(median_seconds(&[10, 13]), Some(11.5));
+        assert_eq!(median_seconds(&[10, 13, 30]), Some(13.0));
+    }
+
     fn checkpoint_fixture() -> Checkpoint {
         let mut game = Game::new(42, 1);
         for _ in 0..60 {
