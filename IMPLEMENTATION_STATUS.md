@@ -27,6 +27,10 @@ Current saves use **version 9 / generator 5**. Older campaigns are archived befo
 - Isolated packaged Windows checks pass anchored two-finger pinch, two-axis pan, production, purchases, import/export, rejection of corrupt imports, reset/archive, stale commands, preferences, background/resume and reload. Child application PATH excludes development runtimes. Desktop/portrait screenshots and emulated touch controls pass.
 - Android ARM64 build script produces a debug-signed test APK and verifies v2/v3 signatures and 16 KB ZIP alignment. Rebuild after the last code checkpoint before distribution.
 
+## Strategy intervention diagnostic
+
+Three one-hour simulations with identical upgraded equipment compared fixed depth policy against priorities based only on discovered commodity prices. Credit changes were **+58.0%, −15.0%, and −20.5%**; the vein policy reached 174–360 metres versus 2,796–3,200 metres for depth policy. These fixture runs demonstrate a production/access tradeoff, not a guaranteed active-play bonus or campaign acceptance. No timed power multiplier is involved.
+
 ## Measurements in progress
 
 The new 30-seed scheduled campaign and 30-minute expanded-terrain endurance run are being measured. Their reports, not earlier fixed-width measurements, determine campaign and performance acceptance. Headquarters remains targeted at 28–42 days with two daily 12-minute visits.
