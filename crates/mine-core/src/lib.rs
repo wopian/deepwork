@@ -1,3 +1,4 @@
+pub mod columns;
 pub mod content;
 pub mod geology;
 pub mod geometry;
@@ -177,7 +178,7 @@ pub struct Game {
     pub priorities: Vec<usize>,
     pub reserve: BTreeMap<String, u64>,
     pub pinned: Option<String>,
-    pub heights: BTreeMap<i64, i64>,
+    pub heights: columns::ColumnDepths,
     #[serde(default)]
     pub terrain: terrain::Terrain,
     #[serde(default)]
@@ -341,7 +342,7 @@ impl Game {
             priorities: vec![],
             reserve: BTreeMap::new(),
             pinned: Some("furnace".into()),
-            heights: BTreeMap::new(),
+            heights: columns::ColumnDepths::default(),
             terrain: terrain::Terrain::default(),
             workings: workings::Workings::default(),
             removed: vec![],
@@ -415,7 +416,7 @@ impl Game {
         *self.levels.get(k).unwrap_or(&0)
     }
     pub fn depth(&self) -> u32 {
-        geometry::depth(self.heights.values().max().copied().unwrap_or(0))
+        geometry::depth(self.heights.deepest_row())
     }
     pub fn cost(&self, k: &str) -> u64 {
         let p = pacing::get();
@@ -1016,10 +1017,7 @@ impl Game {
             if !self.terrain.excavate(x, y) {
                 break;
             }
-            self.heights
-                .entry(x)
-                .and_modify(|h| *h = (*h).max(y + 1))
-                .or_insert(y + 1);
+            self.heights.excavate_to(x, y + 1);
             self.removed.push(Cell { x, y, material: id });
             if self.removed.len() > 512 {
                 self.removed.drain(..256);
