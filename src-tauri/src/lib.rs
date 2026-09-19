@@ -225,6 +225,19 @@ fn transition_background(
         state.epoch.load(Ordering::SeqCst),
     )
 }
+fn checkpoint_gap(
+    game: &mut Game,
+    path: &std::path::Path,
+    from: u64,
+    timestamp: u64,
+) -> Result<(), String> {
+    let mut candidate = game.clone();
+    candidate.last_saved = candidate.last_saved.max(from);
+    candidate.advance_offline(timestamp, &materials());
+    save(path, &candidate)?;
+    *game = candidate;
+    Ok(())
+}
 fn transition_epoch(
     state: &Runtime,
     background: bool,
@@ -238,7 +251,7 @@ fn transition_epoch(
     if !game.legacy_pending && state.suspended.load(Ordering::Relaxed) != background {
         let mut candidate = game.clone();
         if background {
-            candidate.last_saved = timestamp;
+            candidate.last_saved = candidate.last_saved.max(timestamp);
         } else {
             candidate.advance_offline(timestamp, &materials());
         }
@@ -293,7 +306,7 @@ fn command_current(
     }
     let mut candidate = g.clone();
     candidate.action(action)?;
-    candidate.last_saved = now();
+    candidate.last_saved = candidate.last_saved.max(now());
     save(&state.path, &candidate)?;
     *g = candidate;
     Ok(g.clone().into())
@@ -356,7 +369,7 @@ fn reset_current(
     };
     let seed = fresh_identity();
     let mut candidate = Game::new(seed, 1);
-    candidate.last_saved = now();
+    candidate.last_saved = candidate.last_saved.max(now());
     persistence::archive(&state.path, &raw, &seed.to_string())?;
     save(&state.path, &candidate)?;
     *game = candidate;
@@ -478,17 +491,19 @@ pub fn run() {
                         // A lifecycle resume may already have consumed this clock gap.
                         let gap_start = previous.max(g.last_saved);
                         if current.saturating_sub(gap_start) > 2 {
-                            g.last_saved = gap_start;
-                            g.advance_offline(current, &cat);
-                            next_tick = std::time::Instant::now();
-                            if let Err(e) = save(&state.path, &g) {
-                                eprintln!("Resume save failed: {e}")
+                            if let Err(e) = checkpoint_gap(&mut g, &state.path, gap_start, current) {
+                                eprintln!("Resume save failed: {e}");
+                                // Retry from the last committed state. Do not publish
+                                // catch-up rewards or replace the interval on failure.
+                                next_tick = std::time::Instant::now() + std::time::Duration::from_secs(1);
+                                continue;
                             }
+                            next_tick = std::time::Instant::now();
                         } else {
                             g.tick(&cat, false);
                         }
                         if g.ticks % 600 == 0 {
-                            g.last_saved = now();
+                            g.last_saved = g.last_saved.max(now());
                             if let Err(e) = save(&state.path, &g) {
                                 eprintln!("Save failed: {e}")
                             }
@@ -544,7 +559,7 @@ pub fn run() {
                 let state = handle.state::<Runtime>();
                 if let Ok(mut g) = state.game.lock() {
                     if !state.suspended.load(Ordering::Relaxed) {
-                        g.last_saved = now();
+                        g.last_saved = g.last_saved.max(now());
                     }
                     if !g.legacy_pending {
                         let _ = save(&state.path, &g);
@@ -610,6 +625,27 @@ mod lifecycle_tests {
         );
     }
     #[test]
+    fn fallback_gap_publishes_only_after_a_successful_checkpoint() {
+        let directory = std::env::temp_dir().join(format!("deepwork-gap-{}", fresh_identity()));
+        fs::create_dir_all(&directory).unwrap();
+        let blocked = directory.join("parent-file");
+        fs::write(&blocked, b"not a directory").unwrap();
+        let mut game = Game::default();
+        game.last_saved = 100;
+        let before = serde_json::to_value(&game).unwrap();
+        assert!(checkpoint_gap(&mut game, &blocked.join("mine.json"), 100, 120).is_err());
+        assert_eq!(serde_json::to_value(&game).unwrap(), before);
+        let path = directory.join("mine.json");
+        checkpoint_gap(&mut game, &path, 100, 120).unwrap();
+        assert_eq!(game.ticks, 200);
+        assert_eq!(game.last_saved, 120);
+        assert_eq!(
+            serde_json::to_value(recover(&path).unwrap().unwrap()).unwrap(),
+            serde_json::to_value(&game).unwrap()
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
     fn repeated_lifecycle_events_apply_offline_interval_once() {
         let directory = std::env::temp_dir().join(format!(
             "deepwork-lifecycle-{}-{}",
@@ -643,6 +679,11 @@ mod lifecycle_tests {
         let backwards = transition_background(&state, false, 150).unwrap();
         assert_eq!(backwards.game.offline.as_ref().unwrap().effective, 0);
         assert!(!state.suspended.load(Ordering::Relaxed));
+        assert_eq!(backwards.game.last_saved, 160);
+        transition_background(&state, true, 155).unwrap();
+        let restored_clock = transition_background(&state, false, 160).unwrap();
+        assert_eq!(restored_clock.game.ticks, 200);
+        assert_eq!(restored_clock.game.offline.as_ref().unwrap().effective, 0);
         drop(state);
         fs::remove_dir_all(directory).unwrap();
     }

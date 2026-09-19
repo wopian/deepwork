@@ -1631,7 +1631,8 @@ impl Game {
             credits: (self.credits - old).to_string(),
             excavated: self.excavated - mined,
         });
-        self.last_saved = now;
+        // A backwards clock must not make an already-accounted interval eligible again.
+        self.last_saved = self.last_saved.max(now);
     }
     pub fn action(&mut self, a: Action) -> Result<(), String> {
         if a.sequence <= self.last_sequence {
@@ -2316,6 +2317,22 @@ mod tests {
         g.action(a.clone()).unwrap();
         assert!(g.action(a).is_err());
         assert_eq!(g.workers, 4);
+    }
+    #[test]
+    fn backwards_clock_cannot_reaward_an_already_consumed_interval() {
+        let mut g = Game::default();
+        g.last_saved = 100;
+        g.advance_offline(120, &materials());
+        let ticks = g.ticks;
+        assert_eq!(ticks, 200);
+        g.advance_offline(100, &materials());
+        assert_eq!(g.last_saved, 120);
+        assert_eq!(g.offline.as_ref().unwrap().effective, 0);
+        g.advance_offline(120, &materials());
+        assert_eq!(g.ticks, ticks);
+        g.advance_offline(140, &materials());
+        assert_eq!(g.ticks, ticks + 200);
+        assert_eq!(g.offline.as_ref().unwrap().effective, 10);
     }
     #[test]
     fn offline_equivalent() {
