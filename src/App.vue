@@ -164,7 +164,7 @@ onMounted(start);
 </script>
 <template>
   <div
-    class="shell"
+    class="shell app-frame"
     :class="{ 'mine-first': tab === 'Operations' }"
     :style="{ zoom: preferences.uiScale }"
   >
@@ -272,9 +272,13 @@ onMounted(start);
               ? "Deepwork"
               : tab === "Minerals"
                 ? "Mineral collection"
-                : tab === "Headquarters"
-                  ? "Headquarters"
-                  : "Mine records"
+                : tab === "Industry"
+                  ? "Mine industry"
+                  : tab === "Headquarters"
+                    ? "Headquarters"
+                    : tab === "Settings"
+                      ? "Settings"
+                      : "Mine records"
           }}
         </h1>
         <div class="balance">
@@ -754,320 +758,494 @@ onMounted(start);
         </button>
       </nav>
     </template>
-    <section v-else-if="tab === 'Minerals'" class="card catalogue">
-      <div class="panel-heading">
-        <h2>FIELD GUIDE · {{ materials.length }} FEEDS</h2>
-        <input
-          v-model="query"
-          placeholder="Find a mineral…"
-          aria-label="Search minerals"
-        />
-      </div>
-      <p>
-        Real mineral identities. Simplified game processing. Select up to three
-        excavation priorities. Cargo scheduling can favour the same minerals.
-      </p>
-      <div class="mineral-grid">
-        <button
-          v-for="m in filtered"
-          :key="m.id"
-          :class="{ selected: state?.priorities.includes(m.id) }"
-          :disabled="!state"
-          @click="act('priority', '', m.id)"
-        >
-          <span class="mineral-swatch" :style="{ background: m.color }">▨</span
-          ><strong
-            >{{ m.name
-            }}<small
-              >{{ m.family }} → {{ m.product.replaceAll("_", " ") }}</small
-            ></strong
-          ><b>{{
-            state?.discoveries.includes(m.id) ? "FOUND" : "T" + m.tier
-          }}</b>
-        </button>
-      </div>
-      <div class="panel-heading">
-        <h2>REFINED COLLECTION</h2>
-        <span
-          >{{ state?.collection.length ?? 0 }} /
-          {{ productCatalogue.length }}</span
-        >
-      </div>
-      <div class="collection-grid">
-        <span
-          v-for="product in productCatalogue"
-          :class="{ found: state?.collection.includes(product) }"
-          >{{ state?.collection.includes(product) ? "◆" : "◇" }}
-          {{ product.replaceAll("_", " ") }}</span
-        >
-      </div>
-    </section>
-    <section v-else-if="tab === 'Industry'" class="card">
-      <div class="panel-heading">
-        <h2>PROCESSING MODULES</h2>
-        <span>AUTOMATIC INPUT RESERVES</span>
-      </div>
-      <p>
-        Toggle production recipes. Active modules retain eight units of each
-        input before selling surplus. Steel and aluminium start enabled; pause
-        them to route shared feed into other products.
-      </p>
-      <div class="mineral-grid">
-        <button
-          v-for="r in recipeCards"
-          :disabled="!state"
-          :class="{
-            selected:
-              !state?.paused_recipes.includes(r.id) &&
-              (state?.enabled_recipes.includes(r.id) ||
-                ['steel', 'aluminium'].includes(r.id)),
-          }"
-          @click="act('recipe', r.id)"
-        >
-          <strong
-            >{{ r.output.replaceAll("_", " ")
-            }}<small>{{
-              Object.entries(r.inputs)
-                .map(([p, n]) => `${n} ${p.replaceAll("_", " ")}`)
-                .join(" + ")
-            }}</small
-            ><small>{{ r.buildingName }}</small>
-            <small v-if="r.sources.length"
-              >Recover from {{ r.sources.join(" or ") }} processing.</small
-            ></strong
-          >
-        </button>
-      </div>
-      <h2>Recoverable process residues</h2>
-      <div class="mineral-grid">
-        <div v-for="(qty, name) in state?.trace_feed" class="inventory">
-          {{ name.replaceAll("_", " ") }} · {{ resourceQuantity(qty) }} units
-        </div>
-      </div>
-      <h2>Next equipment purchase</h2>
-      <p>
-        Pin an upgrade to reserve its material cost and foundation steel for
-        upcoming infrastructure. Pin again to release these reserves.
-      </p>
-      <div class="mineral-grid">
-        <button
-          v-for="upgrade in materialUpgrades"
-          :class="{ selected: state?.pinned === upgrade.id }"
-          @click="act('pin', upgrade.id)"
-        >
-          <strong
-            >{{ upgrade.id
-            }}<small>{{
-              Object.entries(upgrade.inputs)
-                .map(([name, n]) => `${Number(n) / 1000} ${name}`)
-                .join(" + ")
-            }}</small
-            ><small>Requires {{ upgrade.requires }}</small
-            ><small v-if="upgrade.research_points"
-              >{{ upgrade.research_points }} headquarters research
-              invested</small
-            ></strong
-          >
-        </button>
-      </div>
-      <h2>Reserved feed warehouse</h2>
-      <p v-if="state">
-        {{ format(cargoTotal(state.raw_stock) / RESOURCE_UNIT) }} /
-        {{ format(state.raw_stock_capacity / RESOURCE_UNIT) }} units. Reserved
-        feed waits for its processing module. Loading depot upgrades add space.
-      </p>
-      <div class="mineral-grid">
-        <div v-for="m in discoveredMaterials" :key="m.id" class="inventory">
-          <strong
-            >{{ m.name }} ·
-            {{ format((state?.raw_stock[m.id] ?? 0) / RESOURCE_UNIT) }}
-            stored</strong
-          >
-          <button @click="act('reserve', m.product, 4 * RESOURCE_UNIT)">
-            Reserve feed + 4 product
-          </button>
-          <button @click="act('reserve', m.product, 0)">
-            Release manual reserve
-          </button>
-        </div>
-      </div>
-      <h2>Stockpile reserves</h2>
-      <div class="mineral-grid">
-        <div v-for="(qty, product) in state?.products" class="inventory">
-          <strong
-            >{{ product }} · {{ format(qty / RESOURCE_UNIT) }} units</strong
-          ><button @click="act('reserve', String(product), 10 * RESOURCE_UNIT)">
-            Keep 10</button
-          ><button @click="act('reserve', String(product), 0)">
-            Sell surplus
-          </button>
-        </div>
+    <section v-else-if="tab === 'Minerals'" class="management-view catalogue">
+      <div class="management-grid">
+        <section class="workshop-panel is-wide">
+          <div class="panel-heading">
+            <h2>FIELD GUIDE · {{ materials.length }} FEEDS</h2>
+            <input
+              v-model="query"
+              placeholder="Find a mineral…"
+              aria-label="Search minerals"
+            />
+          </div>
+          <p class="panel-copy">
+            Real mineral identities. Simplified game processing. Select up to
+            three excavation priorities. Cargo scheduling can favour the same
+            minerals.
+          </p>
+          <div class="mineral-grid">
+            <button
+              v-for="m in filtered"
+              :key="m.id"
+              :class="{ selected: state?.priorities.includes(m.id) }"
+              :disabled="!state"
+              @click="act('priority', '', m.id)"
+            >
+              <span class="mineral-swatch" :style="{ background: m.color }"
+                >▨</span
+              ><strong
+                >{{ m.name
+                }}<small
+                  >{{ m.family }} → {{ m.product.replaceAll("_", " ") }}</small
+                ></strong
+              ><b>{{
+                state?.discoveries.includes(m.id) ? "FOUND" : "T" + m.tier
+              }}</b>
+            </button>
+          </div>
+        </section>
+        <section class="workshop-panel is-wide">
+          <div class="panel-heading">
+            <h2>REFINED COLLECTION</h2>
+            <span
+              >{{ state?.collection.length ?? 0 }} /
+              {{ productCatalogue.length }}</span
+            >
+          </div>
+          <div class="collection-grid">
+            <span
+              v-for="product in productCatalogue"
+              :key="product"
+              :class="{ found: state?.collection.includes(product) }"
+              >{{ state?.collection.includes(product) ? "◆" : "◇" }}
+              {{ product.replaceAll("_", " ") }}</span
+            >
+          </div>
+        </section>
       </div>
     </section>
-    <section v-else-if="tab === 'Headquarters'" class="card">
-      <div class="panel-heading">
-        <h2>PERMANENT RESEARCH</h2>
-        <span>{{ state?.research ?? 0 }} RESEARCH</span>
+    <section v-else-if="tab === 'Industry'" class="management-view">
+      <div class="management-grid">
+        <section class="workshop-panel is-wide">
+          <div class="panel-heading">
+            <h2>PROCESSING MODULES</h2>
+            <span>AUTOMATIC INPUT RESERVES</span>
+          </div>
+          <p class="panel-copy">
+            Toggle production recipes. Active modules retain eight units of each
+            input before selling surplus. Steel and aluminium start enabled;
+            pause them to route shared feed into other products.
+          </p>
+          <div class="mineral-grid">
+            <button
+              v-for="r in recipeCards"
+              :disabled="!state"
+              :class="{
+                selected:
+                  !state?.paused_recipes.includes(r.id) &&
+                  (state?.enabled_recipes.includes(r.id) ||
+                    ['steel', 'aluminium'].includes(r.id)),
+              }"
+              @click="act('recipe', r.id)"
+            >
+              <strong
+                >{{ r.output.replaceAll("_", " ")
+                }}<small>{{
+                  Object.entries(r.inputs)
+                    .map(([p, n]) => `${n} ${p.replaceAll("_", " ")}`)
+                    .join(" + ")
+                }}</small
+                ><small>{{ r.buildingName }}</small>
+                <small v-if="r.sources.length"
+                  >Recover from {{ r.sources.join(" or ") }} processing.</small
+                ></strong
+              >
+            </button>
+          </div>
+        </section>
+        <section class="workshop-panel">
+          <div class="panel-heading">
+            <h2>RECOVERABLE PROCESS RESIDUES</h2>
+            <span>TRACE FEED</span>
+          </div>
+          <div class="mineral-grid compact-grid">
+            <div
+              v-for="(qty, name) in state?.trace_feed"
+              :key="name"
+              class="inventory"
+            >
+              {{ name.replaceAll("_", " ") }} ·
+              {{ resourceQuantity(qty) }} units
+            </div>
+          </div>
+        </section>
+        <section class="workshop-panel">
+          <div class="panel-heading">
+            <h2>NEXT EQUIPMENT PURCHASE</h2>
+            <span>MATERIAL RESERVE</span>
+          </div>
+          <p class="panel-copy">
+            Pin an upgrade to reserve its material cost and foundation steel for
+            upcoming infrastructure. Pin again to release these reserves.
+          </p>
+          <div class="mineral-grid compact-grid">
+            <button
+              v-for="upgrade in materialUpgrades"
+              :class="{ selected: state?.pinned === upgrade.id }"
+              @click="act('pin', upgrade.id)"
+            >
+              <strong
+                >{{ upgrade.id
+                }}<small>{{
+                  Object.entries(upgrade.inputs)
+                    .map(([name, n]) => `${Number(n) / 1000} ${name}`)
+                    .join(" + ")
+                }}</small
+                ><small>Requires {{ upgrade.requires }}</small
+                ><small v-if="upgrade.research_points"
+                  >{{ upgrade.research_points }} headquarters research
+                  invested</small
+                ></strong
+              >
+            </button>
+          </div>
+        </section>
+        <section class="workshop-panel is-wide">
+          <div class="panel-heading">
+            <h2>RESERVED FEED WAREHOUSE</h2>
+            <span v-if="state"
+              >{{ format(cargoTotal(state.raw_stock) / RESOURCE_UNIT) }} /
+              {{ format(state.raw_stock_capacity / RESOURCE_UNIT) }} UNITS</span
+            >
+          </div>
+          <p v-if="state" class="panel-copy">
+            Reserved feed waits for its processing module. Loading depot
+            upgrades add space.
+          </p>
+          <div class="mineral-grid">
+            <div v-for="m in discoveredMaterials" :key="m.id" class="inventory">
+              <strong
+                >{{ m.name }} ·
+                {{ format((state?.raw_stock[m.id] ?? 0) / RESOURCE_UNIT) }}
+                stored</strong
+              >
+              <button @click="act('reserve', m.product, 4 * RESOURCE_UNIT)">
+                Reserve feed + 4 product
+              </button>
+              <button @click="act('reserve', m.product, 0)">
+                Release manual reserve
+              </button>
+            </div>
+          </div>
+        </section>
+        <section class="workshop-panel is-wide">
+          <div class="panel-heading">
+            <h2>STOCKPILE RESERVES</h2>
+            <span>SALE POLICY</span>
+          </div>
+          <div class="mineral-grid">
+            <div v-for="(qty, product) in state?.products" class="inventory">
+              <strong
+                >{{ product }} · {{ format(qty / RESOURCE_UNIT) }} units</strong
+              ><button
+                @click="act('reserve', String(product), 10 * RESOURCE_UNIT)"
+              >
+                Keep 10</button
+              ><button @click="act('reserve', String(product), 0)">
+                Sell surplus
+              </button>
+            </div>
+          </div>
+        </section>
       </div>
-      <div class="research-grid">
-        <button
-          v-for="branch in [
-            'excavation',
-            'logistics',
-            'metallurgy',
-            'prospecting',
-            'reclamation',
-          ]"
-          :disabled="!state"
-          @click="act('research', branch)"
-        >
-          <strong>{{ branch }}</strong>
-          <p>Rank {{ state?.ranks[branch] ?? 0 }} / 10</p>
-          <small v-for="grant in headquartersBenefits(branch)" :key="grant.rank"
-            >Rank {{ grant.rank }}: start with
-            {{ grant.upgrades.join(" + ") }}</small
-          >
-          <span
-            >{{
-              pacing.research_base * ((state?.ranks[branch] ?? 0) + 1) ** 2
-            }}
-            research</span
-          >
-        </button>
-      </div>
-      <h2>Rebuild blueprints</h2>
-      <p>
-        Logistics rank 3 unlocks foreground rebuilding. Purchases stop while
-        offline.
-      </p>
-      <button @click="act('blueprint', 'camp')">Camp blueprint</button
-      ><button @click="act('blueprint', 'industry')">Industry blueprint</button
-      ><button @click="act('blueprint', 'off')">Disable</button>
-      <p>Queue: {{ state?.build_queue.join(" → ") || "None" }}</p>
-      <h2>Campaign milestones</h2>
-      <div class="mineral-grid">
-        <div v-for="milestone in state?.milestones" class="inventory">
-          ✓ {{ milestone }}
-        </div>
-      </div>
-      <h2>Headquarters megaproject</h2>
-      <p>
-        Reserve ten units each of advanced structures, precision controls,
-        magnets and batteries. Invest
-        {{ pacing.headquarters_research }} research across headquarters branches
-        ({{ state?.research_invested ?? 0 }} invested).
-      </p>
-      <button
-        :disabled="!state || state.megaproject"
-        @click="act('megaproject')"
-      >
-        {{
-          state?.megaproject ? "Megaproject complete ✓" : "Deliver components"
-        }}
-      </button>
-      <h2>Leave a legacy. Start another mine.</h2>
-      <p>
-        Retirement keeps research, discoveries and records. Local terrain,
-        buildings, workers, credits and materials reset.
-      </p>
-      <button class="primary" :disabled="!ready" @click="retirementPreview">
-        {{
-          ready
-            ? "Preview retirement →"
-            : "Requires steel production and 300 m depth"
-        }}
-      </button>
     </section>
-    <section v-else-if="tab === 'Settings'" class="card settings">
-      <h2>Make yourself comfortable.</h2>
-      <label
-        ><input v-model="preferences.reducedMotion" type="checkbox" /> Reduced
-        motion</label
-      ><label><input v-model="preferences.audio" type="checkbox" /> Audio</label
-      ><label
-        >Volume
-        <input
-          v-model.number="preferences.volume"
-          type="range"
-          min="0"
-          max="1"
-          step="0.01" /></label
-      ><label
-        >Interface size
-        <select v-model.number="preferences.uiScale">
-          <option :value="1">100%</option>
-          <option :value="1.15">115%</option>
-          <option :value="1.3">130%</option>
-        </select></label
-      >
-      <label
-        ><input v-model="preferences.ambience" type="checkbox" /> Machinery
-        ambience</label
-      >
-      <label
-        >Visual quality<select v-model="preferences.quality">
-          <option value="auto">Automatic</option>
-          <option value="low">Low · fewer sprites and particles</option>
-          <option value="high">High · desktop budget</option>
-        </select></label
-      >
-      <label
-        >Number display<select v-model="preferences.numbers">
-          <option value="compact">Compact · 12K</option>
-          <option value="full">Full · 12,000</option>
-          <option value="scientific">Scientific · 1.2E4</option>
-        </select></label
-      >
-      <p>
-        Mineral names and patterns supplement colours. Settings remain on this
-        device.
-      </p>
-    </section>
-    <section v-else class="card">
-      <h2>Retired operations</h2>
-      <p v-if="!state?.records.length">
-        Your first mine is still writing its story.
-      </p>
-      <div v-for="r in state?.records" class="record">
-        SITE {{ r.site }} · {{ r.depth }} m · {{ format(r.excavated) }} cells ·
-        {{ r.research }} research
-        <svg
-          v-if="r.section?.length"
-          viewBox="0 0 64 64"
-          width="192"
-          height="192"
-          aria-label="Retired mine cross-section"
-        >
-          <rect width="64" height="64" fill="#806044" />
-          <path :d="sectionPath(r.section)" fill="#101820" />
-        </svg>
+    <section v-else-if="tab === 'Headquarters'" class="management-view">
+      <div class="management-grid">
+        <section class="workshop-panel is-wide">
+          <div class="panel-heading">
+            <h2>PERMANENT RESEARCH</h2>
+            <span>{{ state?.research ?? 0 }} RESEARCH</span>
+          </div>
+          <div class="research-grid">
+            <button
+              v-for="branch in [
+                'excavation',
+                'logistics',
+                'metallurgy',
+                'prospecting',
+                'reclamation',
+              ]"
+              :disabled="!state"
+              @click="act('research', branch)"
+            >
+              <strong>{{ branch }}</strong>
+              <p>Rank {{ state?.ranks[branch] ?? 0 }} / 10</p>
+              <small
+                v-for="grant in headquartersBenefits(branch)"
+                :key="grant.rank"
+                >Rank {{ grant.rank }}: start with
+                {{ grant.upgrades.join(" + ") }}</small
+              >
+              <span
+                >{{
+                  pacing.research_base * ((state?.ranks[branch] ?? 0) + 1) ** 2
+                }}
+                research</span
+              >
+            </button>
+          </div>
+        </section>
+        <section class="workshop-panel">
+          <div class="panel-heading">
+            <h2>REBUILD BLUEPRINTS</h2>
+            <span>FOREGROUND ONLY</span>
+          </div>
+          <p class="panel-copy">
+            Logistics rank 3 unlocks foreground rebuilding. Purchases stop while
+            offline.
+          </p>
+          <div class="action-row">
+            <button @click="act('blueprint', 'camp')">Camp blueprint</button>
+            <button @click="act('blueprint', 'industry')">
+              Industry blueprint
+            </button>
+            <button @click="act('blueprint', 'off')">Disable</button>
+          </div>
+          <p class="panel-status">
+            Queue: {{ state?.build_queue.join(" → ") || "None" }}
+          </p>
+        </section>
+        <section class="workshop-panel">
+          <div class="panel-heading">
+            <h2>CAMPAIGN MILESTONES</h2>
+            <span>{{ state?.milestones.length ?? 0 }} COMPLETE</span>
+          </div>
+          <div class="mineral-grid compact-grid">
+            <div
+              v-for="milestone in state?.milestones"
+              :key="milestone"
+              class="inventory"
+            >
+              ✓ {{ milestone }}
+            </div>
+          </div>
+        </section>
+        <section class="workshop-panel">
+          <div class="panel-heading">
+            <h2>HEADQUARTERS MEGAPROJECT</h2>
+            <span>{{ state?.research_invested ?? 0 }} INVESTED</span>
+          </div>
+          <p class="panel-copy">
+            Reserve ten units each of advanced structures, precision controls,
+            magnets and batteries. Invest
+            {{ pacing.headquarters_research }} research across headquarters
+            branches.
+          </p>
+          <div class="action-row">
+            <button
+              :disabled="!state || state.megaproject"
+              @click="act('megaproject')"
+            >
+              {{
+                state?.megaproject
+                  ? "Megaproject complete ✓"
+                  : "Deliver components"
+              }}
+            </button>
+          </div>
+        </section>
+        <section class="workshop-panel">
+          <div class="panel-heading">
+            <h2>LEAVE A LEGACY</h2>
+            <span>RETIRE SITE</span>
+          </div>
+          <p class="panel-copy">
+            Retirement keeps research, discoveries and records. Local terrain,
+            buildings, workers, credits and materials reset.
+          </p>
+          <div class="action-row">
+            <button
+              class="primary"
+              :disabled="!ready"
+              @click="retirementPreview"
+            >
+              {{
+                ready
+                  ? "Preview retirement →"
+                  : "Requires steel production and 300 m depth"
+              }}
+            </button>
+          </div>
+        </section>
       </div>
-      <h2>Save management</h2>
-      <p v-if="state?.requires_reset">
-        This older campaign uses incompatible terrain. Export it, then start
-        fresh. Reset also archives it automatically.
-      </p>
-      <button
-        :disabled="!state"
-        @click="
-          showReset = true;
-          resetText = '';
-        "
-      >
-        Reset campaign
-      </button>
-      <button :disabled="!state" @click="exportSave">Export save</button
-      ><label class="import"
-        >Import save<input
-          type="file"
-          accept=".json"
-          @change="
-            (e: Event) => {
-              const f = (e.target as HTMLInputElement).files?.[0];
-              if (f) importSave(f);
-            }
-          "
-      /></label>
+    </section>
+    <section v-else-if="tab === 'Settings'" class="management-view settings">
+      <div class="management-grid">
+        <section class="workshop-panel">
+          <div class="panel-heading">
+            <h2>ACCESSIBILITY & INTERFACE</h2>
+            <span>LOCAL SETTINGS</span>
+          </div>
+          <div class="settings-list">
+            <label class="settings-row"
+              ><span
+                ><strong>Reduced motion</strong
+                ><small
+                  >Limit animated transitions and settling effects.</small
+                ></span
+              ><input
+                v-model="preferences.reducedMotion"
+                type="checkbox"
+                aria-label="Reduced motion"
+            /></label>
+            <label class="settings-row"
+              ><span
+                ><strong>Interface size</strong
+                ><small
+                  >Scale controls and text across every screen.</small
+                ></span
+              ><select
+                v-model.number="preferences.uiScale"
+                aria-label="Interface size"
+              >
+                <option :value="1">100%</option>
+                <option :value="1.15">115%</option>
+                <option :value="1.3">130%</option>
+              </select></label
+            >
+          </div>
+        </section>
+        <section class="workshop-panel">
+          <div class="panel-heading">
+            <h2>SOUND</h2>
+            <span>MIXER</span>
+          </div>
+          <div class="settings-list">
+            <label class="settings-row"
+              ><span
+                ><strong>Audio</strong><small>Enable game sound.</small></span
+              ><input
+                v-model="preferences.audio"
+                type="checkbox"
+                aria-label="Audio"
+            /></label>
+            <label class="settings-row"
+              ><span
+                ><strong>Volume</strong
+                ><small>Set overall output level.</small></span
+              ><input
+                v-model.number="preferences.volume"
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                aria-label="Volume"
+            /></label>
+            <label class="settings-row"
+              ><span
+                ><strong>Machinery ambience</strong
+                ><small>Play continuous worksite machinery loops.</small></span
+              ><input
+                v-model="preferences.ambience"
+                type="checkbox"
+                aria-label="Machinery ambience"
+            /></label>
+          </div>
+        </section>
+        <section class="workshop-panel is-wide">
+          <div class="panel-heading">
+            <h2>DISPLAY</h2>
+            <span>VISUAL OUTPUT</span>
+          </div>
+          <div class="settings-list settings-columns">
+            <label class="settings-row"
+              ><span
+                ><strong>Visual quality</strong
+                ><small>Adjust sprite and particle budgets.</small></span
+              ><select
+                v-model="preferences.quality"
+                aria-label="Visual quality"
+              >
+                <option value="auto">Automatic</option>
+                <option value="low">Low · fewer sprites and particles</option>
+                <option value="high">High · desktop budget</option>
+              </select></label
+            >
+            <label class="settings-row"
+              ><span
+                ><strong>Number display</strong
+                ><small>Choose how large quantities are written.</small></span
+              ><select
+                v-model="preferences.numbers"
+                aria-label="Number display"
+              >
+                <option value="compact">Compact · 12K</option>
+                <option value="full">Full · 12,000</option>
+                <option value="scientific">Scientific · 1.2E4</option>
+              </select></label
+            >
+          </div>
+          <p class="panel-status">
+            Mineral names and patterns supplement colours. Settings remain on
+            this device.
+          </p>
+        </section>
+      </div>
+    </section>
+    <section v-else class="management-view records-view">
+      <div class="management-grid records-grid">
+        <section class="workshop-panel">
+          <div class="panel-heading">
+            <h2>RETIRED OPERATIONS</h2>
+            <span>{{ state?.records.length ?? 0 }} ARCHIVED</span>
+          </div>
+          <p v-if="!state?.records.length" class="empty-state">
+            Your first mine is still writing its story.
+          </p>
+          <div v-for="r in state?.records" :key="r.site" class="record">
+            SITE {{ r.site }} · {{ r.depth }} m ·
+            {{ format(r.excavated) }} cells · {{ r.research }} research
+            <svg
+              v-if="r.section?.length"
+              viewBox="0 0 64 64"
+              width="192"
+              height="192"
+              aria-label="Retired mine cross-section"
+            >
+              <rect width="64" height="64" fill="#806044" />
+              <path :d="sectionPath(r.section)" fill="#101820" />
+            </svg>
+          </div>
+        </section>
+        <section class="workshop-panel">
+          <div class="panel-heading">
+            <h2>SAVE MANAGEMENT</h2>
+            <span>LOCAL CAMPAIGN</span>
+          </div>
+          <p v-if="state?.requires_reset" class="panel-copy">
+            This older campaign uses incompatible terrain. Export it, then start
+            fresh. Reset also archives it automatically.
+          </p>
+          <p v-else class="panel-copy">
+            Export a portable checkpoint, import another campaign, or archive
+            this operation before starting again.
+          </p>
+          <div class="action-row vertical-actions">
+            <button
+              :disabled="!state"
+              @click="
+                showReset = true;
+                resetText = '';
+              "
+            >
+              Reset campaign
+            </button>
+            <button :disabled="!state" @click="exportSave">Export save</button>
+            <label class="import"
+              >Import save<input
+                type="file"
+                accept=".json"
+                @change="
+                  (e: Event) => {
+                    const f = (e.target as HTMLInputElement).files?.[0];
+                    if (f) importSave(f);
+                  }
+                "
+            /></label>
+          </div>
+        </section>
+      </div>
     </section>
     <footer>
       <span>DEEPWORK <b> / </b> ONE PIXEL AT A TIME.</span

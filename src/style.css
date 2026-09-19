@@ -8,6 +8,14 @@
   font-synthesis: none;
   --accent: #e5a34d;
   --line: #e8dfc820;
+  --line-strong: #65717b;
+  --surface: #131d25;
+  --surface-raised: #151f28;
+  --muted: #d0cbbb;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
 }
 * {
   box-sizing: border-box;
@@ -1507,4 +1515,353 @@ nav button {
   display: block;
   margin-bottom: 8px;
   font-size: 14px;
+}
+
+/* Shared workshop frame and management pages. */
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+.app-frame {
+  position: fixed;
+  inset: 0;
+  max-width: none;
+  height: auto;
+  margin: 0;
+  padding: 0 calc(20px + var(--safe-right)) 0 calc(20px + var(--safe-left));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.app-frame > header {
+  min-height: calc(72px + var(--safe-top));
+  padding: calc(12px + var(--safe-top)) 0 12px;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+}
+.app-frame > header nav {
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.app-frame > header nav::-webkit-scrollbar {
+  display: none;
+}
+.app-frame > .notice,
+.app-frame > .offline {
+  flex: 0 0 auto;
+}
+.app-frame:not(.mine-first) .page-heading {
+  flex: 0 0 auto;
+  padding: 16px 0 12px;
+}
+.app-frame:not(.mine-first) .page-heading h1 {
+  font-size: clamp(24px, 2.2vw, 34px);
+}
+.app-frame footer {
+  display: none;
+}
+.management-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: #806044 #101820;
+  padding-bottom: calc(24px + var(--safe-bottom));
+}
+.management-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.workshop-panel {
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+}
+.workshop-panel.is-wide {
+  grid-column: 1 / -1;
+}
+.management-view .panel-heading {
+  min-height: 50px;
+  border-bottom: 2px solid var(--accent);
+  background: var(--surface-raised);
+}
+.management-view .panel-heading h2 {
+  color: #e8dfc8;
+}
+.management-view .panel-heading > span {
+  color: var(--muted);
+}
+.management-view .panel-heading input {
+  width: clamp(220px, 32vw, 420px);
+}
+.panel-copy,
+.panel-status,
+.empty-state {
+  margin: 0;
+  padding: 16px 20px;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.55;
+}
+.panel-status {
+  border-top: 1px solid var(--line);
+  font-family: monospace;
+  font-size: 14px;
+}
+.empty-state {
+  min-height: 140px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+.management-view .mineral-grid,
+.management-view .research-grid,
+.management-view .collection-grid {
+  padding: 16px;
+  gap: 10px;
+}
+.management-view .compact-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.management-view .inventory {
+  border-color: var(--line-strong);
+  background: #10182080;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.management-view .inventory button {
+  margin-top: 8px;
+}
+.management-view .research-grid button {
+  text-align: left;
+  border-color: var(--line-strong);
+}
+.management-view .research-grid small,
+.management-view .research-grid span {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 16px 20px;
+}
+.action-row .primary {
+  margin: 0;
+}
+.action-row .primary:disabled {
+  color: #d0cbbb;
+  background: #25313a;
+  border-color: var(--line-strong);
+}
+.vertical-actions {
+  align-items: stretch;
+  flex-direction: column;
+}
+.vertical-actions > * {
+  width: 100%;
+  margin: 0;
+}
+.management-view .import {
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.management-view .import input {
+  min-width: 0;
+  max-width: 68%;
+}
+.records-grid {
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.6fr);
+}
+.record {
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  line-height: 1.6;
+}
+.settings-list {
+  display: grid;
+}
+.settings-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.settings-row {
+  min-height: 72px;
+  margin: 0;
+  padding: 12px 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(44px, auto);
+  align-items: center;
+  gap: 20px;
+  border-bottom: 1px solid var(--line);
+}
+.settings-row:last-child {
+  border-bottom: 0;
+}
+.settings-columns .settings-row:nth-child(odd) {
+  border-right: 1px solid var(--line);
+}
+.settings-row span,
+.settings-row strong,
+.settings-row small {
+  display: block;
+}
+.settings-row strong {
+  font-weight: 600;
+}
+.settings-row small {
+  margin-top: 5px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.settings-row input[type="checkbox"] {
+  width: 24px;
+  height: 24px;
+  accent-color: var(--accent);
+}
+.settings-row input[type="range"] {
+  width: min(220px, 34vw);
+  min-height: 44px;
+  padding-inline: 0;
+  accent-color: var(--accent);
+}
+.settings-row select {
+  max-width: min(320px, 40vw);
+  background: #101820;
+  color: #e8dfc8;
+  padding: 8px 12px;
+  border: 1px solid var(--line-strong);
+}
+.modal-backdrop {
+  padding: calc(20px + var(--safe-top)) calc(20px + var(--safe-right))
+    calc(20px + var(--safe-bottom)) calc(20px + var(--safe-left));
+}
+.context-panel {
+  padding-right: var(--safe-right);
+}
+.worksite-dock {
+  padding-bottom: max(8px, var(--safe-bottom));
+}
+
+@media (max-width: 800px) {
+  .app-frame {
+    padding-right: calc(6px + var(--safe-right));
+    padding-left: calc(6px + var(--safe-left));
+  }
+  .app-frame > header,
+  .mine-first header {
+    min-height: calc(48px + var(--safe-top));
+    padding: var(--safe-top) 0 0;
+    gap: 0;
+    flex-wrap: nowrap;
+  }
+  .app-frame > header .brand {
+    display: none;
+  }
+  .app-frame > header nav,
+  .mine-first header nav {
+    order: initial;
+    width: 100%;
+    height: 48px;
+    margin: 0;
+    gap: 18px;
+  }
+  .app-frame > header nav button {
+    min-height: 48px;
+    flex: 0 0 auto;
+  }
+  .app-frame .site-tag {
+    display: none;
+  }
+  .app-frame:not(.mine-first) .page-heading {
+    padding: 10px 6px;
+  }
+  .app-frame:not(.mine-first) .page-heading h1 {
+    font-size: 24px;
+  }
+  .app-frame:not(.mine-first) .balance small {
+    display: none;
+  }
+  .app-frame:not(.mine-first) .balance strong {
+    margin: 0;
+    font-size: 18px;
+  }
+  .management-grid,
+  .records-grid,
+  .settings-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .workshop-panel.is-wide {
+    grid-column: auto;
+  }
+  .management-view .panel-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding: 12px 14px;
+  }
+  .management-view .panel-heading > span {
+    max-width: none;
+    text-align: left;
+  }
+  .management-view .panel-heading input {
+    width: 100%;
+  }
+  .management-view .mineral-grid,
+  .management-view .research-grid,
+  .management-view .compact-grid,
+  .management-view .collection-grid {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 12px;
+  }
+  .settings-columns .settings-row:nth-child(odd) {
+    border-right: 0;
+  }
+  .settings-row {
+    grid-template-columns: minmax(0, 1fr) minmax(44px, auto);
+    padding: 14px;
+  }
+  .settings-row select {
+    max-width: min(48vw, 230px);
+  }
+  .settings-row input[type="range"] {
+    width: min(42vw, 200px);
+  }
+  .panel-copy,
+  .panel-status,
+  .empty-state,
+  .action-row {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+  .action-row > button {
+    flex: 1 1 100%;
+  }
+  .management-view .import {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .management-view .import input {
+    max-width: 100%;
+    width: 100%;
+  }
+  .context-panel {
+    padding-right: var(--safe-right);
+    padding-bottom: var(--safe-bottom);
+    padding-left: var(--safe-left);
+  }
 }
