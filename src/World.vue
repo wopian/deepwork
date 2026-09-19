@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { onMounted, onBeforeUnmount, ref, watch, computed } from "vue";
 import { Application, Graphics, Text, Container } from "pixi.js";
 // Pixi shader/uniform polyfills preserve the native CSP without eval.
 import "pixi.js/unsafe-eval";
-import { state, materials, terrainEpoch, format, act } from "./game";
+import { state, materials, terrainEpoch, format, act, upgrades } from "./game";
 import { inspectOre } from "./inspect";
 import { WasteParticles } from "./waste";
 import { TerrainView } from "./terrain-view";
@@ -44,7 +44,24 @@ const pointers = new Map<number, ScreenPoint>();
 const inspected = ref<number | null>(null);
 const inspectionPinned = ref(false);
 const unknownSignal = ref(false);
-let inspectedCell: [number, number] | null = null;
+const inspectedCell = ref<[number, number] | null>(null);
+const accessNotice = computed(() => {
+  const game = state.value;
+  const cell = inspectedCell.value;
+  if (
+    !game ||
+    !cell ||
+    !Number.isFinite(game.access_depth_limit) ||
+    cell[1] < game.access_depth_limit * CELLS_PER_METRE
+  )
+    return null;
+  return {
+    depth: game.access_depth_limit,
+    equipment: (game.access_upgrades ?? [])
+      .map((id) => upgrades.find(([key]) => key === id)?.[1] ?? id)
+      .join(" + "),
+  };
+});
 let press: ScreenPoint | null = null;
 let moved = false;
 let offsetX = 0;
@@ -457,7 +474,7 @@ onMounted(async () => {
         inspected.value = null;
         inspectionPinned.value = false;
         unknownSignal.value = false;
-        inspectedCell = null;
+        inspectedCell.value = null;
         pointers.clear();
         press = null;
         fineTerrain.clear();
@@ -725,19 +742,19 @@ function inspectAt(p: ScreenPoint, select = false) {
   if (!app || !state.value) return;
   if (!select && inspectionPinned.value) return;
   const scale = (app.screen.width / 1100) * zoom;
-  inspectedCell = [
+  inspectedCell.value = [
     Math.floor(((p.x - offsetX) / scale - 235) / CELL_PIXEL),
     Math.floor(((p.y - offsetY) / scale - 208) / CELL_PIXEL),
   ];
-  inspected.value = inspectOre(state.value.terrain, ...inspectedCell);
+  inspected.value = inspectOre(state.value.terrain, ...inspectedCell.value);
   if (select) inspectionPinned.value = inspected.value !== null;
   unknownSignal.value =
     inspected.value === null &&
     state.value.workings.signals.some(
       (s) =>
         Math.hypot(
-          s.centre[0] - inspectedCell![0],
-          s.centre[1] - inspectedCell![1],
+          s.centre[0] - inspectedCell.value![0],
+          s.centre[1] - inspectedCell.value![1],
         ) <= s.radius,
     );
   const wx = (p.x - offsetX) / scale,
@@ -872,6 +889,17 @@ function fitWorkings() {
         >Refines into
         {{ materials[inspected]?.product.replaceAll("_", " ") }}</span
       >
+      <span v-if="accessNotice">
+        Access ends at {{ format(accessNotice.depth) }} m.
+        <template v-if="accessNotice.equipment"
+          >Needed: {{ accessNotice.equipment }}.</template
+        >
+        <template v-else>Current lift is at its maximum reach.</template>
+        Crews can still work accessible parts of this vein.
+      </span>
+      <button v-if="accessNotice" @click="emit('inspect', 'Equipment')">
+        View access equipment
+      </button>
       <button
         @click="inspectedCell && act('target_vein', inspectedCell.join(','))"
       >

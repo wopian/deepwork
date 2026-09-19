@@ -108,6 +108,8 @@ export interface Game {
     masks: Record<string, number[]>;
   } | null;
   pinned_inputs: Record<string, number>;
+  access_depth_limit: number;
+  access_upgrades: string[];
   processing: {
     id: number;
     output: string;

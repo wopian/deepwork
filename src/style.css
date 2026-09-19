@@ -918,6 +918,8 @@ header {
   left: 12px;
   bottom: 100px;
   max-width: calc(100% - 24px);
+  max-height: calc(100% - 110px);
+  overflow-y: auto;
   background: #101820;
   border: 2px solid #e5a34d;
   padding: 12px;

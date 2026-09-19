@@ -67,6 +67,8 @@ struct Snapshot {
     processing: Vec<mine_core::ProcessingFeed>,
     pinned_inputs: std::collections::BTreeMap<String, u64>,
     selected_vein: Option<mine_core::workings::VeinOrderView>,
+    access_depth_limit: u32,
+    access_upgrades: Vec<&'static str>,
     research_invested: u64,
     upgrade_previews: std::collections::BTreeMap<String, mine_core::UpgradePreview>,
     purchase_blockers: std::collections::BTreeMap<String, String>,
@@ -86,6 +88,16 @@ impl From<Game> for Snapshot {
             .collect();
         let upgrade_previews = game.upgrade_previews();
         let selected_vein = game.workings.order_view(&game.terrain);
+        let access_depth_limit = game.equipment_depth_limit();
+        let mut access_upgrades = Vec::new();
+        if game.lift_depth_limit() == access_depth_limit && game.level("shaft") < 50 {
+            access_upgrades.push("shaft");
+        }
+        for (id, depth) in [("supports", 300), ("pump", 700), ("ventilation", 1500)] {
+            if game.level(id) == 0 && depth == access_depth_limit {
+                access_upgrades.push(id);
+            }
+        }
         let retirement_award = game.retirement_quote.unwrap_or_else(|| game.award());
         let purchase_blockers = mine_core::requirements()
             .iter()
@@ -123,6 +135,8 @@ impl From<Game> for Snapshot {
         }
         Self {
             selected_vein,
+            access_depth_limit,
+            access_upgrades,
             requires_reset: game.legacy_pending,
             workings_offset: 0,
             shipments,
@@ -572,6 +586,27 @@ pub fn run() {
 #[cfg(test)]
 mod stream_tests {
     use super::*;
+    #[test]
+    fn access_inspection_names_each_equipment_gate_at_the_current_limit() {
+        let mut game = Game::default();
+        let snapshot = Snapshot::from(game.clone());
+        assert_eq!(snapshot.access_depth_limit, 300);
+        assert_eq!(snapshot.access_upgrades, vec!["shaft", "supports"]);
+        game.levels.insert("shaft".into(), 3);
+        game.levels.insert("supports".into(), 1);
+        let snapshot = Snapshot::from(game.clone());
+        assert_eq!(snapshot.access_depth_limit, 700);
+        assert_eq!(snapshot.access_upgrades, vec!["pump"]);
+        game.levels.insert("pump".into(), 1);
+        let snapshot = Snapshot::from(game.clone());
+        assert_eq!(snapshot.access_depth_limit, 1500);
+        assert_eq!(snapshot.access_upgrades, vec!["shaft", "ventilation"]);
+        game.levels.insert("shaft".into(), 50);
+        game.levels.insert("ventilation".into(), 1);
+        let snapshot = Snapshot::from(game);
+        assert_eq!(snapshot.access_depth_limit, 20_300);
+        assert!(snapshot.access_upgrades.is_empty());
+    }
     #[test]
     fn importing_earlier_terrain_resets_removed_chunks() {
         let mut stream = Stream::default();
