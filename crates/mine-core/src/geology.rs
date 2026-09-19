@@ -144,15 +144,15 @@ pub fn deposit_cells(
         return vec![];
     };
     let extent = deposit.length + deposit.width * 3. + 64.;
-    let identity = deposit.identity();
     let mut cells = Vec::new();
     for y in ((deposit.y - extent).max(0.) as i64)
         ..=((deposit.y + extent) as i64).min(crate::geometry::MAX_ROWS - 1)
     {
         for x in ((deposit.x - extent) as i64)..=((deposit.x + extent) as i64) {
             if deposit.contains(x as f64, y as f64)
-                && deposit_id(seed, profile, [x, y], catalogue).as_deref()
-                    == Some(identity.as_str())
+                && locate(seed, profile, x, y, catalogue)
+                    .1
+                    .is_some_and(|d| d.seed == deposit.seed && d.x == deposit.x && d.y == deposit.y)
             {
                 cells.push([x, y]);
             }

@@ -138,6 +138,8 @@ pub struct Workings {
     #[serde(skip)]
     node_index: BTreeMap<i64, usize>,
     #[serde(skip)]
+    node_tiles: BTreeMap<(i64,i64), Vec<usize>>,
+    #[serde(skip)]
     indexed: usize,
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -182,17 +184,40 @@ impl Workings {
             return vec![];
         };
         let cells = crate::geology::deposit_cells(seed, profile, anchor, cat);
-        let nearest = cells
-            .iter()
+        let remaining: Vec<_> = cells
+            .into_iter()
             .filter(|p| !terrain.contains(p[0], p[1]))
-            .map(|p| distance(*p, at))
-            .min()
-            .unwrap_or(0);
-        let mut found = BTreeSet::new();
-        for p in cells {
-            if !terrain.contains(p[0], p[1]) && (stage == 2 || distance(p, at) <= nearest + 6) {
-                found.extend(terrain.reveal(seed, profile, p[0], p[1], 0, cat));
+            .collect();
+        let mut facing = BTreeMap::<i32, (u64, Point)>::new();
+        let nearest = remaining.iter().min_by_key(|p| distance(**p, at)).copied();
+        if stage == 1 {
+            if let Some(nearest) = nearest {
+                let bearing = ((nearest[1] - at[1]) as f64).atan2((nearest[0] - at[0]) as f64);
+                for &p in &remaining {
+                    let dx = (p[0] - at[0]) as f64;
+                    let dy = (p[1] - at[1]) as f64;
+                    let angle = dy.atan2(dx);
+                    // Closest cell along each sight ray forms the actual facing
+                    // arc, including curved deposits. No interior proximity blob.
+                    if (angle - bearing).cos() < 0.342 {
+                        continue;
+                    }
+                    let ray = (angle.to_degrees() * 2.).round() as i32;
+                    let d = (dx * dx + dy * dy) as u64;
+                    if facing.get(&ray).is_none_or(|(old, _)| d < *old) {
+                        facing.insert(ray, (d, p));
+                    }
+                }
             }
+        }
+        let visible: Vec<_> = if stage == 2 {
+            remaining
+        } else {
+            facing.values().map(|(_, p)| *p).collect()
+        };
+        let mut found = BTreeSet::new();
+        for p in visible {
+            found.extend(terrain.reveal(seed, profile, p[0], p[1], 0, cat));
         }
         self.veins.get_mut(&id).unwrap().stage = stage;
         self.revision += 1;
@@ -202,6 +227,7 @@ impl Workings {
         while self.indexed < self.passages.len() {
             let n = &self.passages[self.indexed];
             self.node_index.insert(key(n.feet), self.indexed);
+            self.node_tiles.entry((n.feet[0].div_euclid(64),n.feet[1]/64)).or_default().push(self.indexed);
             if !n.lift {
                 self.floor_index
                     .entry(n.feet[0])
@@ -463,14 +489,20 @@ impl Workings {
                 if access_blocked {
                     // Reuse older surveyed workings when the next equipment gate stops
                     // access development. The derived spatial index bounds this lookup.
-                    self.node_index
-                        .range(
-                            key([-MAX_X, p[1].saturating_sub(256).max(0)])
-                                ..=key([MAX_X - 1, p[1].saturating_add(256)]),
-                        )
-                        .map(|(_, &i)| distance(self.passages[i].feet, p))
-                        .min()
-                        .unwrap_or(i64::MAX)
+                    let tx=p[0].div_euclid(64); let ty=p[1]/64;
+                    let mut best=i64::MAX;
+                    for ring in 0_i64..=4 {
+                        for dy in -ring..=ring { for dx in -ring..=ring {
+                            if dx.abs().max(dy.abs())!=ring { continue; }
+                            let x=(tx+dx)*64; let y=(ty+dy)*64;
+                            let lower=distance(p,[p[0].clamp(x,x+63),p[1].clamp(y,y+63)]);
+                            if lower>=best || lower>256 { continue; }
+                            if let Some(nodes)=self.node_tiles.get(&(tx+dx,ty+dy)) {
+                                for &i in nodes { best=best.min(distance(self.passages[i].feet,p)); }
+                            }
+                        }}
+                    }
+                    best
                 } else {
                     self.passages
                         .iter()
