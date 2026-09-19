@@ -409,8 +409,9 @@ onMounted(async () => {
     const g = state.value;
     productionAudio(g?.stages.reduce((sum, s) => sum + s.rate, 0) ?? 0);
     if (g) {
-      if (lastCampaign !== g.campaign_id) {
-        lastCampaign = g.campaign_id;
+      const worldIdentity = `${g.campaign_id}:${g.site}`;
+      if (lastCampaign !== worldIdentity) {
+        lastCampaign = worldIdentity;
         inspected.value = null;
         unknownSignal.value = false;
         inspectedCell = null;
