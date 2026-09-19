@@ -5,7 +5,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap};
 #[derive(Deserialize)]
 pub struct Mining {
     pub signal_radius: i64,
@@ -141,6 +141,11 @@ pub struct Workings {
     node_tiles: BTreeMap<(i64, i64), Vec<usize>>,
     #[serde(skip)]
     indexed: usize,
+    /// Pure distances depend on passage geometry and lookup scope, not survey changes.
+    #[serde(skip)]
+    distance_cache: HashMap<Point, i64>,
+    #[serde(skip)]
+    distance_cache_at: (usize, bool),
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VeinSurvey {
@@ -524,8 +529,17 @@ impl Workings {
             let deepest = self.passages.iter().map(|n| n.feet[1]).max().unwrap();
             let access_blocked = depth_limit <= deepest + 17;
             let development = policy == "depth" && !access_blocked;
-            let nearest_distance = |p: Point| {
-                if access_blocked || self.target.is_some() {
+            let lookup_all = access_blocked || self.target.is_some();
+            let distance_stamp = (self.passages.len(), lookup_all);
+            if self.distance_cache_at != distance_stamp {
+                self.distance_cache.clear();
+                self.distance_cache_at = distance_stamp;
+            }
+            let mut nearest_distance = |p: Point| {
+                if let Some(&distance) = self.distance_cache.get(&p) {
+                    return distance;
+                }
+                let result = if lookup_all {
                     // Reuse older surveyed workings when the next equipment gate stops
                     // access development. The derived spatial index bounds this lookup.
                     let tx = p[0].div_euclid(64);
@@ -568,7 +582,13 @@ impl Workings {
                         .map(|n| distance(n.feet, p))
                         .min()
                         .unwrap_or(i64::MAX)
+                };
+                // Bound derived memory even on very wide, old mines. A cache miss
+                // always computes the same distance; eviction cannot change routes.
+                if self.distance_cache.len() < 16_384 {
+                    self.distance_cache.insert(p, result);
                 }
+                result
             };
             let mut candidates: Vec<(i64, Point)> = vec![];
             // A deposit order persists across individual cuts. Unknown cells never
