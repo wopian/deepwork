@@ -12,11 +12,30 @@ use std::{
 };
 use tauri::{ipc::Channel, Emitter, Manager, State};
 struct LifecycleRequest {
+    issued: std::time::Instant,
     background: bool,
     timestamp: u64,
     epoch: u64,
     source: &'static str,
     reply: Option<mpsc::Sender<Result<Snapshot, String>>>,
+}
+/// Native mobile lifecycle owns suspension once available. WebView events
+/// remain a desktop/startup fallback and cannot undo a newer native transition.
+#[derive(Default)]
+struct LifecycleGate {
+    last: Option<std::time::Instant>,
+    native_seen: bool,
+}
+impl LifecycleGate {
+    fn accepts(&mut self, source: &str, issued: std::time::Instant) -> bool {
+        if self.last.is_some_and(|last| issued <= last) || (self.native_seen && source == "webview")
+        {
+            return false;
+        }
+        self.last = Some(issued);
+        self.native_seen |= source == "native";
+        true
+    }
 }
 struct Runtime {
     _save_lock: fs::File,
@@ -226,6 +245,7 @@ async fn set_background(background: bool, handle: tauri::AppHandle) -> Result<Sn
     state
         .lifecycle
         .send(LifecycleRequest {
+            issued: std::time::Instant::now(),
             background,
             timestamp: now(),
             epoch: state.epoch.load(Ordering::SeqCst),
@@ -381,27 +401,32 @@ pub fn run() {
             });
             let lifecycle_handle = app.handle().clone();
             std::thread::spawn(move || {
+                let mut gate = LifecycleGate::default();
                 while let Ok(request) = requests.recv() {
                     let started = std::time::Instant::now();
                     if !request.background {
                         let _ = lifecycle_handle.emit("mine-reconciling", true);
                     }
-                    let result = transition_epoch(
-                        &lifecycle_handle.state::<Runtime>(),
-                        request.background,
-                        request.timestamp,
-                        request.epoch,
-                    );
+                    let state = lifecycle_handle.state::<Runtime>();
+                    let accepted = request.epoch == state.epoch.load(Ordering::SeqCst)
+                        && gate.accepts(request.source, request.issued);
+                    let result = if accepted {
+                        transition_epoch(&state, request.background, request.timestamp, request.epoch)
+                    } else {
+                        state.game.lock().map(|game| game.clone().into()).map_err(|e| e.to_string())
+                    };
                     if let Err(error) = &result {
                         let _ = lifecycle_handle.emit("mine-lifecycle-error", error.clone());
                     }
                     eprintln!(
-                        "Lifecycle source={} background={} timestamp={} duration_ms={} success={}",
+                        "Lifecycle source={} background={} timestamp={} duration_ms={} success={} accepted={} report={}",
                         request.source,
                         request.background,
                         request.timestamp,
                         started.elapsed().as_millis(),
-                        result.is_ok()
+                        result.is_ok(),
+                        accepted,
+                        result.as_ref().ok().and_then(|s| s.game.offline.as_ref()).map(|r| r.id.as_str()).unwrap_or("none")
                     );
                     if !request.background {
                         let _ = lifecycle_handle.emit("mine-reconciling", false);
@@ -413,6 +438,7 @@ pub fn run() {
             });
             lifecycle
                 .send(LifecycleRequest {
+            issued: std::time::Instant::now(),
                     background: false,
                     timestamp: now(),
                     epoch: 0,
@@ -495,6 +521,7 @@ pub fn run() {
                 if let Some(background) = background {
                     let state = handle.state::<Runtime>();
                     let _ = state.lifecycle.send(LifecycleRequest {
+            issued: std::time::Instant::now(),
                         background,
                         timestamp: now(),
                         epoch: state.epoch.load(Ordering::SeqCst),
@@ -550,6 +577,28 @@ mod stream_tests {
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
+    #[test]
+    fn native_lifecycle_rejects_stale_and_contradictory_webview_events() {
+        let mut gate = LifecycleGate::default();
+        let start = std::time::Instant::now();
+        let at = |n| start + std::time::Duration::from_millis(n);
+        assert!(gate.accepts("startup", at(0)));
+        assert!(gate.accepts("webview", at(1)));
+        assert!(gate.accepts("native", at(3)));
+        assert!(
+            !gate.accepts("native", at(2)),
+            "late queued suspend is stale"
+        );
+        assert!(!gate.accepts("native", at(3)), "same event is idempotent");
+        assert!(
+            !gate.accepts("webview", at(8)),
+            "visibility cannot undo native resume"
+        );
+        assert!(
+            gate.accepts("native", at(4)),
+            "ignored web event cannot stale native events"
+        );
+    }
     #[test]
     fn repeated_lifecycle_events_apply_offline_interval_once() {
         let directory = std::env::temp_dir().join(format!(
