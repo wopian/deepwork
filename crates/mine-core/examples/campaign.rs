@@ -2,6 +2,54 @@
 use mine_core::{materials, pacing, recipes, requirements, Action, Game};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Checkpoint {
+    seed: u64,
+    style: String,
+    mode: String,
+    content: u64,
+    visit: u64,
+    wall: u64,
+    idle_visits: u64,
+    events: BTreeMap<String, u64>,
+    stalls: Vec<Value>,
+    game: Game,
+}
+fn content_fingerprint() -> u64 {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for text in [
+        include_str!("../../../content/pacing.json"),
+        include_str!("../../../content/upgrades.json"),
+        include_str!("../../../content/materials.json"),
+        include_str!("../../../content/recipes.json"),
+        include_str!("../../../content/deposits.json"),
+        include_str!("../../../content/mining.json"),
+        include_str!("../../../content/sites.json"),
+        include_str!("../../../content/traces.json"),
+    ] {
+        for byte in text.bytes().chain(std::iter::once(0)) {
+            hash = (hash ^ byte as u64).wrapping_mul(0x100000001b3);
+        }
+    }
+    hash
+}
+impl Checkpoint {
+    fn validate(&mut self, seed: u64, style: &str, mode: &str) -> Result<(), String> {
+        if self.seed != seed
+            || self.style != style
+            || self.mode != mode
+            || self.content != content_fingerprint()
+            || self.wall != self.visit * 43200
+            || mode == "continuous"
+            || self.game.last_saved != 1_000_000 + self.wall
+            || self.events.values().any(|time| *time > self.wall)
+        {
+            return Err("Campaign checkpoint does not match run parameters/content".into());
+        }
+        self.game.terrain.rebuild()?;
+        self.game.validate()
+    }
+}
 const BUILD_ORDER: &[&str] = &[
     "furnace",
     "conveyor",
@@ -469,7 +517,7 @@ fn record(g: &Game, wall: u64, events: &mut BTreeMap<String, u64>) {
         }
     }
 }
-fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
+fn run(seed: u64, style: &str, days: u64, mode: &str, resume: Option<&std::path::Path>) -> Value {
     let run_started = std::time::Instant::now();
     let mut g = Game::new(seed, 1);
     g.profile = (seed % 3) as usize;
@@ -478,7 +526,27 @@ fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
     let mut wall = 0;
     let mut idle_visits = 0;
     let mut stalls = Vec::new();
-    for visit in 0..days * 2 {
+    let mut resumed_visit = 0;
+    if let Some(path) = resume
+        .map(|dir| dir.join(format!("campaign-checkpoint-{seed}.json")))
+        .filter(|p| p.exists())
+    {
+        let mut checkpoint: Checkpoint =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        checkpoint.validate(seed, style, mode).unwrap();
+        assert!(
+            checkpoint.visit < days * 2,
+            "Checkpoint exceeds observation window"
+        );
+        resumed_visit = checkpoint.visit;
+        wall = checkpoint.wall;
+        idle_visits = checkpoint.idle_visits;
+        events = checkpoint.events;
+        stalls = checkpoint.stalls;
+        g = checkpoint.game;
+        eprintln!("Resumed seed={seed} after visit={resumed_visit}");
+    }
+    for visit in resumed_visit..days * 2 {
         let visit_started = std::time::Instant::now();
         if idle_visits >= 2 && g.depth() >= 300 && g.steel_made {
             stalls.push(json!({"visit":visit,"site":g.site,"depth":g.depth(),"products":g.products,"paused_recipes":g.paused_recipes,"next":g.pinned,"ranks":g.ranks}));
@@ -546,6 +614,21 @@ fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
         )
         .unwrap();
         std::fs::write(format!("target/campaign-{seed}.json"), serde_json::to_vec_pretty(&json!({"seed":seed,"visit":visit+1,"events":events,"site":g.site,"depth":g.depth(),"next":g.pinned,"products":g.products,"trace":g.trace_feed,"levels":g.levels,"recipes":g.enabled_recipes,"paused_recipes":g.paused_recipes,"credits":g.credits,"ranks":g.ranks,"research":g.research,"invested":g.research_invested(),"shaft_blocker":g.purchase_blocker("shaft")})).unwrap()).unwrap();
+        let checkpoint = Checkpoint {
+            seed,
+            style: style.into(),
+            mode: mode.into(),
+            content: content_fingerprint(),
+            visit: visit + 1,
+            wall,
+            idle_visits,
+            events: events.clone(),
+            stalls: stalls.clone(),
+            game: g.clone(),
+        };
+        let temporary = format!("target/campaign-checkpoint-{seed}.tmp");
+        std::fs::write(&temporary, serde_json::to_vec(&checkpoint).unwrap()).unwrap();
+        std::fs::rename(temporary, format!("target/campaign-checkpoint-{seed}.json")).unwrap();
         if std::env::var_os("DEEPWORK_CAMPAIGN_DIAGNOSTIC").is_some() {
             let _ = std::fs::write(
                 format!("target/campaign-debug-{seed}.json"),
@@ -577,7 +660,7 @@ fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
         )
         .unwrap();
     }
-    json!({"seed":seed,"compute_seconds":run_started.elapsed().as_secs(),"strategy":style,"mode":mode,"stalls":stalls,"complete":g.megaproject,"events":events,"sites":g.site,"depth":g.depth(),"credits":g.credits,"next_upgrade":g.pinned,"purchase_blocker":g.pinned.as_ref().and_then(|id|g.purchase_blocker(id)),"products":g.products,"levels":g.levels,"blockers":g.stages.iter().map(|f|&f.blocker).collect::<Vec<_>>(),"expanded_state_bytes":serde_json::to_vec(&g).unwrap().len()})
+    json!({"seed":seed,"content_fingerprint":content_fingerprint().to_string(),"resumed_visit":resumed_visit,"compute_seconds":run_started.elapsed().as_secs(),"strategy":style,"mode":mode,"stalls":stalls,"complete":g.megaproject,"events":events,"sites":g.site,"depth":g.depth(),"credits":g.credits,"next_upgrade":g.pinned,"purchase_blocker":g.pinned.as_ref().and_then(|id|g.purchase_blocker(id)),"products":g.products,"levels":g.levels,"blockers":g.stages.iter().map(|f|&f.blocker).collect::<Vec<_>>(),"expanded_state_bytes":serde_json::to_vec(&g).unwrap().len()})
 }
 fn main() {
     let started = std::time::Instant::now();
@@ -595,6 +678,7 @@ fn main() {
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(42);
     let mode = args.get(3).map(String::as_str).unwrap_or("scheduled");
+    let resume = args.get(6).map(std::path::Path::new);
     assert!(["scheduled", "attentive", "continuous"].contains(&mode));
     let seed_start = args
         .get(5)
@@ -623,7 +707,7 @@ fn main() {
                 }
                 let style = ["bulk", "precision", "reclamation"][(seed_start + index) as usize % 3];
                 sender
-                    .send(run(seed_start + index, style, days, mode))
+                    .send(run(seed_start + index, style, days, mode, resume))
                     .unwrap();
             });
         }
@@ -672,6 +756,51 @@ fn main() {
 #[cfg(test)]
 mod strategy_tests {
     use super::*;
+    fn checkpoint_fixture() -> Checkpoint {
+        let mut game = Game::new(42, 1);
+        for _ in 0..60 {
+            game.second(materials(), false);
+        }
+        game.last_saved = 1_043_200;
+        Checkpoint {
+            seed: 42,
+            style: "bulk".into(),
+            mode: "scheduled".into(),
+            content: content_fingerprint(),
+            visit: 1,
+            wall: 43_200,
+            idle_visits: 0,
+            events: BTreeMap::new(),
+            stalls: vec![],
+            game,
+        }
+    }
+    #[test]
+    fn resume_rejects_changed_content_clock_or_strategy() {
+        let mut checkpoint = checkpoint_fixture();
+        checkpoint.validate(42, "bulk", "scheduled").unwrap();
+        assert!(checkpoint.validate(42, "precision", "scheduled").is_err());
+        checkpoint.content ^= 1;
+        assert!(checkpoint.validate(42, "bulk", "scheduled").is_err());
+        checkpoint.content ^= 1;
+        checkpoint.wall += 1;
+        assert!(checkpoint.validate(42, "bulk", "scheduled").is_err());
+    }
+    #[test]
+    fn resumed_checkpoint_continues_identical_simulation() {
+        let mut original = checkpoint_fixture();
+        let mut restored: Checkpoint =
+            serde_json::from_slice(&serde_json::to_vec(&original).unwrap()).unwrap();
+        restored.validate(42, "bulk", "scheduled").unwrap();
+        for _ in 0..120 {
+            original.game.tick(materials(), true);
+            restored.game.tick(materials(), true);
+        }
+        assert_eq!(
+            serde_json::to_value(&original.game).unwrap(),
+            serde_json::to_value(&restored.game).unwrap()
+        );
+    }
     #[test]
     fn construction_shortages_use_known_recipe_feeds_without_reading_geology() {
         let mut g = Game::new(51, 2);
