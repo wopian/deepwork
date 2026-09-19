@@ -1,6 +1,7 @@
 /** Isolated native visual/stream acceptance for dynamically generated workings. */
 import { chromium } from "playwright-core";
 import { chunkOrigin } from "../src/geometry";
+import { checkOreInspection } from "./ore-inspection-check";
 import {
   mkdtemp,
   mkdir,
@@ -14,6 +15,7 @@ const out = resolve(process.argv[2] ?? "test-results/workings");
 const duration = Number(process.argv[3] ?? 30);
 const inputLocked = process.argv.includes("--locked-input");
 const priorityOrder = process.argv.includes("--priority");
+const inspectControls = process.argv.includes("--inspect");
 const canonical = (value: any): any =>
   Array.isArray(value)
     ? value.map(canonical)
@@ -257,6 +259,14 @@ try {
     path: join(out, "underground-desktop.png"),
     fullPage: true,
   });
+  const inspection = [];
+  if (inspectControls) {
+    inspection.push(await checkOreInspection(page, "mouse"));
+    await page.screenshot({
+      path: join(out, "ore-desktop.png"),
+      fullPage: true,
+    });
+  }
   const cameraSample = () =>
     page.locator("[data-fps]").evaluate((el) => {
       const d = (el as HTMLElement).dataset;
@@ -310,6 +320,7 @@ try {
     throw new Error("Touch did not toggle survey overlay");
   await touch.send("Emulation.setTouchEmulationEnabled", { enabled: false });
   await touch.detach();
+  if (inspectControls) inspection.push(await checkOreInspection(page, "touch"));
   if (
     await page.evaluate(
       () => document.documentElement.scrollWidth > innerWidth + 2,
@@ -357,7 +368,10 @@ try {
         setupCommands: measurementStartSequence - fixtureState.last_sequence,
         saveBytes: Buffer.byteLength(save),
         fixtureWorkers: fixtureState.workers,
-        gameplayCommands: g.last_sequence - measurementStartSequence,
+        gameplayCommands:
+          measuredState.last_sequence - measurementStartSequence,
+        inspectionCommands: g.last_sequence - measuredState.last_sequence,
+        inspection,
         touchSurvey: true,
         rotation: { landscapeCamera, portraitCamera, drift: rotationDrift },
         passages: g.workings.passages.length,

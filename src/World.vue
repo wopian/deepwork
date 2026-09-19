@@ -36,6 +36,7 @@ let zoom = 1;
 let offsetY = 0;
 const pointers = new Map<number, ScreenPoint>();
 const inspected = ref<number | null>(null);
+const inspectionPinned = ref(false);
 const unknownSignal = ref(false);
 let inspectedCell: [number, number] | null = null;
 let press: ScreenPoint | null = null;
@@ -436,6 +437,7 @@ onMounted(async () => {
       if (lastCampaign !== worldIdentity) {
         lastCampaign = worldIdentity;
         inspected.value = null;
+        inspectionPinned.value = false;
         unknownSignal.value = false;
         inspectedCell = null;
         pointers.clear();
@@ -703,12 +705,14 @@ function pointerMove(e: PointerEvent) {
 }
 function inspectAt(p: ScreenPoint, select = false) {
   if (!app || !state.value) return;
+  if (!select && inspectionPinned.value) return;
   const scale = (app.screen.width / 1100) * zoom;
   inspectedCell = [
     Math.floor(((p.x - offsetX) / scale - 235) / CELL_PIXEL),
     Math.floor(((p.y - offsetY) / scale - 208) / CELL_PIXEL),
   ];
   inspected.value = inspectOre(state.value.terrain, ...inspectedCell);
+  if (select) inspectionPinned.value = inspected.value !== null;
   unknownSignal.value =
     inspected.value === null &&
     state.value.workings.signals.some(
@@ -840,6 +844,9 @@ function fitWorkings() {
     </div>
     <div v-if="inspected !== null" class="ore-inspector" role="status">
       <strong>{{ materials[inspected]?.name }}</strong>
+      <span v-if="!inspectionPinned"
+        >Click an ore face to keep this inspector open.</span
+      >
       <span
         >Refines into
         {{ materials[inspected]?.product.replaceAll("_", " ") }}</span
@@ -859,7 +866,13 @@ function fitWorkings() {
             : "Prioritise this material"
         }}
       </button>
-      <button @click="inspected = null" aria-label="Close mineral inspector">
+      <button
+        @click="
+          inspected = null;
+          inspectionPinned = false;
+        "
+        aria-label="Close mineral inspector"
+      >
         ×
       </button>
     </div>

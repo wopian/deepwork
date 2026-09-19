@@ -1770,7 +1770,6 @@ impl Game {
                 }
                 let p = [coordinates[0], coordinates[1]];
                 if !geometry::valid_cell(p[0], p[1])
-                    || self.terrain.contains(p[0], p[1])
                     || !self
                         .terrain
                         .known_material(p[0], p[1])
@@ -1778,10 +1777,22 @@ impl Game {
                 {
                     return Err("Select surveyed, unmined ore".into());
                 }
+                let cells = geology::deposit_cells(self.seed, self.profile, p, materials());
+                if !cells.iter().any(|cell| {
+                    !self.terrain.contains(cell[0], cell[1])
+                        && self
+                            .terrain
+                            .known_material(cell[0], cell[1])
+                            .is_some_and(|id| id > 1)
+                }) {
+                    return Err("This vein has no surveyed ore remaining".into());
+                }
+                // The face may be mined while its inspector is open. Keep the
+                // stable deposit anchor when other surveyed cells still remain.
                 self.workings.target = Some(p);
-                self.workings.target_cells.clear();
-                self.workings
-                    .prepare_deposit_order(self.seed, self.profile, &materials());
+                self.workings.target_deposit =
+                    geology::deposit_id(self.seed, self.profile, p, materials());
+                self.workings.target_cells = cells;
                 self.workings.search = None;
                 self.workings.blocked_at = None;
                 self.workings.deferred.clear();
@@ -3133,6 +3144,37 @@ mod survey_offline_tests {
         assert_eq!(offline.terrain.revealed, stepped.terrain.revealed);
         assert_eq!(offline.terrain.visible, stepped.terrain.visible);
         assert_eq!(offline.ticks, stepped.ticks);
+    }
+}
+
+#[cfg(test)]
+mod vein_inspection_tests {
+    use super::*;
+    #[test]
+    fn mined_inspector_anchor_can_select_remaining_surveyed_vein() {
+        let mut game = Game::new(42, 1);
+        let cat = materials();
+        let anchor = (220..250)
+            .map(|x| [x, 24])
+            .find(|p| geology::sample(42, 0, p[0], p[1], cat) == 3)
+            .unwrap();
+        for y in 0..=anchor[1] {
+            assert!(game.terrain.excavate(anchor[0], y));
+        }
+        game.terrain.reveal(42, 0, anchor[0], anchor[1], 0, cat);
+        let command = || Action {
+            sequence: 1,
+            kind: "target_vein".into(),
+            target: format!("{},{}", anchor[0], anchor[1]),
+            value: 0,
+        };
+        assert!(game.action(command()).is_err());
+        assert_eq!(game.workings.target, None);
+        assert_eq!(game.last_sequence, 0);
+        game.terrain.reveal(42, 0, anchor[0], anchor[1], 4, cat);
+        game.action(command()).unwrap();
+        assert_eq!(game.workings.target, Some(anchor));
+        assert!(game.workings.order_view(&game.terrain).unwrap().known_cells > 0);
     }
 }
 
