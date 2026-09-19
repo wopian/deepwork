@@ -414,6 +414,7 @@ fn record(g: &Game, wall: u64, events: &mut BTreeMap<String, u64>) {
     }
 }
 fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
+    let run_started = std::time::Instant::now();
     let mut g = Game::new(seed, 1);
     g.profile = (seed % 3) as usize;
     let cat = materials();
@@ -422,6 +423,7 @@ fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
     let mut idle_visits = 0;
     let mut stalls = Vec::new();
     for visit in 0..days * 2 {
+        let visit_started = std::time::Instant::now();
         if idle_visits >= 2 && g.depth() >= 300 && g.steel_made {
             stalls.push(json!({"visit":visit,"site":g.site,"depth":g.depth(),"products":g.products,"paused_recipes":g.paused_recipes,"next":g.pinned,"ranks":g.ranks}));
             act(
@@ -475,6 +477,13 @@ fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
         } else {
             0
         };
+        if idle_visits == 2 {
+            std::fs::write(
+                format!("target/campaign-stalled-{seed}.json"),
+                serde_json::to_vec(&g).unwrap(),
+            )
+            .unwrap();
+        }
         std::fs::write(format!("target/campaign-{seed}.json"), serde_json::to_vec_pretty(&json!({"seed":seed,"visit":visit+1,"events":events,"site":g.site,"depth":g.depth(),"next":g.pinned,"products":g.products,"trace":g.trace_feed,"levels":g.levels,"recipes":g.enabled_recipes,"paused_recipes":g.paused_recipes,"credits":g.credits,"ranks":g.ranks,"research":g.research,"invested":g.research_invested(),"shaft_blocker":g.purchase_blocker("shaft")})).unwrap()).unwrap();
         if std::env::var_os("DEEPWORK_CAMPAIGN_DIAGNOSTIC").is_some() {
             let _ = std::fs::write(
@@ -492,14 +501,22 @@ fn run(seed: u64, style: &str, days: u64, mode: &str) -> Value {
             );
         }
         eprintln!(
-            "seed={seed} strategy={style} mode={mode} visit={} depth={} next={:?} credits={}",
+            "seed={seed} strategy={style} mode={mode} visit={} depth={} next={:?} credits={} compute_seconds={}",
             visit + 1,
             g.depth(),
             g.pinned,
-            g.credits
+            g.credits,
+            visit_started.elapsed().as_secs()
         );
     }
-    json!({"seed":seed,"strategy":style,"mode":mode,"stalls":stalls,"complete":g.megaproject,"events":events,"sites":g.site,"depth":g.depth(),"credits":g.credits,"next_upgrade":g.pinned,"purchase_blocker":g.pinned.as_ref().and_then(|id|g.purchase_blocker(id)),"products":g.products,"levels":g.levels,"blockers":g.stages.iter().map(|f|&f.blocker).collect::<Vec<_>>(),"expanded_state_bytes":serde_json::to_vec(&g).unwrap().len()})
+    if !g.megaproject {
+        std::fs::write(
+            format!("target/campaign-failed-{seed}.json"),
+            serde_json::to_vec(&g).unwrap(),
+        )
+        .unwrap();
+    }
+    json!({"seed":seed,"compute_seconds":run_started.elapsed().as_secs(),"strategy":style,"mode":mode,"stalls":stalls,"complete":g.megaproject,"events":events,"sites":g.site,"depth":g.depth(),"credits":g.credits,"next_upgrade":g.pinned,"purchase_blocker":g.pinned.as_ref().and_then(|id|g.purchase_blocker(id)),"products":g.products,"levels":g.levels,"blockers":g.stages.iter().map(|f|&f.blocker).collect::<Vec<_>>(),"expanded_state_bytes":serde_json::to_vec(&g).unwrap().len()})
 }
 fn main() {
     let started = std::time::Instant::now();

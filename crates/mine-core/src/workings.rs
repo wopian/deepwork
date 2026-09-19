@@ -621,11 +621,29 @@ impl Workings {
             }
             candidates.sort_unstable();
             let goal = candidates.first().map(|(_, p)| *p).unwrap_or_else(|| {
-                let n = self.passages.iter().max_by_key(|n| n.feet[1]).unwrap();
-                [
-                    n.feet[0],
-                    (n.feet[1] + 16).min(depth_limit.saturating_sub(1)),
-                ]
+                if deepest + 1 >= depth_limit {
+                    // A depth gate must never exhaust basic earning. Extend a
+                    // supported edge into unsurveyed host rock, then let local
+                    // surveys steer subsequent cuts. No hidden ore query here.
+                    let right = self.passages.len() % 2 == 0;
+                    let edge = self
+                        .passages
+                        .iter()
+                        .filter(|n| n.supported && n.feet[1] >= 16)
+                        .min_by_key(|n| if right { -n.feet[0] } else { n.feet[0] })
+                        .unwrap_or(&self.passages[self.active]);
+                    let rise = if self.passages.len() % 3 == 0 { 4 } else { 0 };
+                    [
+                        edge.feet[0] + if right { 16 } else { -16 },
+                        (edge.feet[1] - rise).max(16).min(depth_limit - 1),
+                    ]
+                } else {
+                    let n = self.passages.iter().max_by_key(|n| n.feet[1]).unwrap();
+                    [
+                        n.feet[0],
+                        (n.feet[1] + 16).min(depth_limit.saturating_sub(1)),
+                    ]
+                }
             });
             // Reachable sampled ore becomes a local extraction area, not a new access shaft.
             if !development
@@ -721,7 +739,7 @@ impl Workings {
                     }
                 }
             }
-            if goal[1] < PIT_ROWS || depth_limit <= deepest + 1 && candidates.is_empty() {
+            if goal[1] < PIT_ROWS {
                 self.status = "Depth equipment required".into();
                 self.blocked_at = Some(stamp);
                 return;
@@ -1042,36 +1060,104 @@ mod tests {
     use super::*;
     const PIT_ROWS: i64 = 192;
     #[test]
-    fn selected_ore_extends_connected_supported_drives_past_negative_x() {
-        let mut terrain=Terrain::default(); let mut w=Workings::default(); w.initialise();
-        let mut destinations=vec![([256,63],true)];
-        destinations.extend((-32_i32..256).step_by(16).rev().map(|x|([x as i64,63],false)));
-        for (to,lift) in destinations {
-            let from=w.passages.last().unwrap().feet;
-            let mut pending=cut_cells(from,to,lift);
-            while !pending.is_empty() {
-                let before=pending.len();
-                pending.retain(|p| !terrain.contains(p[0],p[1]) && !terrain.excavate(p[0],p[1]));
-                assert!(pending.len()<before,"fixture must excavate connected faces");
+    fn exhausted_depth_gate_still_develops_lateral_survey_access() {
+        let mut t = Terrain::default();
+        let mut w = Workings::default();
+        w.initialise();
+        for y in 0..64 {
+            for x in 253..260 {
+                assert!(t.excavate(x, y));
             }
-            w.passages.push(Passage {feet:to,parent:w.passages.len()-1,lift,supported:true,column:true});
         }
-        w.active=w.passages.len()-1;
-        let goal=[-80,63];
-        terrain.reveal(42,0,goal[0],goal[1],0,&crate::materials());
-        terrain.visible.get_mut(&crate::geometry::chunk_id(goal[0],goal[1])).unwrap()[crate::geometry::bit_index(goal[0],goal[1])]=3;
-        w.target=Some(goal); w.target_cells=vec![goal];
+        w.passages.push(Passage {
+            feet: [256, 63],
+            parent: 0,
+            lift: true,
+            supported: true,
+            column: false,
+        });
+        w.active = 1;
         for _ in 0..100 {
-            w.advance(&terrain,&[3],"vein",1200,1,0);
-            if w.section.is_some() {break;}
+            w.advance(&t, &[], "bulk", 64, 1, 0);
+            if w.section.is_some() {
+                break;
+            }
         }
-        let section=w.section.as_ref().expect("bounded planner should extend beyond old wall");
+        let section = w
+            .section
+            .as_ref()
+            .expect("depth gate must not close every earning path");
+        assert_ne!(section.to[0], 256);
+        assert!(section.to[1] < 64);
+        assert!(section.cells.iter().all(|p| p[1] < 64));
+        assert!(
+            w.signals.is_empty(),
+            "exploration does not inspect hidden ore"
+        );
+    }
+    #[test]
+    fn selected_ore_extends_connected_supported_drives_past_negative_x() {
+        let mut terrain = Terrain::default();
+        let mut w = Workings::default();
+        w.initialise();
+        let mut destinations = vec![([256, 63], true)];
+        destinations.extend(
+            (-32_i32..256)
+                .step_by(16)
+                .rev()
+                .map(|x| ([x as i64, 63], false)),
+        );
+        for (to, lift) in destinations {
+            let from = w.passages.last().unwrap().feet;
+            let mut pending = cut_cells(from, to, lift);
+            while !pending.is_empty() {
+                let before = pending.len();
+                pending.retain(|p| !terrain.contains(p[0], p[1]) && !terrain.excavate(p[0], p[1]));
+                assert!(
+                    pending.len() < before,
+                    "fixture must excavate connected faces"
+                );
+            }
+            w.passages.push(Passage {
+                feet: to,
+                parent: w.passages.len() - 1,
+                lift,
+                supported: true,
+                column: true,
+            });
+        }
+        w.active = w.passages.len() - 1;
+        let goal = [-80, 63];
+        terrain.reveal(42, 0, goal[0], goal[1], 0, &crate::materials());
+        terrain
+            .visible
+            .get_mut(&crate::geometry::chunk_id(goal[0], goal[1]))
+            .unwrap()[crate::geometry::bit_index(goal[0], goal[1])] = 3;
+        w.target = Some(goal);
+        w.target_cells = vec![goal];
+        for _ in 0..100 {
+            w.advance(&terrain, &[3], "vein", 1200, 1, 0);
+            if w.section.is_some() {
+                break;
+            }
+        }
+        let section = w
+            .section
+            .as_ref()
+            .expect("bounded planner should extend beyond old wall");
         assert!(section.to[0] < -32);
-        while let Some(k)=w.next_cell(&terrain) { let p=point(k); assert!(terrain.excavate(p[0],p[1])); }
-        w.advance(&terrain,&[3],"vein",1200,100,10);
+        while let Some(k) = w.next_cell(&terrain) {
+            let p = point(k);
+            assert!(terrain.excavate(p[0], p[1]));
+        }
+        w.advance(&terrain, &[3], "vein", 1200, 100, 10);
         assert!(w.passages.last().unwrap().supported);
-        assert!(w.working_route().iter().all(|p|terrain.contains(p[0],p[1])));
-        terrain.rebuild().unwrap(); assert!(w.valid());
+        assert!(w
+            .working_route()
+            .iter()
+            .all(|p| terrain.contains(p[0], p[1])));
+        terrain.rebuild().unwrap();
+        assert!(w.valid());
     }
     #[test]
     fn deposit_order_survives_selected_cell_and_save_without_leaking_geometry() {
@@ -1522,13 +1608,13 @@ mod development_tests {
         }
     }
     #[test]
-    fn equipment_gate_idle_skip_preserves_survey_clock_and_state() {
+    fn equipment_gate_lateral_work_preserves_offline_clock_and_state() {
         let cat = crate::materials();
         let mut a = fixture(49);
         a.levels.remove("supports");
         a.workings.initialise();
         for i in 1..=75 {
-            let feet = [WIDTH / 2, PIT_ROWS - 1 + 16 * i];
+            let feet = [WIDTH / 2, (PIT_ROWS - 1 + 16 * i).min(1199)];
             let parent = a.workings.passages.len() - 1;
             for p in cut_cells(a.workings.passages[parent].feet, feet, true) {
                 a.terrain.excavate(p[0], p[1]);
@@ -1552,7 +1638,7 @@ mod development_tests {
             .exhausted
             .extend(a.workings.signals.iter().map(|s| key(s.centre)));
         a.tick(&cat, true);
-        assert!(a.workings.blocked_at.is_some());
+        assert!(a.workings.blocked_at.is_none());
         let mut b = a.clone();
         a.last_saved = 100;
         a.advance_offline(220, &cat);

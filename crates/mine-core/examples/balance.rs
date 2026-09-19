@@ -14,8 +14,8 @@ fn main() {
     assert!(g.profile < mine_core::sites().len(), "Unknown profile");
     let cat = materials();
     let plan = [
-        "conveyor",
         "furnace",
+        "conveyor",
         "steelworks",
         "shaft",
         "supports",
