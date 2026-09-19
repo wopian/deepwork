@@ -3,8 +3,8 @@ use mine_core::{materials, pacing, recipes, requirements, Action, Game};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 const BUILD_ORDER: &[&str] = &[
-    "conveyor",
     "furnace",
+    "conveyor",
     "steelworks",
     "shaft",
     "supports",
@@ -83,7 +83,26 @@ fn pinned_feeds(g: &Game) -> Vec<usize> {
     feeds.into_iter().take(3).collect()
 }
 
-fn strategy(g: &mut Game, style: &str, _attentive: bool) {
+fn strategy(g: &mut Game, style: &str, attentive: bool) {
+    if attentive && g.ticks % 100 == 0 {
+        // Strategy intervention, not a production multiplier: redirect crews to
+        // publicly revealed feed required by the currently pinned investment.
+        let needed = pinned_feeds(g);
+        let target = g
+            .terrain
+            .ore_frontiers
+            .iter()
+            .filter(|(id, _)| needed.contains(id))
+            .flat_map(|(_, faces)| faces.iter())
+            .next()
+            .copied()
+            .map(mine_core::geometry::cell_point);
+        if let Some(p) = target {
+            if g.workings.target.is_none() {
+                act(g, "target_vein", &format!("{},{}", p[0], p[1]), 0);
+            }
+        }
+    }
     if g.workers == 3 {
         act(g, "buy", "worker", 0);
     }
