@@ -108,6 +108,9 @@ impl From<Game> for Snapshot {
         game.workings.deferred.clear();
         // Private anchors may lie behind the revealed facing edge.
         game.workings.veins.clear();
+        // Persistence identities encode the private descriptor centre. The
+        // client selects public cells and needs only the filtered order view.
+        game.workings.target_deposit = None;
         game.workings.deferred_at = (0, 0);
         game.workings.exhausted.clear();
         if let Some(section) = &mut game.workings.section {
@@ -729,15 +732,21 @@ mod workings_stream_tests {
             },
         );
         game.workings.deferred.insert(43);
+        game.workings.target_deposit = Some("private-centre-identity".into());
         game.workings.deferred_at = (100, 200);
         game.workings.signals.push(mine_core::workings::Signal {
             centre: [240, 240],
             radius: 23,
             confidence: 1,
         });
-        let snapshot: Snapshot = game.into();
+        let snapshot: Snapshot = game.clone().into();
         assert!(snapshot.game.workings.veins.is_empty());
+        assert_eq!(
+            game.workings.target_deposit.as_deref(),
+            Some("private-centre-identity")
+        );
         let json = serde_json::to_value(snapshot).unwrap();
+        assert!(json["workings"]["target_deposit"].is_null());
         assert_eq!(json["workings"]["surveyed"], serde_json::json!([]));
         assert_eq!(json["workings"]["deferred"], serde_json::json!([]));
         assert_eq!(json["workings"]["deferred_at"], serde_json::json!([0, 0]));
