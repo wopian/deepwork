@@ -21,3 +21,9 @@ The expanded 7,020-passage fixture advances 1,200 exact simulation seconds in 7.
 Computed settled-state checks cover 25 desktop/portrait views: 1,015 text and 536 control observations. They found and fixed 14-pixel policy/contract controls, default small headquarters labels, 41-pixel settings selectors and a 28-pixel mobile production shortcut. Normal text meets 4.5:1 contrast in the checked DOM views; canvas art and physical-device comfort remain separately assessed.
 
 A campaign-derived 3.6 km endurance fixture exposed full-route cargo duplication in IPC. Its initial frame stalls reached about 10 FPS and native private memory peaked at 790 MiB; the 120-second partial run was stopped and retained as failed diagnostic evidence. Snapshots now send the occupied leg only and strip persistent batch/segment geometry without changing saved routes or material ownership. Position and snapshot-size regressions pass; totals are 110 core and 13 native tests. A new full-duration run uses the same deep fixture.
+
+## Windows endurance blocked by Defender
+
+The corrected 3.6 km run reached its first measurement (50 FPS, 157.7 MiB native working set, 140.0 MiB private memory), then the application closed. Windows Defender records show quarantine of the exact temporary executable/process as `Trojan:Win32/Bearfoos.A!ml` (threat ID 2147731250). A second copy was quarantined before startup, and the source executable subsequently became inaccessible. Classification is unresolved; no exclusions, restores or protection changes were performed. The initial sample is not a completed endurance result. Earlier complete endurance runs remain evidence for their recorded binaries only.
+
+The harness now captures native stdout/stderr and exit codes. Rust tests, browser readability, Android packaging and campaign simulations remain independently verifiable.

@@ -51,9 +51,14 @@ const app = Bun.spawn([exe, "--portable"], {
     WEBVIEW2_USER_DATA_FOLDER: join(data, "webview"),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
   },
-  stdout: "ignore",
-  stderr: "ignore",
+  stdout: "pipe",
+  stderr: "pipe",
 });
+const stdoutLog = new Response(app.stdout).text();
+const stderrLog = new Response(app.stderr).text();
+void app.exited.then((code) =>
+  console.log("Native fixture process exited", code),
+);
 let browser;
 try {
   for (let n = 0; n < 150; n++) {
@@ -421,4 +426,8 @@ try {
 } finally {
   await browser?.close();
   app.kill();
+  await Promise.all([
+    writeFile(join(out, "native-stdout.log"), await stdoutLog),
+    writeFile(join(out, "native-stderr.log"), await stderrLog),
+  ]);
 }
