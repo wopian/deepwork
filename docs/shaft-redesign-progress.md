@@ -75,3 +75,9 @@ An additional 30-seed deliberate-sale opening diagnostic spends starter iron on 
 Clock rollback retains the last accounted timestamp across offline advancement, background events, autosaves and commands. Restoring the clock cannot re-award the consumed interval. The foreground suspension fallback now saves a cloned candidate before replacing live state; failed saves preserve the original state and retry without publishing rewards. Tests pass: 112 core, 14 native, 18 campaign. Normal forward-clock simulation is unchanged; the active campaign executable remains valid for the balance gate.
 
 ARM64 APK rebuilt on bb66756; v2/v3 signatures, 16 KB ZIP alignment and all three packaged ELF load segments pass. SHA-256: 5dbe2eceeeb4f0ebd60ef9cf969d08436d44fc4abd728c886f8e2d157f5fe011. Physical Android checks remain pending.
+
+## Ore access feedback
+
+Snapshots expose the authoritative current depth limit and equipment needed to extend it. Ore inspection shows that limit, names required upgrades, and opens Equipment without rejecting a whole-vein order that still has accessible faces. Native tests cover simultaneous lift/support gates, drainage, heat and maximum lift reach. Desktop click and portrait tap identify the expected revealed mineral; the warning disappears when an authoritative snapshot raises access. Both views pass contrast/type/touch-target checks. The inspector scrolls within the mine viewport when space is limited.
+
+Current checks: 112 core, 15 native, 18 campaign strategy and 30 Bun tests. Frontend production build passes. ARM64 APK rebuilt on c52ce69; packaged ELF and ZIP alignment plus v2/v3 signatures pass. SHA-256: d17593b8a3c99c75ac8a1094252304888c96b7f13e14f4f2ad125ebb34dfabd9. The 30-seed allocation-aware campaign remains in progress.
