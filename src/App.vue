@@ -6,6 +6,8 @@ import { RESOURCE_UNIT, CELLS_PER_METRE } from "./geometry";
 import upgradeRequirements from "../content/upgrades.json";
 import profiles from "../content/sites.json";
 import recipes from "../content/recipes.json";
+import traces from "../content/traces.json";
+import { resourceQuantity } from "./numbers";
 import pacing from "../content/pacing.json";
 import mining from "../content/mining.json";
 import { preferences } from "./preferences";
@@ -26,6 +28,21 @@ import {
 const discoveredMaterials = computed(() =>
   materials.filter((m) => state.value?.discoveries.includes(m.id)),
 );
+const recipeCards = recipes.map((recipe) => ({
+  ...recipe,
+  buildingName:
+    upgrades.find(([id]) => id === recipe.building)?.[1] ?? recipe.building,
+  sources: [
+    ...new Set(
+      traces
+        .filter(
+          (rule) =>
+            recipe.id.startsWith("separate_") && rule.output === recipe.output,
+        )
+        .map((rule) => materials[rule.feed]!.name),
+    ),
+  ],
+}));
 const headquartersBenefits = (branch: string) =>
   (
     pacing.headquarters_starting as Record<
@@ -781,7 +798,7 @@ onMounted(start);
       </p>
       <div class="mineral-grid">
         <button
-          v-for="r in recipes"
+          v-for="r in recipeCards"
           :disabled="!state"
           :class="{
             selected:
@@ -795,17 +812,20 @@ onMounted(start);
             >{{ r.output.replaceAll("_", " ")
             }}<small>{{
               Object.entries(r.inputs)
-                .map(([p, n]) => `${n} ${p}`)
+                .map(([p, n]) => `${n} ${p.replaceAll("_", " ")}`)
                 .join(" + ")
             }}</small
-            ><small>{{ r.building }}</small></strong
+            ><small>{{ r.buildingName }}</small>
+            <small v-if="r.sources.length"
+              >Recover from {{ r.sources.join(" or ") }} processing.</small
+            ></strong
           >
         </button>
       </div>
       <h2>Recoverable process residues</h2>
       <div class="mineral-grid">
         <div v-for="(qty, name) in state?.trace_feed" class="inventory">
-          {{ name }} · {{ format(qty / RESOURCE_UNIT) }} units
+          {{ name.replaceAll("_", " ") }} · {{ resourceQuantity(qty) }} units
         </div>
       </div>
       <h2>Next equipment purchase</h2>

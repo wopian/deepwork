@@ -2,12 +2,7 @@
 import { computed } from "vue";
 import { state, materials, act } from "./game";
 import { RESOURCE_UNIT } from "./geometry";
-const quantity = (n: number) =>
-  n > 0 && n < RESOURCE_UNIT / 1000
-    ? "<0.001"
-    : (n / RESOURCE_UNIT).toLocaleString(undefined, {
-        maximumFractionDigits: 3,
-      });
+import { resourceQuantity as quantity } from "./numbers";
 const rate = (n: number) =>
   n > 0 && n < 0.001
     ? "<0.001"

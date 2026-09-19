@@ -1,3 +1,14 @@
+import { RESOURCE_UNIT } from "./geometry";
+
+const materialNumber = new Intl.NumberFormat("en", {
+  maximumFractionDigits: 3,
+});
+export function resourceQuantity(quanta: number) {
+  return quanta > 0 && quanta < RESOURCE_UNIT / 1000
+    ? "<0.001"
+    : materialNumber.format(quanta / RESOURCE_UNIT);
+}
+
 export function displayNumber(value: number | string, style = "compact") {
   const number =
     typeof value === "string" && /^-?\d+$/.test(value)
