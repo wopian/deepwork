@@ -1520,12 +1520,14 @@ impl Game {
                 rate: self.flow_window[3] as f64 / UNITS as f64 / seconds,
                 buffer: self.products.values().sum(),
                 capacity: cap,
-                blocker: if power_factor < 1. {
+                blocker: if power_factor < 1. && self.concentrate.values().any(|q| *q > 0) {
                     "Power supply limited"
-                } else if self.level("furnace") == 0 {
+                } else if self.level("furnace") == 0 && self.raw_stock.values().any(|q| *q > 0) {
                     "Raw sales · furnace locked"
+                } else if self.flow_window[3] == 0 {
+                    "Waiting for ore"
                 } else {
-                    "Reserves protected"
+                    "Processing continuously"
                 }
                 .into(),
             },

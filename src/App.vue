@@ -101,11 +101,16 @@ const panelNames = [
   "Production",
   "Contracts",
 ];
-const constraint = computed(() =>
-  state.value?.stages.find(
-    (s) => s.blocker && !["Flowing", "Working", "Selling"].includes(s.blocker),
-  ),
-);
+const constraint = computed(() => {
+  const stages = state.value?.stages ?? [];
+  return (
+    [...stages]
+      .reverse()
+      .find((s) =>
+        /full|required|limited|locked|No walkable/i.test(s.blocker),
+      ) ?? stages[0]
+  );
+});
 function openPanel(name: string) {
   panel.value = panel.value === name ? "" : name;
 }
@@ -211,7 +216,13 @@ onMounted(start);
             ? state.offline.effective + " simulated seconds"
             : format(state.offline.effective / 60) + " simulated minutes"
         }}
-        at 50% speed.
+        credited at 50% speed from
+        {{
+          state.offline.elapsed < 60
+            ? state.offline.elapsed + " seconds"
+            : format(state.offline.elapsed / 60) + " minutes"
+        }}
+        away.
       </p>
       <p v-if="state.offline.capped">
         {{ format(state.offline.capped / 3600) }} hours beyond eight-hour cap.
