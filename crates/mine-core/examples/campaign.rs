@@ -283,12 +283,20 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
         .and_then(|id| requirements().iter().find(|u| u.id == *id))
         .map(|u| u.inputs.keys().cloned().collect())
         .unwrap_or_else(|| {
-            vec![
-                "advanced_structure".into(),
-                "precision_controls".into(),
-                "magnets".into(),
-                "batteries".into(),
+            // Completed component lines must stop consuming shared feeds such
+            // as iron needed for a lift. Re-enable them if reserved stock falls.
+            [
+                "advanced_structure",
+                "precision_controls",
+                "magnets",
+                "batteries",
             ]
+            .into_iter()
+            .filter(|product| {
+                g.products.get(*product).copied().unwrap_or(0) < 10 * mine_core::geometry::UNITS
+            })
+            .map(str::to_string)
+            .collect()
         });
     while let Some(product) = pending.pop() {
         if let Some(recipe) = recipes().iter().find(|r| r.output == product) {
@@ -1031,6 +1039,61 @@ mod strategy_tests {
             before.advanced_to(&Advancement::read(&game)),
             "Residue production prevents premature site abandonment"
         );
+    }
+    #[test]
+    fn completed_headquarters_lines_release_shared_feeds_and_restart_when_short() {
+        let mut g = Game::new(42, 2);
+        g.credits = 0;
+        for id in BUILD_ORDER {
+            g.levels.insert((*id).into(), 1);
+        }
+        for product in ["magnets", "batteries", "precision_controls"] {
+            g.products
+                .insert(product.into(), 10 * mine_core::geometry::UNITS);
+        }
+        for id in [
+            "magnets",
+            "batteries",
+            "controls",
+            "separate_neodymium",
+            "separate_praseodymium",
+            "silicon",
+            "separate_gallium",
+        ] {
+            g.enabled_recipes.insert(id.into());
+        }
+        strategy(&mut g, "bulk", false);
+        for id in [
+            "magnets",
+            "batteries",
+            "controls",
+            "separate_neodymium",
+            "separate_praseodymium",
+            "silicon",
+            "separate_gallium",
+        ] {
+            assert!(
+                !g.enabled_recipes.contains(id),
+                "Completed component still consumes feed: {id}"
+            );
+        }
+        assert!(g.enabled_recipes.contains("structures"));
+        assert!(!g.paused_recipes.contains("steel"));
+        g.products
+            .insert("magnets".into(), 9 * mine_core::geometry::UNITS);
+        strategy(&mut g, "bulk", false);
+        for id in [
+            "magnets",
+            "separate_neodymium",
+            "separate_praseodymium",
+            "structures",
+        ] {
+            assert!(
+                g.enabled_recipes.contains(id),
+                "Missing component must restart its supply chain: {id}"
+            );
+        }
+        assert!(!g.enabled_recipes.contains("batteries"));
     }
     #[test]
     fn construction_shortages_use_known_recipe_feeds_without_reading_geology() {
