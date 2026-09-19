@@ -10,7 +10,13 @@ import { TerrainView } from "./terrain-view";
 import { CELL_PIXEL, CELLS_PER_METRE, RESOURCE_UNIT } from "./geometry";
 import { routePosition, cargoPosition } from "./routes";
 import { preferences, productionAudio } from "./preferences";
-import { gesture, zoomAt, resizeViewport, type ScreenPoint } from "./camera";
+import {
+  gesture,
+  zoomAt,
+  resizeViewport,
+  fitBounds,
+  type ScreenPoint,
+} from "./camera";
 const emit = defineEmits<{ inspect: [panel: string] }>();
 const host = ref<HTMLDivElement>();
 let app: Application | undefined;
@@ -119,6 +125,18 @@ function draw() {
         y = 208 + (node.feet[1] + 1) * CELL_PIXEL;
       const px = 235 + parent.feet[0] * CELL_PIXEL,
         py = 208 + (parent.feet[1] + 1) * CELL_PIXEL;
+      if (scale < 0.25) {
+        // Keep the complete connected mine readable when fine textures and supports
+        // fall below one screen pixel. This uses excavated passages, never geology.
+        structures
+          .moveTo(px, py - 4 * CELL_PIXEL)
+          .lineTo(x, y - 4 * CELL_PIXEL)
+          .stroke({
+            width: Math.max(7 * CELL_PIXEL, 1 / scale),
+            color: 0x101820,
+          });
+        continue;
+      }
       if (node.lift) {
         rect(
           structures,
@@ -766,15 +784,18 @@ function fitWorkings() {
     maxX = Math.max(maxX, x);
     maxY = Math.max(maxY, y);
   }
-  const scale = Math.min(
-    (app.screen.width - 64) / Math.max(100, (maxX - minX) * CELL_PIXEL),
-    (app.screen.height - 224) / Math.max(100, maxY * CELL_PIXEL),
+  const next = fitBounds(
+    {
+      left: 235 + minX * CELL_PIXEL,
+      right: 235 + maxX * CELL_PIXEL,
+      top: 208,
+      bottom: 208 + maxY * CELL_PIXEL,
+    },
+    app.screen,
   );
-  zoom = Math.max(0.15, Math.min(24, (scale * 1100) / app.screen.width));
-  const actual = (app.screen.width / 1100) * zoom;
-  offsetX =
-    app.screen.width / 2 - (235 + ((minX + maxX) / 2) * CELL_PIXEL) * actual;
-  offsetY = 128 - 208 * actual;
+  zoom = next.zoom;
+  offsetX = next.x;
+  offsetY = next.y;
   follow = false;
   followCrew = false;
   draw();

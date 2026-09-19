@@ -1,5 +1,33 @@
 import { expect, test } from "bun:test";
-import { gesture, zoomAt, resizeViewport } from "./camera";
+import { gesture, zoomAt, resizeViewport, fitBounds } from "./camera";
+
+test("five-kilometre workings fit both screens and keep low-zoom gestures anchored", () => {
+  const bounds = { left: -1515, right: 2860, top: 208, bottom: 17708 };
+  for (const viewport of [
+    { width: 1440, height: 818 },
+    { width: 412, height: 740 },
+  ]) {
+    const camera = fitBounds(bounds, viewport);
+    const scale = (viewport.width / 1100) * camera.zoom;
+    expect(camera.zoom).toBeLessThan(0.15);
+    expect(camera.x + bounds.left * scale).toBeGreaterThanOrEqual(32 - 1e-9);
+    expect(camera.x + bounds.right * scale).toBeLessThanOrEqual(
+      viewport.width - 32 + 1e-9,
+    );
+    expect(camera.y + bounds.top * scale).toBeCloseTo(128);
+    expect(camera.y + bounds.bottom * scale).toBeLessThanOrEqual(
+      viewport.height - 96 + 1e-9,
+    );
+    const next = zoomAt(camera, 0.5, { x: 100, y: 300 });
+    expect(next.zoom).toBeCloseTo(camera.zoom / 2);
+    expect((100 - next.x) / next.zoom).toBeCloseTo(
+      (100 - camera.x) / camera.zoom,
+    );
+    expect((300 - next.y) / next.zoom).toBeCloseTo(
+      (300 - camera.y) / camera.zoom,
+    );
+  }
+});
 
 test("portrait rotation preserves the inspected world centre and scale", () => {
   const camera = { zoom: 3, x: -966, y: -1855 };
