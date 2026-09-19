@@ -40,6 +40,17 @@ impl Deposit {
         if along.abs() >= 1. {
             return false;
         }
+        // A conservative envelope rejects distant macro tiles before trigonometry.
+        // Include the furthest branch and a one-cell numeric margin; actual shape,
+        // overlap precedence and material identity remain unchanged.
+        let envelope = match self.shape % 3 {
+            0 => self.slope.abs() * self.length + self.width * 2.3 + self.length * 0.22,
+            1 => self.slope.abs() * self.length * 0.25 + self.width,
+            _ => 13. + self.width,
+        };
+        if v.abs() > envelope + 1. {
+            return false;
+        }
         let ripple = (u / 39. + (self.seed % 19) as f64).sin();
         let centre = match self.shape % 3 {
             0 => self.slope * u + ripple * self.width * 1.3,
