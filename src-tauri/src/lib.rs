@@ -94,6 +94,13 @@ impl From<Game> for Snapshot {
                     .map(|reason| (u.id.clone(), reason))
             })
             .collect();
+        let shipments = game.transport.visual();
+        for segment in &mut game.transport.segments {
+            segment.legs.clear();
+            for batch in &mut segment.batches {
+                batch.legs.clear();
+            }
+        }
         // Persistence retains search internals; rendering receives only public knowledge.
         game.workings.search = None;
         game.workings.blocked_at = None;
@@ -115,7 +122,7 @@ impl From<Game> for Snapshot {
             selected_vein,
             requires_reset: game.legacy_pending,
             workings_offset: 0,
-            shipments: game.transport.visual(),
+            shipments,
             work_route: game.work_route().to_vec(),
             raw_stock_capacity: game.raw_stock_capacity(),
             processing: game.processing(),
@@ -735,5 +742,40 @@ mod workings_stream_tests {
         assert_eq!(json["workings"]["deferred"], serde_json::json!([]));
         assert_eq!(json["workings"]["deferred_at"], serde_json::json!([0, 0]));
         assert_eq!(json["workings"]["signals"][0].as_object().unwrap().len(), 3);
+    }
+}
+
+#[cfg(test)]
+mod bounded_cargo_snapshot_tests {
+    use super::*;
+    #[test]
+    fn visual_snapshot_does_not_repeat_deep_routes_per_batch() {
+        let mut game = Game::new(42, 1);
+        let leg = mine_core::logistics::Leg {
+            from: [0, 0],
+            to: [0, 16],
+            mode: "lift".into(),
+            milliseconds: 1000,
+        };
+        game.transport.segments[0].legs = vec![leg.clone(); 4096];
+        game.transport.segments[0]
+            .batches
+            .push(mine_core::transport::Batch {
+                route: 0,
+                material: 3,
+                amount: 1234,
+                remaining_ms: 4_098_000,
+                duration_ms: 4_098_000,
+                legs: vec![leg; 4096],
+            });
+        let snapshot = Snapshot::from(game.clone());
+        assert_eq!(snapshot.shipments[0].legs.len(), 1);
+        assert!(snapshot.game.transport.segments[0].legs.is_empty());
+        assert!(snapshot.game.transport.segments[0].batches[0]
+            .legs
+            .is_empty());
+        assert_eq!(snapshot.game.transport.mass(), game.transport.mass());
+        assert_eq!(game.transport.segments[0].batches[0].legs.len(), 4096);
+        assert!(serde_json::to_vec(&snapshot).unwrap().len() < 100_000);
     }
 }

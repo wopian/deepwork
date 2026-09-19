@@ -280,23 +280,33 @@ impl Network {
             .iter()
             .flat_map(|s| &s.batches)
             .filter(|b| !b.legs.is_empty())
-            .map(|b| VisualCargo {
-                material: b.material,
-                amount: b.amount,
-                remaining: b.remaining_ms as f64 / 1000.,
-                duration: b.duration_ms as f64 / 1000.,
-                mode: b
-                    .legs
-                    .first()
-                    .map(|l| l.mode.clone())
-                    .unwrap_or_else(|| "carrying".into()),
-                depth: b
-                    .legs
-                    .first()
-                    .map(|l| crate::geometry::depth(l.from[1].max(0) as i64))
-                    .unwrap_or(0),
-                path: vec![],
-                legs: b.legs.clone(),
+            .map(|b| {
+                // Render only the occupied leg. Sending every historic shaft edge
+                // per batch makes IPC grow with both mine depth and vehicle count.
+                let mut elapsed = b
+                    .duration_ms
+                    .saturating_sub(b.remaining_ms)
+                    .saturating_sub(2000);
+                let mut leg = b.legs.last().unwrap();
+                for next in &b.legs {
+                    leg = next;
+                    if elapsed <= next.milliseconds {
+                        break;
+                    }
+                    elapsed -= next.milliseconds;
+                }
+                let elapsed = elapsed.min(leg.milliseconds);
+                VisualCargo {
+                    material: b.material,
+                    amount: b.amount,
+                    remaining: (leg.milliseconds - elapsed) as f64 / 1000.,
+                    // Preserve the renderer's 2-second loading offset locally.
+                    duration: (leg.milliseconds + 2000) as f64 / 1000.,
+                    mode: leg.mode.clone(),
+                    depth: crate::geometry::depth(leg.from[1].max(0) as i64),
+                    path: vec![],
+                    legs: vec![leg.clone()],
+                }
             })
             .collect()
     }
@@ -866,5 +876,53 @@ mod tests {
             ordered.iter().map(|l| l.milliseconds).sum::<u32>(),
             legs.iter().map(|l| l.milliseconds).sum::<u32>()
         );
+    }
+}
+
+#[cfg(test)]
+mod visual_payload_tests {
+    use super::*;
+    #[test]
+    fn cargo_visual_keeps_current_leg_position_without_whole_route() {
+        let mut network = Network::default();
+        let legs = vec![
+            Leg {
+                from: [0, 0],
+                to: [8, 0],
+                mode: "carrying".into(),
+                milliseconds: 1000,
+            },
+            Leg {
+                from: [8, 0],
+                to: [8, 40],
+                mode: "lift".into(),
+                milliseconds: 3000,
+            },
+        ];
+        network.segments[0].batches.push(Batch {
+            route: 0,
+            material: 3,
+            amount: 1234,
+            remaining_ms: 6000,
+            duration_ms: 6000,
+            legs: legs.clone(),
+        });
+        for (remaining, index, elapsed) in [
+            (6000, 0, 0.),
+            (4500, 0, 0.),
+            (3500, 0, 0.5),
+            (3000, 0, 1.),
+            (1500, 1, 1.5),
+            (0, 1, 3.),
+        ] {
+            network.segments[0].batches[0].remaining_ms = remaining;
+            let before = serde_json::to_value(&network).unwrap();
+            let visual = network.visual();
+            assert_eq!(visual.len(), 1);
+            assert!(visual[0].legs == vec![legs[index].clone()]);
+            assert!((visual[0].duration - visual[0].remaining - 2. - elapsed).abs() < 1e-9);
+            assert_eq!(visual[0].amount, 1234);
+            assert_eq!(serde_json::to_value(&network).unwrap(), before);
+        }
     }
 }
