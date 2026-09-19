@@ -380,7 +380,10 @@ onMounted(async () => {
     } else if (follow) {
       offsetY =
         80 -
-        ((Math.max(0, ...Object.values(state.value?.heights ?? {})) *
+        ((Object.values(state.value?.heights ?? {}).reduce(
+          (max, h) => Math.max(max, h),
+          0,
+        ) *
           CELL_PIXEL *
           app.screen.width) /
           1100) *
@@ -584,8 +587,26 @@ function focusDistrict(x: number) {
   if (!app) return;
   follow = false;
   followCrew = false;
-  offsetY = 0;
-  offsetX = app.screen.width / 2 - ((x * app.screen.width) / 1100) * zoom;
+  zoom = innerWidth < 800 ? 4 : 2;
+  const scale = (app.screen.width / 1100) * zoom;
+  offsetY = Math.max(150, app.screen.height * 0.45) - 208 * scale;
+  offsetX = app.screen.width / 2 - x * scale;
+  draw();
+}
+function surfaceOverview() {
+  if (!app) return;
+  zoom = innerWidth < 800 ? 2 : 1;
+  const scale = (app.screen.width / 1100) * zoom;
+  offsetX = app.screen.width / 2 - 550 * scale;
+  offsetY = 150 - 208 * scale;
+  follow = false;
+  followCrew = false;
+  draw();
+}
+function focusCrew() {
+  zoom = Math.max(zoom, innerWidth < 800 ? 6 : 3);
+  followCrew = true;
+  follow = false;
   draw();
 }
 function wheel(e: WheelEvent) {
@@ -691,13 +712,13 @@ function fitWorkings() {
   }
   const scale = Math.min(
     (app.screen.width - 64) / Math.max(100, (maxX - minX) * CELL_PIXEL),
-    (app.screen.height - 96) / Math.max(100, maxY * CELL_PIXEL),
+    (app.screen.height - 224) / Math.max(100, maxY * CELL_PIXEL),
   );
   zoom = Math.max(0.15, Math.min(24, (scale * 1100) / app.screen.width));
   const actual = (app.screen.width / 1100) * zoom;
   offsetX =
     app.screen.width / 2 - (235 + ((minX + maxX) / 2) * CELL_PIXEL) * actual;
-  offsetY = 48 - 208 * actual;
+  offsetY = 128 - 208 * actual;
   follow = false;
   followCrew = false;
   draw();
@@ -718,30 +739,8 @@ function fitWorkings() {
     <div class="world-tools">
       <button @click="changeZoom(1.4)" aria-label="Zoom in">＋</button
       ><button @click="changeZoom(1 / 1.4)" aria-label="Zoom out">−</button
-      ><button
-        @click="
-          () => {
-            offsetY = 0;
-            offsetX = 0;
-            zoom = 1;
-            follow = false;
-            followCrew = false;
-            draw();
-          }
-        "
-      >
-        Surface ↑</button
-      ><button
-        @click="
-          () => {
-            followCrew = true;
-            follow = false;
-            draw();
-          }
-        "
-      >
-        Active crew
-      </button>
+      ><button @click="surfaceOverview">Surface ↑</button>
+      <button @click="focusCrew">Active crew</button>
       <button @click="fitWorkings">Fit workings</button>
     </div>
     <div class="world-districts">

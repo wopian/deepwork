@@ -124,7 +124,10 @@ async function retirementCancel() {
 const dismissedOffline = ref("");
 const depth = computed(() =>
   Math.floor(
-    Math.max(0, ...Object.values(state.value?.heights ?? {})) / CELLS_PER_METRE,
+    Object.values(state.value?.heights ?? {}).reduce(
+      (max, h) => Math.max(max, h),
+      0,
+    ) / CELLS_PER_METRE,
   ),
 );
 const filtered = computed(() =>
@@ -188,23 +191,33 @@ onMounted(start);
     <div class="notice" v-if="error" role="status">
       {{ error }}<button @click="error = ''" aria-label="Dismiss">×</button>
     </div>
-    <section
+    <details
       class="offline"
       v-if="state?.offline?.effective && state.offline.id !== dismissedOffline"
     >
-      <strong>Welcome back to the mine.</strong> Your crew excavated
-      {{ format(state.offline.excavated) }} cells and earned
-      {{ format(state.offline.credits) }} credits while away.
-      <p>
-        {{ format(state.offline.effective / 60) }} simulated minutes at 50%
-        speed.
-        <span v-if="state.offline.capped"
-          >{{ format(state.offline.capped / 3600) }} hours beyond the eight-hour
-          cap.</span
+      <summary>
+        <span>While away · +{{ format(state.offline.credits) }} credits</span
+        ><button
+          @click.stop.prevent="dismissedOffline = state?.offline?.id ?? ''"
+          aria-label="Dismiss return report"
         >
+          ×
+        </button>
+      </summary>
+      <p>
+        {{ format(state.offline.excavated) }} cells excavated ·
+        {{
+          state.offline.effective < 60
+            ? state.offline.effective + " simulated seconds"
+            : format(state.offline.effective / 60) + " simulated minutes"
+        }}
+        at 50% speed.
+      </p>
+      <p v-if="state.offline.capped">
+        {{ format(state.offline.capped / 3600) }} hours beyond eight-hour cap.
       </p>
       <p v-if="state.offline.discoveries.length">
-        Discovered:
+        Discovered
         {{
           state.offline.discoveries
             .map((id: number) => materials[id].name)
@@ -212,10 +225,7 @@ onMounted(start);
         }}.
       </p>
       <p v-for="blocker in state.offline.blockers">{{ blocker }}</p>
-      <button @click="dismissedOffline = state?.offline?.id ?? ''">
-        Continue →
-      </button>
-    </section>
+    </details>
     <p class="notice" v-if="state?.challenge">
       SITE CHALLENGE ·
       {{
@@ -270,19 +280,15 @@ onMounted(start);
           </div>
           <World @inspect="panel = $event" />
           <div class="opening-guide" v-if="state && !state.levels.furnace">
-            <strong>First workshop: refine iron</strong>
-            <p>
-              Crew follows surveyed rock. Furnace turns held ore into equipment
-              iron.
-            </p>
+            <strong>Next · refine iron</strong>
             <button
               @click="act('buy', 'furnace')"
               :disabled="!!state.purchase_blockers.furnace"
             >
               Build furnace · {{ state.quotes.furnace }} credits
             </button>
-            <span>{{
-              state.purchase_blockers.furnace || "Ready to build"
+            <span v-if="state.purchase_blockers.furnace">{{
+              state.purchase_blockers.furnace
             }}</span>
           </div>
         </section>

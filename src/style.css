@@ -1448,3 +1448,53 @@ nav button {
     display: none;
   }
 }
+.mine-first {
+  position: fixed;
+  inset: 0;
+  height: auto;
+}
+.mine-first header nav,
+.worksite-dock,
+.world-districts {
+  scrollbar-width: none;
+  overflow-y: hidden;
+}
+.mine-first header nav::-webkit-scrollbar,
+.worksite-dock::-webkit-scrollbar,
+.world-districts::-webkit-scrollbar {
+  display: none;
+}
+.mine-first .offline {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  margin: 6px 0 0;
+  max-height: 30dvh;
+  overflow: auto;
+}
+.offline summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  cursor: pointer;
+  gap: 8px;
+}
+.offline summary span::before {
+  content: "▸ ";
+}
+.offline[open] summary span::before {
+  content: "▾ ";
+}
+.offline summary button {
+  min-width: 44px;
+  padding: 4px;
+}
+.mine-first .opening-guide {
+  width: fit-content;
+  max-width: calc(100% - 32px);
+}
+.mine-first .opening-guide strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
