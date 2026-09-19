@@ -1,5 +1,10 @@
 import type { Page } from "playwright-core";
-import { CELL_PIXEL, chunkOrigin } from "../src/geometry";
+import {
+  CELL_PIXEL,
+  MINE_ORIGIN_X,
+  SURFACE_Y,
+  chunkOrigin,
+} from "../src/geometry";
 import catalogue from "../content/materials.json";
 
 /** Exercise the player's controls using only exported revealed cells. */
@@ -79,8 +84,10 @@ export async function checkOreInspection(page: Page, mode: "mouse" | "touch") {
           continue;
         const x = cx + (i % 64),
           y = cy + Math.floor(i / 64);
-        const sx = (235 + (x + 0.5) * CELL_PIXEL) * initial.scale + initial.x;
-        const sy = (208 + (y + 0.5) * CELL_PIXEL) * initial.scale + initial.y;
+        const sx =
+          (MINE_ORIGIN_X + (x + 0.5) * CELL_PIXEL) * initial.scale + initial.x;
+        const sy =
+          (SURFACE_Y + (y + 0.5) * CELL_PIXEL) * initial.scale + initial.y;
         const distance = Math.hypot(
           sx - initial.width / 2,
           sy - initial.height / 2,
@@ -93,8 +100,9 @@ export async function checkOreInspection(page: Page, mode: "mouse" | "touch") {
     // Repeated short real drags keep the gesture inside the mine viewport.
     for (let n = 0; n < 80; n++) {
       const c = await camera();
-      const sx = (235 + (target.x + 0.5) * CELL_PIXEL) * c.scale + c.x;
-      const sy = (208 + (target.y + 0.5) * CELL_PIXEL) * c.scale + c.y;
+      const sx =
+        (MINE_ORIGIN_X + (target.x + 0.5) * CELL_PIXEL) * c.scale + c.x;
+      const sy = (SURFACE_Y + (target.y + 0.5) * CELL_PIXEL) * c.scale + c.y;
       const dx = c.width / 2 - sx,
         dy = c.height / 2 - sy;
       if (Math.hypot(dx, dy) < 2) break;
@@ -125,8 +133,10 @@ export async function checkOreInspection(page: Page, mode: "mouse" | "touch") {
       await page.waitForTimeout(40);
     }
     const c = await camera();
-    const x = c.left + (235 + (target.x + 0.5) * CELL_PIXEL) * c.scale + c.x;
-    const y = c.top + (208 + (target.y + 0.5) * CELL_PIXEL) * c.scale + c.y;
+    const x =
+      c.left + (MINE_ORIGIN_X + (target.x + 0.5) * CELL_PIXEL) * c.scale + c.x;
+    const y =
+      c.top + (SURFACE_Y + (target.y + 0.5) * CELL_PIXEL) * c.scale + c.y;
     await tap(x, y);
     const name = catalogue[target.id]!.name;
     await page

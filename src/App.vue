@@ -43,13 +43,38 @@ const recipeCards = recipes.map((recipe) => ({
     ),
   ],
 }));
-const headquartersBenefits = (branch: string) =>
-  (
-    pacing.headquarters_starting as Record<
-      string,
-      { rank: number; upgrades: string[] }[]
-    >
-  )[branch] ?? [];
+const headquartersBenefits: Record<string, string[]> = {
+  excavation: [
+    "Every rank: +4% face work",
+    "Rank 3: start with powered picks",
+    "Rank 6: +2 simultaneous fronts",
+    "Rank 10: +2 fronts and 50% faster supports",
+  ],
+  logistics: [
+    "Every rank: +4% loading and dispatch",
+    "Rank 3: start with handcarts",
+    "Rank 6: +50% shared transfer storage",
+    "Rank 10: start with branch conveyors",
+  ],
+  metallurgy: [
+    "Every rank: +4% processing",
+    "Rank 3: start with sorting deck",
+    "Rank 6: +5 recovery points",
+    "Rank 10: 20% lower industry power demand",
+  ],
+  prospecting: [
+    "Every rank: +5% survey work",
+    "Rank 3: start with survey office",
+    "Rank 6: refine two signals per survey cycle",
+    "Rank 10: reveal full vein after boundary survey",
+  ],
+  reclamation: [
+    "Every rank: +5% recovery throughput",
+    "Rank 3: start with recovery screens",
+    "Rank 6: +5 recovery points",
+    "Rank 10: double disposal and trace throughput",
+  ],
+};
 const showReset = ref(false);
 const resetText = ref("");
 async function confirmReset() {
@@ -440,6 +465,31 @@ onMounted(start);
                   >{{ count }} {{ role }}</span
                 >
               </p>
+              <div class="mining-fronts" v-if="state?.mining_fronts.length">
+                <article
+                  v-for="front in state.mining_fronts"
+                  :key="front.id"
+                  :class="{
+                    selected: front.selected,
+                    blocked: !!front.blocker,
+                  }"
+                >
+                  <div>
+                    <strong>{{ materials[front.material]?.name }} face</strong>
+                    <small v-if="front.selected">WHOLE-VEIN PRIORITY</small>
+                  </div>
+                  <span
+                    >{{ front.crew }} diggers · {{ front.haulers }} haulers ·
+                    {{ format(front.face[1] / CELLS_PER_METRE) }} m</span
+                  >
+                  <progress :value="front.stockpile" :max="front.capacity" />
+                  <span
+                    >{{ format(front.stockpile / RESOURCE_UNIT) }} /
+                    {{ format(front.capacity / RESOURCE_UNIT) }} units ·
+                    {{ front.blocker || front.status }}</span
+                  >
+                </article>
+              </div>
               <label class="crew-roster" v-if="state"
                 >Crew priority
                 <select
@@ -531,6 +581,30 @@ onMounted(start);
                   Every fifth slot serves other cargo.</span
                 >
               </label>
+              <div class="mining-fronts" v-if="state?.mining_fronts.length">
+                <article
+                  v-for="front in state.mining_fronts"
+                  :key="front.id"
+                  :class="{
+                    selected: front.selected,
+                    blocked: !!front.blocker,
+                  }"
+                >
+                  <div>
+                    <strong
+                      >{{ materials[front.material]?.name }} loading bay</strong
+                    >
+                    <small v-if="front.selected">PRIORITY VEIN</small>
+                  </div>
+                  <span>{{ front.haulers }} haul crew</span>
+                  <progress :value="front.stockpile" :max="front.capacity" />
+                  <span
+                    >{{ format(front.stockpile / RESOURCE_UNIT) }} /
+                    {{ format(front.capacity / RESOURCE_UNIT) }} units ·
+                    {{ front.blocker || front.status }}</span
+                  >
+                </article>
+              </div>
               <div v-if="state" class="transport-panel">
                 <h3>Buffers & express service</h3>
                 <div
@@ -972,10 +1046,9 @@ onMounted(start);
               <strong>{{ branch }}</strong>
               <p>Rank {{ state?.ranks[branch] ?? 0 }} / 10</p>
               <small
-                v-for="grant in headquartersBenefits(branch)"
-                :key="grant.rank"
-                >Rank {{ grant.rank }}: start with
-                {{ grant.upgrades.join(" + ") }}</small
+                v-for="benefit in headquartersBenefits[branch]"
+                :key="benefit"
+                >{{ benefit }}</small
               >
               <span
                 >{{

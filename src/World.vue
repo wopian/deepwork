@@ -7,7 +7,14 @@ import { state, materials, terrainEpoch, format, act, upgrades } from "./game";
 import { inspectOre } from "./inspect";
 import { WasteParticles } from "./waste";
 import { TerrainView } from "./terrain-view";
-import { CELL_PIXEL, CELLS_PER_METRE, RESOURCE_UNIT } from "./geometry";
+import {
+  CELL_PIXEL,
+  CELLS_PER_METRE,
+  RESOURCE_UNIT,
+  MINE_ORIGIN_X,
+  SURFACE_Y,
+  SHAFT_WORLD_X,
+} from "./geometry";
 import { routePosition, cargoPosition } from "./routes";
 import { preferences, productionAudio } from "./preferences";
 import {
@@ -96,7 +103,7 @@ function draw() {
   const first = Math.max(
     0,
     Math.floor(
-      (-offsetY / ((app.screen.width / 1100) * zoom) - 208) / CELL_PIXEL,
+      (-offsetY / ((app.screen.width / 1100) * zoom) - SURFACE_Y) / CELL_PIXEL,
     ) - 30,
   );
   const last =
@@ -138,10 +145,10 @@ function draw() {
         Math.min(node.feet[1], parent.feet[1]) - 16 > last
       )
         continue;
-      const x = 235 + node.feet[0] * CELL_PIXEL,
-        y = 208 + (node.feet[1] + 1) * CELL_PIXEL;
-      const px = 235 + parent.feet[0] * CELL_PIXEL,
-        py = 208 + (parent.feet[1] + 1) * CELL_PIXEL;
+      const x = MINE_ORIGIN_X + node.feet[0] * CELL_PIXEL,
+        y = SURFACE_Y + (node.feet[1] + 1) * CELL_PIXEL;
+      const px = MINE_ORIGIN_X + parent.feet[0] * CELL_PIXEL,
+        py = SURFACE_Y + (parent.feet[1] + 1) * CELL_PIXEL;
       if (scale < 0.25) {
         // Keep the complete connected mine readable when fine textures and supports
         // fall below one screen pixel. This uses excavated passages, never geology.
@@ -203,8 +210,8 @@ function draw() {
           signal.centre[1] - signal.radius > last
         )
           continue;
-        const x = 235 + signal.centre[0] * CELL_PIXEL,
-          y = 208 + signal.centre[1] * CELL_PIXEL;
+        const x = MINE_ORIGIN_X + signal.centre[0] * CELL_PIXEL,
+          y = SURFACE_Y + signal.centre[1] * CELL_PIXEL;
         structures
           .circle(x, y, signal.radius * CELL_PIXEL)
           .fill({ color: 0xe5a34d, alpha: 0.1 })
@@ -217,10 +224,13 @@ function draw() {
       if (section) {
         const from = workings.passages[section.from]!.feet;
         structures
-          .moveTo(235 + from[0] * CELL_PIXEL, 208 + from[1] * CELL_PIXEL)
+          .moveTo(
+            MINE_ORIGIN_X + from[0] * CELL_PIXEL,
+            SURFACE_Y + from[1] * CELL_PIXEL,
+          )
           .lineTo(
-            235 + section.to[0] * CELL_PIXEL,
-            208 + section.to[1] * CELL_PIXEL,
+            MINE_ORIGIN_X + section.to[0] * CELL_PIXEL,
+            SURFACE_Y + section.to[1] * CELL_PIXEL,
           )
           .stroke({ color: 0xe5a34d, width: 2, alpha: 0.65 });
       }
@@ -234,8 +244,8 @@ function draw() {
     g?.terrain,
     first,
     last,
-    (-offsetX / scale - 235) / CELL_PIXEL - 64,
-    ((app.screen.width - offsetX) / scale - 235) / CELL_PIXEL + 64,
+    (-offsetX / scale - MINE_ORIGIN_X) / CELL_PIXEL - 64,
+    ((app.screen.width - offsetX) / scale - MINE_ORIGIN_X) / CELL_PIXEL + 64,
     g?.selected_vein?.masks,
   );
   // Fixed district slots grow upward, keeping routes and touch camera targets stable.
@@ -269,14 +279,16 @@ function draw() {
       rect(terrain, 213, 167 - lane * 3, 478, 1, 0xe5a34d);
   }
   if (g || levels.shaft) {
-    rect(terrain, 444, 130, 5, 70, 0x8c9ba5);
-    rect(terrain, 477, 130, 5, 70, 0x8c9ba5);
-    rect(terrain, 440, 126, 46, 6, 0x8c9ba5);
-    for (let y = 137; y < 164; y += 9) rect(terrain, 449, y, 28, 2, 0xa67548);
-    rect(terrain, 458, 120, 11, 11, 0xe5a34d);
-    rect(terrain, 462, 130, 2, 61, 0xe8dfc8);
+    const shaftX = SHAFT_WORLD_X;
+    rect(terrain, shaftX - 17, 130, 5, 70, 0x8c9ba5);
+    rect(terrain, shaftX + 12, 130, 5, 70, 0x8c9ba5);
+    rect(terrain, shaftX - 21, 126, 42, 6, 0x8c9ba5);
+    for (let y = 137; y < 164; y += 9)
+      rect(terrain, shaftX - 12, y, 24, 2, 0xa67548);
+    rect(terrain, shaftX - 5, 120, 10, 11, 0xe5a34d);
+    rect(terrain, shaftX - 1, 130, 2, 61, 0xe8dfc8);
     for (let tier = 0; tier < Math.floor(levels.shaft / 10); tier++)
-      rect(terrain, 487 + tier * 4, 149, 2, 40, 0x8c9ba5);
+      rect(terrain, shaftX + 22 + tier * 4, 149, 2, 40, 0x8c9ba5);
   }
   if (levels.minecart || levels.train) {
     rect(terrain, 685, 185, 33, 2, 0x8c9ba5);
@@ -439,10 +451,11 @@ onMounted(async () => {
       const cell = state.value.removed[state.value.removed.length - 1]!;
       offsetX =
         app.screen.width / 2 -
-        (((235 + cell.x * CELL_PIXEL) * app.screen.width) / 1100) * zoom;
+        (((MINE_ORIGIN_X + cell.x * CELL_PIXEL) * app.screen.width) / 1100) *
+          zoom;
       offsetY =
         app.screen.height / 2 -
-        (((208 + cell.y * CELL_PIXEL) * app.screen.width) / 1100) * zoom;
+        (((SURFACE_Y + cell.y * CELL_PIXEL) * app.screen.width) / 1100) * zoom;
     } else if (follow) {
       offsetY =
         80 -
@@ -481,8 +494,8 @@ onMounted(async () => {
         drawnKey = "";
         zoom = innerWidth < 800 ? 6 : 3;
         const startScale = (app.screen.width / 1100) * zoom;
-        offsetX = app.screen.width / 2 - 459 * startScale;
-        offsetY = app.screen.height * 0.4 - 208 * startScale;
+        offsetX = app.screen.width / 2 - SHAFT_WORLD_X * startScale;
+        offsetY = app.screen.height * 0.4 - SURFACE_Y * startScale;
         follow = false;
         followCrew = true;
         wasteParticles.items.length = 0;
@@ -524,17 +537,14 @@ onMounted(async () => {
         let x = 250 + i * 8,
           y = 185;
         if (role === "diggers") {
-          const cell =
-            g?.removed[
-              Math.max(
-                0,
-                g.removed.length - 1 - (i % Math.max(1, g.removed.length)),
-              )
-            ];
-          if (cell) {
-            const feet = g?.work_route?.[0] ?? [cell.x, cell.y];
-            x = 235 + feet[0]! * CELL_PIXEL;
-            y = 208 + (feet[1]! + 1) * CELL_PIXEL;
+          const active =
+            g?.mining_fronts.filter((front) => front.crew > 0) ?? [];
+          const front = active[i % Math.max(1, active.length)];
+          const cell = g?.removed[Math.max(0, g.removed.length - 1 - i)];
+          const feet = front?.face ?? (cell ? [cell.x, cell.y] : undefined);
+          if (feet) {
+            x = MINE_ORIGIN_X + feet[0]! * CELL_PIXEL + (i % 2) * 3;
+            y = SURFACE_Y + (feet[1]! + 1) * CELL_PIXEL;
           }
         } else if (role === "haulers") {
           const cargo = g?.shipments[i % Math.max(1, g.shipments.length)];
@@ -542,12 +552,12 @@ onMounted(async () => {
             cargo &&
             cargoPosition(cargo.legs ?? [], cargo.duration - cargo.remaining);
           if (leg) {
-            x = 235 + leg.point[0] * CELL_PIXEL;
-            y = 208 + leg.point[1] * CELL_PIXEL;
+            x = MINE_ORIGIN_X + leg.point[0] * CELL_PIXEL;
+            y = SURFACE_Y + leg.point[1] * CELL_PIXEL;
           } else if (cargo?.path.length) {
             const points: [number, number][] = cargo.path.map(([px, py]) => [
-              235 + px * CELL_PIXEL,
-              208 + py * CELL_PIXEL + 7,
+              MINE_ORIGIN_X + px * CELL_PIXEL,
+              SURFACE_Y + py * CELL_PIXEL + 7,
             ]);
             [x, y] = routePosition(
               points,
@@ -616,34 +626,52 @@ onMounted(async () => {
       const progress = 1 - cargo.remaining / cargo.duration;
       const points: [number, number][] = cargo.path?.length
         ? cargo.path.map(([x, y]) => [
-            235 + x * CELL_PIXEL,
-            208 + y * CELL_PIXEL,
+            MINE_ORIGIN_X + x * CELL_PIXEL,
+            SURFACE_Y + y * CELL_PIXEL,
           ])
-        : [[459, 208 + cargo.depth * CELLS_PER_METRE * CELL_PIXEL]];
+        : [
+            [
+              SHAFT_WORLD_X,
+              SURFACE_Y + cargo.depth * CELLS_PER_METRE * CELL_PIXEL,
+            ],
+          ];
       points.push([points[points.length - 1]![0], 185], [735, 185]);
       const leg = cargoPosition(
         cargo.legs ?? [],
         cargo.duration - cargo.remaining,
       );
       const [x, y] = leg
-        ? [235 + leg.point[0] * CELL_PIXEL, 208 + leg.point[1] * CELL_PIXEL]
+        ? [
+            MINE_ORIGIN_X + leg.point[0] * CELL_PIXEL,
+            SURFACE_Y + leg.point[1] * CELL_PIXEL,
+          ]
         : routePosition(points, progress);
       const mode = leg?.mode ?? cargo.mode;
       actorTargets.push({ x: x + 4, y: y + 2, panel: "Logistics" });
-      rect(
-        actors,
-        x,
-        y,
-        9,
-        5,
-        parseInt(materials[cargo.material].color.slice(1), 16),
-      );
-      if (mode === "minecart" || mode === "train") {
-        rect(actors, x - 2, y + 5, 13, 4, 0x8c9ba5);
+      const oreColor = parseInt(materials[cargo.material].color.slice(1), 16);
+      if (mode === "train") {
+        rect(actors, x - 8, y + 2, 16, 4, 0x8c9ba5);
+        rect(actors, x - 5, y, 9, 3, oreColor);
+        rect(actors, x - 6, y + 6, 3, 1, 0xe8dfc8);
+        rect(actors, x + 3, y + 6, 3, 1, 0xe8dfc8);
+      } else if (mode === "minecart") {
+        rect(actors, x - 5, y + 2, 10, 3, 0x8c9ba5);
+        rect(actors, x - 3, y, 6, 3, oreColor);
+        rect(actors, x - 3, y + 5, 2, 1, 0xe8dfc8);
+        rect(actors, x + 1, y + 5, 2, 1, 0xe8dfc8);
       } else if (mode === "lift") {
-        rect(actors, x - 2, y - 3, 1, 12, 0x8c9ba5);
-        rect(actors, x + 10, y - 3, 1, 12, 0x8c9ba5);
-        rect(actors, x - 2, y + 8, 13, 1, 0x8c9ba5);
+        rect(actors, x - 3, y - 4, 1, 7, 0x8c9ba5);
+        rect(actors, x + 2, y - 4, 1, 7, 0x8c9ba5);
+        rect(actors, x - 3, y + 2, 6, 1, 0x8c9ba5);
+        rect(actors, x - 2, y - 1, 4, 3, oreColor);
+      } else if (mode === "wheelbarrow") {
+        rect(actors, x - 3, y + 1, 6, 2, 0x8c9ba5);
+        rect(actors, x - 1, y - 1, 3, 2, oreColor);
+        rect(actors, x + 1, y + 3, 2, 1, 0xe8dfc8);
+      } else if (mode === "conveyor") {
+        rect(actors, x - 2, y, 4, 3, oreColor);
+      } else {
+        rect(actors, x - 1, y, 2, 2, oreColor);
       }
     }
   });
@@ -660,7 +688,7 @@ function focusDistrict(x: number) {
   followCrew = false;
   zoom = innerWidth < 800 ? 4 : 2;
   const scale = (app.screen.width / 1100) * zoom;
-  offsetY = Math.max(150, app.screen.height * 0.45) - 208 * scale;
+  offsetY = Math.max(150, app.screen.height * 0.45) - SURFACE_Y * scale;
   offsetX = app.screen.width / 2 - x * scale;
   draw();
 }
@@ -669,7 +697,7 @@ function surfaceOverview() {
   zoom = innerWidth < 800 ? 2 : 1;
   const scale = (app.screen.width / 1100) * zoom;
   offsetX = app.screen.width / 2 - 550 * scale;
-  offsetY = 150 - 208 * scale;
+  offsetY = 150 - SURFACE_Y * scale;
   follow = false;
   followCrew = false;
   draw();
@@ -743,8 +771,8 @@ function inspectAt(p: ScreenPoint, select = false) {
   if (!select && inspectionPinned.value) return;
   const scale = (app.screen.width / 1100) * zoom;
   inspectedCell.value = [
-    Math.floor(((p.x - offsetX) / scale - 235) / CELL_PIXEL),
-    Math.floor(((p.y - offsetY) / scale - 208) / CELL_PIXEL),
+    Math.floor(((p.x - offsetX) / scale - MINE_ORIGIN_X) / CELL_PIXEL),
+    Math.floor(((p.y - offsetY) / scale - SURFACE_Y) / CELL_PIXEL),
   ];
   inspected.value = inspectOre(state.value.terrain, ...inspectedCell.value);
   if (select) inspectionPinned.value = inspected.value !== null;
@@ -777,8 +805,11 @@ function inspectAt(p: ScreenPoint, select = false) {
       return;
     }
   }
-  if (select && wy >= 100 && wy < 208) {
-    emit("inspect", wx < 235 ? "Crew" : wx < 680 ? "Logistics" : "Processing");
+  if (select && wy >= 100 && wy < SURFACE_Y) {
+    emit(
+      "inspect",
+      wx < MINE_ORIGIN_X ? "Crew" : wx < 680 ? "Logistics" : "Processing",
+    );
   }
 }
 function pointerEnd(e: PointerEvent) {
@@ -790,7 +821,7 @@ function fitWorkings() {
   if (!app) return;
   const points = state.value?.workings.passages.map((p) => p.feet) ?? [];
   if (!points.length) {
-    focusDistrict(459);
+    focusDistrict(SHAFT_WORLD_X);
     return;
   }
   let minX = Infinity,
@@ -803,10 +834,10 @@ function fitWorkings() {
   }
   const next = fitBounds(
     {
-      left: 235 + minX * CELL_PIXEL,
-      right: 235 + maxX * CELL_PIXEL,
-      top: 208,
-      bottom: 208 + maxY * CELL_PIXEL,
+      left: MINE_ORIGIN_X + minX * CELL_PIXEL,
+      right: MINE_ORIGIN_X + maxX * CELL_PIXEL,
+      top: SURFACE_Y,
+      bottom: SURFACE_Y + maxY * CELL_PIXEL,
     },
     app.screen,
   );
@@ -841,7 +872,7 @@ function fitWorkings() {
       <button
         v-for="[label, x] in [
           ['Camp', 100],
-          ['Shaft', 459],
+          ['Shaft', SHAFT_WORLD_X],
           ['Plants', 800],
           ['Waste', 1000],
         ]"

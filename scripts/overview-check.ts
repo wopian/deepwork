@@ -1,7 +1,12 @@
 /** Browser-only rendering check using Rust-generated passage geometry, not a native playthrough. */
 import { chromium } from "playwright-core";
 import { mkdir } from "node:fs/promises";
-import { CELL_PIXEL, chunkOrigin } from "../src/geometry";
+import {
+  CELL_PIXEL,
+  MINE_ORIGIN_X,
+  SURFACE_Y,
+  chunkOrigin,
+} from "../src/geometry";
 import catalogue from "../content/materials.json";
 import { checkReadability } from "./readability-check";
 
@@ -128,8 +133,8 @@ try {
     const x = Number(camera.cameraX),
       y = Number(camera.cameraY);
     for (const { feet } of passages) {
-      const sx = x + (235 + feet[0] * CELL_PIXEL) * scale;
-      const sy = y + (208 + feet[1] * CELL_PIXEL) * scale;
+      const sx = x + (MINE_ORIGIN_X + feet[0] * CELL_PIXEL) * scale;
+      const sy = y + (SURFACE_Y + feet[1] * CELL_PIXEL) * scale;
       if (
         sx < 31.99 ||
         sx > Number(camera.cameraWidth) - 31.99 ||
@@ -172,9 +177,10 @@ try {
           if (row < 700 * 4) continue;
           const x =
             Number(view.cameraX) +
-            (235 + (cx + (index % 64) + 0.5) * CELL_PIXEL) * scale;
+            (MINE_ORIGIN_X + (cx + (index % 64) + 0.5) * CELL_PIXEL) * scale;
           const y =
-            Number(view.cameraY) + (208 + (row + 0.5) * CELL_PIXEL) * scale;
+            Number(view.cameraY) +
+            (SURFACE_Y + (row + 0.5) * CELL_PIXEL) * scale;
           if (
             x < 24 ||
             x > Number(view.cameraWidth) - 24 ||

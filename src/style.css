@@ -747,6 +747,53 @@ nav {
   font: 14px monospace;
 }
 
+.mining-fronts {
+  display: grid;
+  gap: 8px;
+  padding: 8px 16px 16px;
+}
+.mining-fronts article {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) auto;
+  gap: 6px 12px;
+  padding: 12px;
+  border: 1px solid #65717b;
+  background: #151f27;
+  font:
+    14px/1.4 "Segoe UI",
+    sans-serif;
+}
+.mining-fronts article.selected {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 var(--accent);
+}
+.mining-fronts article.blocked {
+  border-color: #b8815c;
+}
+.mining-fronts article > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.mining-fronts small {
+  color: var(--accent);
+  font: 12px monospace;
+}
+.mining-fronts progress {
+  grid-column: 1 / -1;
+  width: 100%;
+  accent-color: var(--accent);
+}
+.mining-fronts span {
+  color: #d0cbbb;
+}
+
+@media (max-width: 600px) {
+  .mining-fronts article {
+    grid-template-columns: 1fr;
+  }
+}
+
 .upgrade-blocker {
   grid-column: 2 / -1;
   white-space: normal;

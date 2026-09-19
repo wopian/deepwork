@@ -80,6 +80,21 @@ export interface Game {
   crew: Record<string, number>;
   crew_priority: string;
   cargo_policy: string;
+  mining_fronts: {
+    id: string;
+    deposit: string;
+    material: number;
+    face: [number, number];
+    crew: number;
+    haulers: number;
+    progress: number;
+    stockpile: number;
+    capacity: number;
+    route: [number, number][];
+    selected: boolean;
+    status: string;
+    blocker: string;
+  }[];
   workings_offset: number;
   workings: {
     target: [number, number] | null;
@@ -202,7 +217,7 @@ export function format(n: number | string) {
 }
 export const upgrades = [
   ["slagcrusher", "Slag crusher", "Recover construction aggregate from slag."],
-  ["wheelbarrow", "Wheelbarrow fleet", "Faster short-distance hauling."],
+  ["wheelbarrow", "Handcart fleet", "Double crew capacity on branch haulage."],
   ["minecart", "Minecart railway", "Move cargo through deep shafts."],
   ["train", "Powered trains", "Reduce deep cargo transit time."],
   ["survey", "Survey office", "Assign a dedicated prospector."],
@@ -212,10 +227,10 @@ export const upgrades = [
   ["worker", "Recruit minion", "More hands, more progress."],
   ["housing", "Bunkhouse", "Room for four more workers."],
   ["drill", "Powered picks", "Increase excavation work."],
-  ["conveyor", "Conveyor line", "Move ore along supported haul routes."],
+  ["conveyor", "Branch conveyors", "Automate ore flow from active work faces."],
   ["sorter", "Sorting deck", "Separate material faster."],
   ["furnace", "Smelting furnace", "Turn mineral feed into products."],
-  ["shaft", "Shaft & lift", "Increase lift capacity and open deeper access."],
+  ["shaft", "Hoist upgrade", "Increase lift capacity and open deeper access."],
   ["steelworks", "Steelworks", "Iron, coke and lime become steel."],
   ["power", "Power station", "Prepare electrical infrastructure."],
   ["chemical", "Chemical refinery", "Unlock chemical and sulfide feeds."],
@@ -227,7 +242,11 @@ export const upgrades = [
     "Manufacture alloys and advanced parts.",
   ],
   ["recovery", "Recovery screens", "Recover 3% more mineral content."],
-  ["capacity", "Loading depot", "Expand material buffers."],
+  [
+    "capacity",
+    "Transfer buffers",
+    "Expand every work-face and transfer buffer.",
+  ],
   ["reclaimer", "Tailings recovery", "Recover retained mineral content."],
 ] as const;
 export function cost(id: string) {
