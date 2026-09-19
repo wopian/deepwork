@@ -158,7 +158,7 @@ fn route_impl(
             milliseconds,
         });
     }
-    let duration = (2000 + legs.iter().map(|leg| leg.milliseconds).sum::<u32>()).div_ceil(1000);
+    let duration = (1000 + legs.iter().map(|leg| leg.milliseconds).sum::<u32>()).div_ceil(1000);
     (legs, duration)
 }
 #[derive(Clone, Serialize, Deserialize)]

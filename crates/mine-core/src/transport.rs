@@ -5,6 +5,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+const LOADING_MS: u32 = 1000;
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Station {
     pub id: String,
@@ -156,7 +157,7 @@ impl Default for Network {
             name: name.into(),
             batches: vec![],
             capacity: crate::pacing::get().transit_units * UNITS,
-            duration_ms: 2000,
+            duration_ms: LOADING_MS,
             legs: vec![],
             rate: UNITS,
             blocked: false,
@@ -255,11 +256,12 @@ impl Network {
                 segment
                     .legs
                     .iter()
-                    .any(|l| matches!(l.mode.as_str(), "conveyor" | "train" | "lift")),
+                    .any(|l| matches!(l.mode.as_str(), "train" | "lift")),
             );
         }
         for segment in &mut self.segments {
-            segment.duration_ms = 2000 + segment.legs.iter().map(|l| l.milliseconds).sum::<u32>();
+            segment.duration_ms =
+                LOADING_MS + segment.legs.iter().map(|l| l.milliseconds).sum::<u32>();
             // Installed transport modes carry only their matching segment. Long
             // routes receive enough in-transit ownership for 30% headroom over
             // one full cycle instead of retaining a fixed shallow-mine cap.
@@ -322,7 +324,7 @@ impl Network {
                 let mut elapsed = b
                     .duration_ms
                     .saturating_sub(b.remaining_ms)
-                    .saturating_sub(2000);
+                    .saturating_sub(LOADING_MS);
                 let mut leg = b.legs.last().unwrap();
                 for next in &b.legs {
                     leg = next;
@@ -336,8 +338,8 @@ impl Network {
                     material: b.material,
                     amount: b.amount,
                     remaining: (leg.milliseconds - elapsed) as f64 / 1000.,
-                    // Preserve the renderer's 2-second loading offset locally.
-                    duration: (leg.milliseconds + 2000) as f64 / 1000.,
+                    // Preserve renderer loading offset locally.
+                    duration: (leg.milliseconds + LOADING_MS) as f64 / 1000.,
                     mode: leg.mode.clone(),
                     depth: crate::geometry::depth(leg.from[1].max(0) as i64),
                     path: vec![],
@@ -493,7 +495,7 @@ impl Network {
                         .get(&lot.route)
                         .and_then(|r| r.get(index))
                         .unwrap_or(&segment.legs);
-                    let duration = 2000 + legs.iter().map(|l| l.milliseconds).sum::<u32>();
+                    let duration = LOADING_MS + legs.iter().map(|l| l.milliseconds).sum::<u32>();
                     if let Some(batch) = segment.batches.last_mut().filter(|b| {
                         b.material == id
                             && b.route == lot.route
@@ -913,6 +915,33 @@ mod tests {
             legs.iter().map(|l| l.milliseconds).sum::<u32>()
         );
     }
+
+    #[test]
+    fn configured_segments_keep_thirty_percent_cycle_headroom_at_depth() {
+        for depth in [200, 1200, 2800, 6000] {
+            let path = [[-256, depth], [256, depth], [256, 0], [16, -1]];
+            let levels = BTreeMap::from([
+                ("conveyor".into(), 1),
+                ("minecart".into(), u32::from(depth >= 1200)),
+                ("shaft".into(), u32::from(depth >= 1200)),
+                ("train".into(), u32::from(depth >= 6000)),
+            ]);
+            let (legs, _) = crate::logistics::route(&path, &levels, 1.);
+            let mut network = Network::default();
+            network.configure(&legs, 4 * UNITS, 0);
+            for segment in network.segments.iter().filter(|s| !s.legs.is_empty()) {
+                let cycle = segment
+                    .rate
+                    .saturating_mul(segment.duration_ms as u64)
+                    .div_ceil(1000);
+                assert!(
+                    segment.capacity >= cycle.saturating_mul(13).div_ceil(10),
+                    "{} lacks headroom at {depth} cells",
+                    segment.name
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -939,12 +968,12 @@ mod visual_payload_tests {
             route: 0,
             material: 3,
             amount: 1234,
-            remaining_ms: 6000,
-            duration_ms: 6000,
+            remaining_ms: 5000,
+            duration_ms: 5000,
             legs: legs.clone(),
         });
         for (remaining, index, elapsed) in [
-            (6000, 0, 0.),
+            (5000, 0, 0.),
             (4500, 0, 0.),
             (3500, 0, 0.5),
             (3000, 0, 1.),
@@ -956,7 +985,7 @@ mod visual_payload_tests {
             let visual = network.visual();
             assert_eq!(visual.len(), 1);
             assert!(visual[0].legs == vec![legs[index].clone()]);
-            assert!((visual[0].duration - visual[0].remaining - 2. - elapsed).abs() < 1e-9);
+            assert!((visual[0].duration - visual[0].remaining - 1. - elapsed).abs() < 1e-9);
             assert_eq!(visual[0].amount, 1234);
             assert_eq!(serde_json::to_value(&network).unwrap(), before);
         }

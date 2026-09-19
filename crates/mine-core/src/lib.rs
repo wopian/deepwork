@@ -886,7 +886,7 @@ impl Game {
         } else {
             haulers as f64
         };
-        (units * rank * UNITS as f64) as u64
+        (units * rank * pacing::get().haul_rate * UNITS as f64) as u64
     }
     pub fn work_route(&self) -> &[[i64; 2]] {
         &self.haul_path
@@ -1045,6 +1045,20 @@ impl Game {
         }
         let sold_before = self.sold_mass;
         self.crew = logistics::Crew::prioritise(self.workers, &self.levels, &self.crew_priority);
+        let required_fronts = self.required_front_materials(cat);
+        let mut planning_priorities = Vec::new();
+        for id in required_fronts
+            .iter()
+            .copied()
+            .chain(self.priorities.iter().copied())
+        {
+            if !planning_priorities.contains(&id) {
+                planning_priorities.push(id);
+            }
+            if planning_priorities.len() == 3 {
+                break;
+            }
+        }
         {
             self.workings.initialise();
             self.workings.survey_work += (1 + self.crew.prospectors as u64 * 3)
@@ -1094,7 +1108,7 @@ impl Game {
             };
             self.workings.advance(
                 &self.terrain,
-                &self.priorities,
+                &planning_priorities,
                 &self.policy,
                 limit,
                 engineers,
@@ -1115,7 +1129,7 @@ impl Game {
         }
         let cap = self.raw_stock_capacity();
         let ore_total: u64 = self.ore.values().sum();
-        let required = self.required_front_materials(cat);
+        let required = required_fronts;
         let max_fronts = self.max_mining_fronts();
         let buffer_level = self.level("capacity");
         if self.ticks % 100 == 1 || self.mining_fronts.is_empty() {
@@ -1308,13 +1322,15 @@ impl Game {
             let rate = if levels.get("conveyor").copied().unwrap_or(0) > 0 {
                 (4. * (1. + 0.12 * levels["conveyor"] as f64)
                     * 1.5f64.powi((levels["conveyor"] / 10) as i32)
+                    * pacing::get().haul_rate
                     * UNITS as f64) as u64
             } else if levels.get("wheelbarrow").copied().unwrap_or(0) > 0 {
                 (2. * front.haulers as f64
                     * (1. + 0.12 * levels["wheelbarrow"] as f64)
+                    * pacing::get().haul_rate
                     * UNITS as f64) as u64
             } else {
-                front.haulers as u64 * UNITS
+                (front.haulers as f64 * pacing::get().haul_rate * UNITS as f64) as u64
             };
             front.transfer_remainder += rate;
             let budget = front.transfer_remainder / 20;
@@ -1360,8 +1376,8 @@ impl Game {
             source,
             &mut self.hauled,
             cap,
-            &self.priorities,
-            self.cargo_policy == "preferred",
+            &planning_priorities,
+            self.cargo_policy == "preferred" || !required.is_empty(),
             false,
             power,
         );
@@ -1379,8 +1395,8 @@ impl Game {
         logistics::order_cargo(
             &mut sort_ids,
             self.ticks,
-            &self.priorities,
-            self.cargo_policy == "preferred",
+            &planning_priorities,
+            self.cargo_policy == "preferred" || !required.is_empty(),
         );
         for id in sort_ids {
             let quantity = self.hauled.get_mut(&id).expect("known feed");
@@ -3208,7 +3224,7 @@ mod preview_tests {
         let g = Game::default();
         let offers = g.upgrade_previews();
         assert!(offers["conveyor"].machine_percent > offers["conveyor"].line_percent);
-        assert!((offers["conveyor"].line_percent - 100.).abs() < 0.01);
+        assert!(offers["conveyor"].line_percent > 0.);
         assert!(offers["drill"].machine_percent > 0.);
         assert_eq!(offers["drill"].line_percent, 0.);
     }

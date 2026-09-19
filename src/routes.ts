@@ -35,7 +35,7 @@ export function cargoPosition(
   elapsed: number,
 ): { point: [number, number]; mode: string } | null {
   if (!legs.length) return null;
-  let left = Math.max(0, elapsed * 1000 - 2000);
+  let left = Math.max(0, elapsed * 1000 - 1000);
   for (const leg of legs) {
     if (left <= leg.milliseconds)
       return {

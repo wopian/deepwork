@@ -54,7 +54,11 @@ impl Checkpoint {
 }
 const BUILD_ORDER: &[&str] = &[
     "furnace",
+    "wheelbarrow",
     "conveyor",
+    "sorter",
+    "survey",
+    "capacity",
     "steelworks",
     "shaft",
     "supports",
@@ -67,6 +71,7 @@ const BUILD_ORDER: &[&str] = &[
     "ventilation",
     "trace",
     "train",
+    "recovery",
     "reclaimer",
     "slagcrusher",
 ];
@@ -1100,7 +1105,16 @@ mod strategy_tests {
         let mut g = Game::new(51, 2);
         g.credits = 0;
         g.heights.insert((0) as i64, 1192);
-        for id in ["conveyor", "furnace", "steelworks", "shaft"] {
+        for id in [
+            "furnace",
+            "wheelbarrow",
+            "conveyor",
+            "sorter",
+            "survey",
+            "capacity",
+            "steelworks",
+            "shaft",
+        ] {
             g.levels.insert(id.into(), 1);
         }
         strategy(&mut g, "bulk", false);
@@ -1117,7 +1131,16 @@ mod strategy_tests {
         let mut g = Game::new(51, 2);
         g.credits = 0;
         g.heights.insert((0) as i64, 800);
-        for id in ["conveyor", "furnace", "steelworks", "shaft"] {
+        for id in [
+            "furnace",
+            "wheelbarrow",
+            "conveyor",
+            "sorter",
+            "survey",
+            "capacity",
+            "steelworks",
+            "shaft",
+        ] {
             g.levels.insert(id.into(), 1);
         }
         strategy(&mut g, "bulk", false);
@@ -1240,7 +1263,16 @@ mod strategy_tests {
     fn scheduled_decisions_preserve_required_whole_vein_policy_between_surveys() {
         let mut g = Game::new(42, 2);
         g.credits = 0;
-        for id in ["furnace", "conveyor", "steelworks", "shaft"] {
+        for id in [
+            "furnace",
+            "wheelbarrow",
+            "conveyor",
+            "sorter",
+            "survey",
+            "capacity",
+            "steelworks",
+            "shaft",
+        ] {
             g.levels.insert(id.into(), 1);
         }
         let p = (210..260)

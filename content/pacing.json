@@ -30,7 +30,7 @@
   "machine_growth": 1.18,
   "capacity_growth": 1.12,
   "worker_rate": 1.0,
-  "haul_rate": 1.0,
+  "haul_rate": 1.2,
   "lift_depth_per_level": 400,
   "sorting_rate": 2.0,
   "refining_rate": 2.0,

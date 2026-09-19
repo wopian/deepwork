@@ -159,28 +159,48 @@ pub fn refresh(
         .collect();
     let capacity = 20 * UNITS * (4 + buffer_level as u64) / 4;
     for candidate in chosen {
-        let mut front = old.remove(&candidate.id).unwrap_or_else(|| MiningFront {
-            id: candidate.id.clone(),
-            deposit: candidate.deposit.clone(),
-            material: candidate.material,
-            face: candidate.face,
-            crew: 0,
-            haulers: 0,
-            progress: 0,
-            work_remainder: 0,
-            transfer_remainder: 0,
-            stockpile: 0,
-            capacity,
-            route: candidate.route.clone(),
-            route_id: 0,
-            selected: candidate.selected,
-            status: "Awaiting crew".into(),
-            blocker: String::new(),
-        });
+        let nearest = old
+            .iter()
+            .filter(|(_, front)| {
+                front.deposit == candidate.deposit && front.material == candidate.material
+            })
+            .min_by_key(|(_, front)| {
+                front.face[0].abs_diff(candidate.face[0])
+                    + front.face[1].abs_diff(candidate.face[1])
+            })
+            .map(|(id, _)| id.clone());
+        let mut front = old
+            .remove(&candidate.id)
+            .or_else(|| nearest.and_then(|id| old.remove(&id)))
+            .unwrap_or_else(|| MiningFront {
+                id: candidate.id.clone(),
+                deposit: candidate.deposit.clone(),
+                material: candidate.material,
+                face: candidate.face,
+                crew: 0,
+                haulers: 0,
+                progress: 0,
+                work_remainder: 0,
+                transfer_remainder: 0,
+                stockpile: 0,
+                capacity,
+                route: candidate.route.clone(),
+                route_id: 0,
+                selected: candidate.selected,
+                status: "Awaiting crew".into(),
+                blocker: String::new(),
+            });
+        front.id = candidate.id;
         front.deposit = candidate.deposit;
         front.material = candidate.material;
         front.face = candidate.face;
-        if front.route != candidate.route {
+        // Keep cargo ownership stable while a face advances through one vein.
+        // Route replacement happens after existing cargo drains or the route
+        // ceases to exist, avoiding a new network itinerary per mined cell.
+        let route_stale = front.route.last().is_none_or(|end| {
+            end[0].abs_diff(candidate.face[0]) + end[1].abs_diff(candidate.face[1]) > 64
+        });
+        if front.route.is_empty() || route_stale {
             front.route = candidate.route;
             front.route_id = 0;
         }
@@ -394,5 +414,17 @@ mod tests {
         let access = assign(&mut fronts, 4, 1, true);
         assert_eq!(access, 1);
         assert!(fronts.iter().all(|f| f.crew == 1));
+    }
+
+    #[test]
+    fn full_workface_pauses_locally_while_other_fronts_keep_mining() {
+        let mut fronts = vec![front("blocked", 3, false), front("flowing", 5, false)];
+        fronts[0].stockpile = fronts[0].capacity;
+        let access = assign(&mut fronts, 3, 1, false);
+        assert_eq!(access, 0);
+        assert_eq!(fronts[0].crew, 0);
+        assert_eq!(fronts[0].blocker, "Work-face stockpile full");
+        assert_eq!(fronts[1].crew, 3);
+        assert_eq!(fronts.iter().map(|front| front.haulers).sum::<u32>(), 1);
     }
 }

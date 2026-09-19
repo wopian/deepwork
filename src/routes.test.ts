@@ -35,7 +35,7 @@ test("cargo changes vehicle at transport handoffs after loading", () => {
       milliseconds: 2000,
     },
   ];
-  expect(cargoPosition(legs, 1)?.point).toEqual([0, 10]);
-  expect(cargoPosition(legs, 2.5)).toEqual({ point: [0, 5], mode: "lift" });
-  expect(cargoPosition(legs, 4)).toEqual({ point: [5, 0], mode: "conveyor" });
+  expect(cargoPosition(legs, 0.5)?.point).toEqual([0, 10]);
+  expect(cargoPosition(legs, 1.5)).toEqual({ point: [0, 5], mode: "lift" });
+  expect(cargoPosition(legs, 3)).toEqual({ point: [5, 0], mode: "conveyor" });
 });

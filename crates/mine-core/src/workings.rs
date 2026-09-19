@@ -549,6 +549,29 @@ impl Workings {
             self.index_passages();
             self.revision += 1;
         }
+        // Tutorial access is deterministic geometry, not a geology query. Sink
+        // one short supported shaft before anonymous signals can pull planning
+        // sideways. Guaranteed starter ore intersects this cut and becomes
+        // eligible only through normal local exposure.
+        if self.passages.len() == 1
+            && self.passages[0].feet == [WIDTH / 2, PIT_ROWS - 1]
+            && self.section.is_none()
+            && self.search.is_none()
+        {
+            let to = [WIDTH / 2, (PIT_ROWS + 31).min(depth_limit - 1)];
+            if to[1] > self.passages[0].feet[1] {
+                self.section = Some(Section {
+                    from: 0,
+                    to,
+                    lift: true,
+                    cells: cut_cells(self.passages[0].feet, to, true),
+                    support_work: 0,
+                });
+                self.status = "Sinking starter shaft".into();
+                self.revision += 1;
+                return;
+            }
+        }
         if self.search.is_none() {
             let deepest = self.passages.iter().map(|n| n.feet[1]).max().unwrap();
             let access_blocked = depth_limit <= deepest + 17;
@@ -1530,6 +1553,23 @@ mod tests {
         );
         workings.advance(&terrain, &[], "depth", 1200, 1, 0);
         assert_eq!(workings.section.as_ref().unwrap().to, [256, 239]);
+    }
+
+    #[test]
+    fn starter_access_sinks_before_anonymous_signal_planning() {
+        let terrain = Terrain::default();
+        let mut workings = Workings::default();
+        workings.signals.push(Signal {
+            centre: [600, 16],
+            radius: 23,
+            confidence: 2,
+        });
+        workings.advance(&terrain, &[3], "vein", 1200, 1, 0);
+        let section = workings.section.as_ref().expect("starter shaft section");
+        assert!(section.lift);
+        assert_eq!(section.from, 0);
+        assert_eq!(section.to, [WIDTH / 2, crate::geometry::PIT_ROWS + 31]);
+        assert!(section.cells.iter().all(|p| p[0].abs_diff(WIDTH / 2) <= 3));
     }
     #[test]
     fn nearby_sampled_ore_is_extracted_without_building_another_shaft() {
