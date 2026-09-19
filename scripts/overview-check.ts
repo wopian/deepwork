@@ -5,13 +5,16 @@ import { CELL_PIXEL } from "../src/geometry";
 import { checkReadability } from "./readability-check";
 
 const [input, output] = Bun.argv.slice(2);
+const includeTerrain = Bun.argv.includes("--terrain");
 if (!input || !output)
-  throw new Error("overview-check.ts RAW_DIAGNOSTIC.json OUTPUT_DIRECTORY");
+  throw new Error(
+    "overview-check.ts RAW_DIAGNOSTIC.json OUTPUT_DIRECTORY [--terrain]",
+  );
 await mkdir(output, { recursive: true });
 const game = await Bun.file(input).json();
 const { active, revision, status, passages, chambers } = game.workings;
-// Only public passage geometry is relevant. Empty texture data exercises the
-// overview fallback without exposing private deposit descriptors to the browser.
+// Default empty textures exercise the overview fallback. --terrain includes
+// public masks and revealed pixels; private deposit descriptors are always removed.
 game.workings = {
   active,
   revision,
@@ -22,7 +25,14 @@ game.workings = {
   section: null,
   target: null,
 };
-game.terrain = { revision: 0, chunks: {}, visible: {}, revealed: {} };
+game.terrain = includeTerrain
+  ? {
+      revision: game.terrain.revision,
+      chunks: game.terrain.chunks,
+      visible: game.terrain.visible,
+      revealed: game.terrain.revealed,
+    }
+  : { revision: 0, chunks: {}, visible: {}, revealed: {} };
 Object.assign(game, {
   shipments: [],
   work_route: [],
@@ -98,10 +108,17 @@ try {
     await page
       .getByRole("button", { name: "Fit workings", exact: true })
       .click();
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(includeTerrain ? 5000 : 1000);
     const camera = await page
       .locator("[data-camera-zoom]")
       .evaluate((el) => ({ ...(el as HTMLElement).dataset }));
+    if (
+      Number(camera.residentChunks) > 768 ||
+      (includeTerrain && !(Number(camera.residentChunks) > 0))
+    )
+      throw new Error(
+        `${name}: terrain texture budget was not exercised or exceeded`,
+      );
     const scale =
       (Number(camera.cameraWidth) / 1100) * Number(camera.cameraZoom);
     const x = Number(camera.cameraX),
@@ -130,7 +147,10 @@ try {
     )
       throw new Error(`${name}: lift preview omitted reach or equipment gate`);
     const readability = await checkReadability(page, `${name} lift preview`);
-    await page.screenshot({ path: `${output}/${name}-lift.png`, fullPage: true });
+    await page.screenshot({
+      path: `${output}/${name}-lift.png`,
+      fullPage: true,
+    });
     observations.push({
       name,
       passages: passages.length,
@@ -144,7 +164,12 @@ try {
   await Bun.write(
     `${output}/report.json`,
     JSON.stringify(
-      { browserOnly: true, simulationAdvanced: false, observations },
+      {
+        browserOnly: true,
+        simulationAdvanced: false,
+        includeTerrain,
+        observations,
+      },
       null,
       2,
     ),

@@ -57,3 +57,9 @@ Lift reach now comes from validated pacing content and one shared Rust calculati
 A separate benchmark recovery fix bounds unrelated depth progress using public mineral tiers, while honouring revealed deeper required targets. This prevents a strategy from treating a 7 km detour as continued progress toward missing aluminium feed. Fresh 30-seed candidate validation remains pending.
 
 Candidate regression: 111 core, 13 native and 17 campaign tests pass; 30 Bun tests and frontend build pass. Thirty guided and thirty adverse openings pass, as does the three-profile early median assessment. The lift-400 deep offline replay exactly matches fixed steps (60,300 cells, 7,533 credits); 98.8 seconds catch-up versus 95.1 seconds stepped, measured under campaign load. ARM64 APK rebuilt, v2/v3 signatures and 16 KB ZIP alignment verified. Fresh 30-seed run began on 7c1c0ca; full campaign acceptance remains pending.
+
+## Snapshot metadata and deep browser terrain verification
+
+Snapshots now strip persistence-only deposit identities, which encode private descriptor centres. Whole-vein save state remains intact; the existing native privacy regression verifies both boundaries. ARM64 APK rebuilt on a2354e3. The tracked Bun ELF guard passes the packaged native library and rejects a 4 KB-aligned negative fixture; signatures and 16 KB ZIP alignment also pass.
+
+The deep browser check can now include real revealed terrain with --terrain. Desktop and portrait retain all 4,856 passage endpoints in frame while holding the 768-texture cap. Short frame samples were 58/30 FPS respectively, with lift-preview readability checks passing. This is static browser rendering evidence, not native endurance or Android device validation.
