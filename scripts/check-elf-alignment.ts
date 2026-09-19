@@ -1,4 +1,5 @@
 /** Validate the ARM64 library before packaging; executed with Windows Bun. */
+export {};
 const path = Bun.argv[2];
 if (!path)
   throw new Error("Usage: bun.exe scripts/check-elf-alignment.ts LIBRARY.so");
