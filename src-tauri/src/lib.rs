@@ -43,7 +43,7 @@ struct Snapshot {
     requires_reset: bool,
     workings_offset: usize,
     shipments: Vec<mine_core::transport::VisualCargo>,
-    work_route: Vec<[u32; 2]>,
+    work_route: Vec<[i64; 2]>,
     raw_stock_capacity: u64,
     research_invested: u64,
     upgrade_previews: std::collections::BTreeMap<String, mine_core::UpgradePreview>,
@@ -107,9 +107,9 @@ impl From<Game> for Snapshot {
 struct Stream {
     passages: usize,
     identity: Option<(String, u32, u64)>,
-    chunks: std::collections::BTreeMap<u32, Vec<u8>>,
-    visible: std::collections::BTreeMap<u32, Vec<u8>>,
-    revealed: std::collections::BTreeMap<u32, Vec<u8>>,
+    chunks: std::collections::BTreeMap<i64, Vec<u8>>,
+    visible: std::collections::BTreeMap<i64, Vec<u8>>,
+    revealed: std::collections::BTreeMap<i64, Vec<u8>>,
 }
 impl Stream {
     fn update(&mut self, g: &Game) -> Update {

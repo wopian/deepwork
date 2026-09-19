@@ -102,15 +102,15 @@ pub fn encode(game: &Game) -> Result<String, String> {
 fn decode_chunks(
     value: &serde_json::Value,
     length: usize,
-) -> Result<std::collections::BTreeMap<u32, Vec<u8>>, String> {
+) -> Result<std::collections::BTreeMap<i64, Vec<u8>>, String> {
     let map = value.as_object().ok_or("Invalid compact terrain map")?;
     if map.len() > 16384 {
         return Err("Terrain chunk budget exceeded".into());
     }
     map.iter()
         .map(|(key, value)| {
-            let id = key.parse::<u32>().map_err(|_| "Invalid terrain key")?;
-            if id >= mine_core::geometry::MAX_ROWS / 64 * mine_core::geometry::CHUNKS_ACROSS {
+            let id = key.parse::<i64>().map_err(|_| "Invalid terrain key")?;
+            if !mine_core::geometry::valid_chunk(id) {
                 return Err("Invalid terrain key".into());
             }
             let runs = value.as_array().ok_or("Invalid terrain runs")?;
@@ -225,7 +225,7 @@ mod tests {
         let mut game = Game::default();
         for y in 0..128 {
             game.terrain.excavate(256, y);
-            game.heights[256] = y + 1;
+            game.heights.insert((256) as i64, y + 1);
         }
         game.excavated = 128;
         game.terrain.reveal(

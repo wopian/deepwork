@@ -114,7 +114,7 @@ pub struct VisualCargo {
     pub duration: f64,
     pub mode: String,
     pub depth: u32,
-    pub path: Vec<[u32; 2]>,
+    pub path: Vec<[i64; 2]>,
     pub legs: Vec<Leg>,
 }
 impl Default for Network {
@@ -293,7 +293,7 @@ impl Network {
                 depth: b
                     .legs
                     .first()
-                    .map(|l| crate::geometry::depth(l.from[1].max(0) as u32))
+                    .map(|l| crate::geometry::depth(l.from[1].max(0) as i64))
                     .unwrap_or(0),
                 path: vec![],
                 legs: b.legs.clone(),

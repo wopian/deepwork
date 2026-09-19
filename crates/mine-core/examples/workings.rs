@@ -47,15 +47,18 @@ fn main() {
     // Valid benched pit and ramp, bypass only the already-tested surface phase.
     g.heights = (0..WIDTH)
         .map(|x| {
-            if x < 16 {
-                0
-            } else {
-                (x - 15).min(PIT_ROWS).min(((WIDTH - 17 - x) / 24 + 1) * 24)
-            }
+            (
+                x,
+                if x < 16 {
+                    0
+                } else {
+                    (x - 15).min(PIT_ROWS).min(((WIDTH - 17 - x) / 24 + 1) * 24)
+                },
+            )
         })
         .collect();
-    g.terrain = Terrain::from_columns(&g.heights);
-    g.excavated = g.heights.iter().map(|v| *v as u64).sum();
+    g.terrain = Terrain::from_heights(&g.heights);
+    g.excavated = g.heights.values().map(|v| *v as u64).sum();
     g.disposed_mass = g.excavated * 1000;
     let cat = materials();
     for second in 0..seconds {

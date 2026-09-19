@@ -1,6 +1,6 @@
 //! Knowledge-limited underground planning. Coordinates are fine terrain cells.
 use crate::{
-    geometry::{MAX_ROWS, PIT_ROWS, WIDTH},
+    geometry::{cell_key, cell_point, valid_cell, MAX_ROWS, MAX_X, PIT_ROWS, WIDTH},
     terrain::Terrain,
 };
 use serde::{Deserialize, Serialize};
@@ -8,17 +8,17 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 #[derive(Deserialize)]
 pub struct Mining {
-    pub signal_radius: u32,
-    pub upgraded_signal_radius: u32,
-    pub sample_radius: u32,
-    pub signal_tile: u32,
-    pub section_length: u32,
-    pub clearance: u32,
-    pub chamber_height: u32,
-    pub pillar_width: u32,
-    pub search_budget: u32,
-    pub search_limit: u32,
-    pub search_radius: u32,
+    pub signal_radius: i64,
+    pub upgraded_signal_radius: i64,
+    pub sample_radius: i64,
+    pub signal_tile: i64,
+    pub section_length: i64,
+    pub clearance: i64,
+    pub chamber_height: i64,
+    pub pillar_width: i64,
+    pub search_budget: i64,
+    pub search_limit: i64,
+    pub search_radius: i64,
     pub lift_work: u64,
     pub passage_work: u64,
     pub support_work: u64,
@@ -55,21 +55,21 @@ pub fn validate_content() -> Result<(), String> {
     }
     Ok(())
 }
-pub type Point = [u32; 2];
-fn key(p: Point) -> u32 {
-    p[1] * WIDTH + p[0]
+pub type Point = [i64; 2];
+fn key(p: Point) -> i64 {
+    cell_key(p[0], p[1])
 }
-fn point(k: u32) -> Point {
-    [k % WIDTH, k / WIDTH]
+fn point(k: i64) -> Point {
+    cell_point(k)
 }
-fn area(p: Point) -> u32 {
-    (p[1] / 4) * (WIDTH / 4) + p[0] / 4
+fn area(p: Point) -> i64 {
+    cell_key(p[0].div_euclid(4), p[1] / 4)
 }
 fn estimate(a: Point, b: Point) -> u64 {
     a[0].abs_diff(b[0]) as u64 * 5 + a[1].abs_diff(b[1]) as u64 * 12
 }
-fn distance(a: Point, b: Point) -> u32 {
-    a[0].abs_diff(b[0]) + a[1].abs_diff(b[1])
+fn distance(a: Point, b: Point) -> i64 {
+    (a[0].abs_diff(b[0]) + a[1].abs_diff(b[1])) as i64
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Passage {
@@ -83,8 +83,8 @@ pub struct Passage {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Signal {
     pub centre: Point,
-    pub radius: u32,
-    pub confidence: u32,
+    pub radius: i64,
+    pub confidence: i64,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Section {
@@ -98,11 +98,11 @@ pub struct Section {
 pub struct Search {
     pub goal: Point,
     pub origin: Point,
-    pub open: BinaryHeap<Reverse<(u64, u64, u32)>>,
-    pub costs: BTreeMap<u32, u64>,
-    pub previous: BTreeMap<u32, (u32, bool)>,
-    pub sources: BTreeMap<u32, usize>,
-    pub expanded: u32,
+    pub open: BinaryHeap<Reverse<(u64, u64, i64)>>,
+    pub costs: BTreeMap<i64, u64>,
+    pub previous: BTreeMap<i64, (i64, bool)>,
+    pub sources: BTreeMap<i64, usize>,
+    pub expanded: i64,
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Workings {
@@ -118,12 +118,12 @@ pub struct Workings {
     pub target_cells: Vec<Point>,
     pub passages: Vec<Passage>,
     #[serde(default)]
-    pub chambers: BTreeMap<usize, u32>,
+    pub chambers: BTreeMap<usize, i64>,
     pub signals: Vec<Signal>,
-    pub surveyed: BTreeSet<u32>,
-    pub exhausted: BTreeSet<u32>,
+    pub surveyed: BTreeSet<i64>,
+    pub exhausted: BTreeSet<i64>,
     #[serde(default)]
-    pub deferred: BTreeSet<u32>,
+    pub deferred: BTreeSet<i64>,
     #[serde(default)]
     pub deferred_at: (u64, usize),
     pub section: Option<Section>,
@@ -132,18 +132,18 @@ pub struct Workings {
     pub revision: u64,
     pub status: String,
     pub survey_work: u64,
-    pub blocked_at: Option<(u64, u64, u32)>,
+    pub blocked_at: Option<(u64, u64, i64)>,
     #[serde(skip)]
-    floor_index: BTreeMap<u32, BTreeSet<u32>>,
+    floor_index: BTreeMap<i64, BTreeSet<i64>>,
     #[serde(skip)]
-    node_index: BTreeMap<u32, usize>,
+    node_index: BTreeMap<i64, usize>,
     #[serde(skip)]
     indexed: usize,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VeinSurvey {
     pub anchor: Point,
-    pub stage: u32,
+    pub stage: i64,
 }
 impl Workings {
     pub fn prepare_deposit_order(&mut self, seed: u64, profile: usize, cat: &[crate::Material]) {
@@ -163,7 +163,7 @@ impl Workings {
         seed: u64,
         profile: usize,
         cat: &[crate::Material],
-        accuracy: u32,
+        accuracy: i64,
     ) -> Vec<usize> {
         let stage = accuracy.min(2);
         if stage == 0 || self.passages.is_empty() {
@@ -245,8 +245,12 @@ impl Workings {
         };
         let mut found = terrain.reveal(seed, profile, at[0], at[1], settings().sample_radius, cat);
         let mut measured = false;
-        for by in (at[1].saturating_sub(radius) / 32)..=((at[1] + radius).min(MAX_ROWS - 1) / 32) {
-            for bx in (at[0].saturating_sub(radius) / 32)..=((at[0] + radius).min(WIDTH - 1) / 32) {
+        for by in
+            (at[1].saturating_sub(radius).max(0) / 32)..=((at[1] + radius).min(MAX_ROWS - 1) / 32)
+        {
+            for bx in
+                (at[0].saturating_sub(radius).div_euclid(32))..=((at[0] + radius).div_euclid(32))
+            {
                 let centre = [bx * 32 + 16, by * 32 + 16];
                 if centre[1] < PIT_ROWS
                     || distance(at, centre) > radius
@@ -296,7 +300,7 @@ impl Workings {
         found.dedup();
         found
     }
-    pub fn next_cell(&self, terrain: &Terrain) -> Option<u32> {
+    pub fn next_cell(&self, terrain: &Terrain) -> Option<i64> {
         self.section
             .as_ref()?
             .cells
@@ -365,8 +369,8 @@ impl Workings {
         } else {
             settings().signal_radius
         };
-        for by in at[1].saturating_sub(r) / 32..=(at[1] + r).min(MAX_ROWS - 1) / 32 {
-            for bx in at[0].saturating_sub(r) / 32..=(at[0] + r).min(WIDTH - 1) / 32 {
+        for by in at[1].saturating_sub(r).max(0) / 32..=(at[1] + r).min(MAX_ROWS - 1) / 32 {
+            for bx in at[0].saturating_sub(r).div_euclid(32)..=(at[0] + r).div_euclid(32) {
                 let centre = [bx * 32 + 16, by * 32 + 16];
                 if centre[1] >= PIT_ROWS
                     && distance(at, centre) <= r
@@ -377,9 +381,9 @@ impl Workings {
             }
         }
         let r = settings().sample_radius;
-        (at[0].saturating_sub(r)..=(at[0] + r).min(WIDTH - 1)).any(|x| {
-            (at[1].saturating_sub(r)..=(at[1] + r).min(MAX_ROWS - 1)).any(|y| {
-                x.abs_diff(at[0]).pow(2) + y.abs_diff(at[1]).pow(2) <= r * r
+        (at[0].saturating_sub(r)..=(at[0] + r)).any(|x| {
+            (at[1].saturating_sub(r).max(0)..=(at[1] + r).min(MAX_ROWS - 1)).any(|y| {
+                x.abs_diff(at[0]).pow(2) + y.abs_diff(at[1]).pow(2) <= (r * r) as u64
                     && !terrain.is_revealed(x, y)
             })
         })
@@ -390,9 +394,9 @@ impl Workings {
         terrain: &Terrain,
         priorities: &[usize],
         policy: &str,
-        depth_limit: u32,
-        engineers: u32,
-        supports: u32,
+        depth_limit: i64,
+        engineers: i64,
+        supports: i64,
     ) {
         self.initialise();
         self.index_passages();
@@ -461,12 +465,12 @@ impl Workings {
                     // access development. The derived spatial index bounds this lookup.
                     self.node_index
                         .range(
-                            key([0, p[1].saturating_sub(256)])
-                                ..=key([WIDTH - 1, p[1].saturating_add(256)]),
+                            key([-MAX_X, p[1].saturating_sub(256).max(0)])
+                                ..=key([MAX_X - 1, p[1].saturating_add(256)]),
                         )
                         .map(|(_, &i)| distance(self.passages[i].feet, p))
                         .min()
-                        .unwrap_or(u32::MAX)
+                        .unwrap_or(i64::MAX)
                 } else {
                     self.passages
                         .iter()
@@ -474,7 +478,7 @@ impl Workings {
                         .take(128)
                         .map(|n| distance(n.feet, p))
                         .min()
-                        .unwrap_or(u32::MAX)
+                        .unwrap_or(i64::MAX)
                 }
             };
             let mut candidates: Vec<(i64, Point)> = vec![];
@@ -573,9 +577,9 @@ impl Workings {
                     let mut cells = vec![];
                     for x in node.feet[0].min(goal[0])..=node.feet[0].max(goal[0]) {
                         let roof = if x == goal[0] {
-                            goal[1].min(node.feet[1].saturating_sub(7))
+                            goal[1].min(node.feet[1].saturating_sub(7).max(0))
                         } else {
-                            node.feet[1].saturating_sub(7)
+                            node.feet[1].saturating_sub(7).max(0)
                         };
                         for y in roof.max(PIT_ROWS)..=node.feet[1] {
                             cells.push([x, y]);
@@ -583,7 +587,7 @@ impl Workings {
                     }
                     // Batch nearby samples into one bounded work area and one support task.
                     let mut roofs = BTreeMap::new();
-                    for x in node.feet[0].saturating_sub(8)..=(node.feet[0] + 8).min(WIDTH - 1) {
+                    for x in node.feet[0].saturating_sub(8)..=(node.feet[0] + 8) {
                         if let Some(y) = (node.feet[1].saturating_sub(15).max(PIT_ROWS)
                             ..=node.feet[1])
                             .find(|&y| {
@@ -591,7 +595,7 @@ impl Workings {
                                     && !terrain.contains(x, y)
                             })
                         {
-                            roofs.insert(x, y.min(node.feet[1].saturating_sub(7)));
+                            roofs.insert(x, y.min(node.feet[1].saturating_sub(7).max(0)));
                         }
                     }
                     let left = roofs
@@ -611,7 +615,7 @@ impl Workings {
                         let roof = roofs
                             .get(&x)
                             .copied()
-                            .unwrap_or(node.feet[1].saturating_sub(7));
+                            .unwrap_or(node.feet[1].saturating_sub(7).max(0));
                         for y in roof.max(PIT_ROWS)..=node.feet[1] {
                             area.push([x, y]);
                         }
@@ -722,15 +726,15 @@ impl Workings {
                 }
                 let nx = p[0] as i32 + dx;
                 let ny = p[1] as i32 + dy;
-                if nx < 8
-                    || nx >= WIDTH as i32 - 8
+                if nx < -MAX_X as i32 + 8
+                    || nx >= MAX_X as i32 - 8
                     || ny < PIT_ROWS as i32 - 1
                     || ny >= depth_limit as i32
                     || ny >= MAX_ROWS as i32 - 8
                 {
                     continue;
                 }
-                let q = [nx as u32, ny as u32];
+                let q = [nx as i64, ny as i64];
                 if distance(q, search.origin) > settings().search_radius {
                     continue;
                 }
@@ -824,11 +828,9 @@ impl Workings {
             .is_some_and(|id| id.len() > 128)
             || self.veins.len() > 25000
             || self.veins.iter().any(|(id, v)| {
-                id.len() > 128 || v.anchor[0] >= WIDTH || v.anchor[1] >= MAX_ROWS || v.stage > 2
+                id.len() > 128 || !valid_cell(v.anchor[0], v.anchor[1]) || v.stage > 2
             })
-            || self
-                .target
-                .is_some_and(|p| p[0] >= WIDTH || p[1] >= MAX_ROWS)
+            || self.target.is_some_and(|p| !valid_cell(p[0], p[1]))
         {
             return false;
         }
@@ -843,27 +845,23 @@ impl Workings {
             && self
                 .deferred
                 .iter()
-                .all(|k| *k < MAX_ROWS / 4 * (WIDTH / 4))
+                .all(|k| valid_cell(cell_point(*k)[0] * 4, cell_point(*k)[1] * 4))
             && self.surveyed.len() <= 1_000_000
             && self.status.len() <= 128
             && self.signals.iter().all(|s| {
-                s.centre[0] < WIDTH
-                    && s.centre[1] < MAX_ROWS
+                valid_cell(s.centre[0], s.centre[1])
                     && s.radius == 23
                     && (1..=2).contains(&s.confidence)
             })
             && (self.passages.is_empty() || self.active < self.passages.len())
             && self.passages.iter().enumerate().all(|(i, n)| {
-                n.feet[0] < WIDTH
-                    && n.feet[1] < MAX_ROWS
-                    && (i == 0 && n.parent == 0 || n.parent < i)
+                valid_cell(n.feet[0], n.feet[1]) && (i == 0 && n.parent == 0 || n.parent < i)
             })
             && self.section.as_ref().is_none_or(|s| {
                 s.from < self.passages.len()
                     && s.cells.len() <= 2048
-                    && s.cells.iter().all(|p| p[0] < WIDTH && p[1] < MAX_ROWS)
-                    && s.to[0] < WIDTH
-                    && s.to[1] < MAX_ROWS
+                    && s.cells.iter().all(|p| valid_cell(p[0], p[1]))
+                    && valid_cell(s.to[0], s.to[1])
             })
             && self.search.as_ref().is_none_or(|s| {
                 s.costs.len() <= 32768
@@ -874,8 +872,7 @@ impl Workings {
                             && key(self.passages[*i].feet) == *k
                             && !s.previous.contains_key(k)
                     })
-                    && s.goal[0] < WIDTH
-                    && s.goal[1] < MAX_ROWS
+                    && valid_cell(s.goal[0], s.goal[1])
                     && s.previous.iter().all(|(k, (prev, _))| {
                         s.costs
                             .get(prev)
@@ -889,23 +886,23 @@ impl Workings {
 /// or repeating chunk/floor lookups for every fine pixel during path search.
 fn cut_cost(
     terrain: &Terrain,
-    floors: &BTreeMap<u32, BTreeSet<u32>>,
+    floors: &BTreeMap<i64, BTreeSet<i64>>,
     a: Point,
     b: Point,
     lift: bool,
 ) -> Option<u64> {
     let (left, right) = if lift {
-        (a[0].saturating_sub(3), (a[0] + 3).min(WIDTH - 1))
+        (a[0].saturating_sub(3), (a[0] + 3))
     } else {
         (a[0].min(b[0]), a[0].max(b[0]))
     };
     let mut solid = 0;
     for x in left..=right {
         let (first, last) = if lift {
-            (a[1].min(b[1]).saturating_sub(7), a[1].max(b[1]))
+            (a[1].min(b[1]).saturating_sub(7).max(0), a[1].max(b[1]))
         } else {
             let feet = interpolate(a, b, x);
-            (feet.saturating_sub(7), feet)
+            (feet.saturating_sub(7).max(0), feet)
         };
         if !lift
             && floors.get(&x).is_some_and(|ys| {
@@ -919,33 +916,33 @@ fn cut_cost(
     }
     Some(solid)
 }
-fn protected(floors: &BTreeMap<u32, BTreeSet<u32>>, p: Point, except: &[Point]) -> bool {
+fn protected(floors: &BTreeMap<i64, BTreeSet<i64>>, p: Point, except: &[Point]) -> bool {
     floors.get(&p[0]).is_some_and(|ys| {
         ys.range(p[1].saturating_sub(settings().pillar_width)..p[1])
             .any(|&y| !except.contains(&[p[0], y]))
     })
 }
-fn interpolate(a: Point, b: Point, x: u32) -> u32 {
+fn interpolate(a: Point, b: Point, x: i64) -> i64 {
     if a[0] == b[0] {
         return b[1];
     }
     let (left, right) = if a[0] < b[0] { (a, b) } else { (b, a) };
     (left[1] as i64
         + ((right[1] as i64 - left[1] as i64) * (x as i64 - left[0] as i64))
-            .div_euclid((right[0] - left[0]) as i64)) as u32
+            .div_euclid((right[0] - left[0]) as i64)) as i64
 }
 pub fn cut_cells(a: Point, b: Point, lift: bool) -> Vec<Point> {
     let mut cells = vec![];
     if lift {
-        for y in a[1].min(b[1]).saturating_sub(7)..=a[1].max(b[1]) {
-            for x in a[0].saturating_sub(3)..=(a[0] + 3).min(WIDTH - 1) {
+        for y in a[1].min(b[1]).saturating_sub(7).max(0)..=a[1].max(b[1]) {
+            for x in a[0].saturating_sub(3)..=(a[0] + 3) {
                 cells.push([x, y]);
             }
         }
     } else {
         for x in a[0].min(b[0])..=a[0].max(b[0]) {
             let feet = interpolate(a, b, x);
-            for y in feet.saturating_sub(7)..=feet {
+            for y in feet.saturating_sub(7).max(0)..=feet {
                 cells.push([x, y]);
             }
         }
@@ -955,7 +952,7 @@ pub fn cut_cells(a: Point, b: Point, lift: bool) -> Vec<Point> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    const PIT_ROWS: u32 = 192;
+    const PIT_ROWS: i64 = 192;
     #[test]
     fn deposit_order_survives_selected_cell_and_save_without_leaking_geometry() {
         let cat = crate::materials();
@@ -1064,7 +1061,7 @@ mod tests {
                             (0, 16, true),
                             (0, -16, true),
                         ] {
-                            let b = [(x as i32 + dx) as u32, (y as i32 + dy) as u32];
+                            let b = [(x as i32 + dx) as i64, (y as i32 + dy) as i64];
                             let cells = cut_cells(a, b, lift);
                             let unsafe_cut = cells
                                 .iter()
@@ -1201,7 +1198,7 @@ mod tests {
         w.advance(&t, &[3], "vein", 1200, 1, 0);
         assert_eq!(w.section.as_ref().unwrap().to, [256, 223]);
         while let Some(k) = w.next_cell(&t) {
-            assert!(t.excavate(k % WIDTH, k / WIDTH));
+            assert!(t.excavate(point(k)[0], point(k)[1]));
         }
         w.advance(&t, &[3], "vein", 1200, 100, 10);
         assert_eq!(w.passages.len(), 2);
@@ -1294,13 +1291,13 @@ mod tests {
             radius: 23,
             confidence: 2,
         });
-        for _ in 0..100 {
-            w.advance(&terrain, &[], "vein", 1200, 1, 0);
-            if w.deferred.contains(&area([4, 192])) {
-                break;
-            }
-        }
-        assert!(w.deferred.contains(&area([4, 192])));
+        // Deferred work persists; unlike the old bounded world, x=4 is now
+        // reachable. Seed the exhausted search state to test retry ownership.
+        w.advance(&terrain, &[], "vein", 1200, 1, 0);
+        w.search = None;
+        w.section = None;
+        w.deferred.insert(area([4, 192]));
+        w.deferred_at = (terrain.revision, w.passages.len());
         assert!(!w.exhausted.contains(&key([4, 192])));
         let mut restored: Workings =
             serde_json::from_str(&serde_json::to_string(&w).unwrap()).unwrap();
@@ -1419,7 +1416,7 @@ mod development_tests {
                 column: false,
             });
         }
-        a.heights[WIDTH as usize / 2] = 1200;
+        a.heights.insert((WIDTH as usize / 2) as i64, 1200);
         a.workings.active = 75;
         a.workings
             .survey(&mut a.terrain, a.seed, a.profile, &cat, true, false);

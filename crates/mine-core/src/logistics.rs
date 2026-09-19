@@ -85,14 +85,14 @@ pub struct Leg {
 }
 /// Existing systems serve appropriate segments rather than being replaced globally.
 pub fn route(
-    path: &[[u32; 2]],
+    path: &[[i64; 2]],
     levels: &BTreeMap<String, u32>,
     terrain_factor: f64,
 ) -> (Vec<Leg>, u32) {
     route_impl(path, levels, terrain_factor, None)
 }
 pub fn route_registered(
-    path: &[[u32; 2]],
+    path: &[[i64; 2]],
     levels: &BTreeMap<String, u32>,
     terrain_factor: f64,
     workings: &crate::workings::Workings,
@@ -100,7 +100,7 @@ pub fn route_registered(
     route_impl(path, levels, terrain_factor, Some(workings))
 }
 fn route_impl(
-    path: &[[u32; 2]],
+    path: &[[i64; 2]],
     levels: &BTreeMap<String, u32>,
     terrain_factor: f64,
     workings: Option<&crate::workings::Workings>,
@@ -123,8 +123,8 @@ fn route_impl(
                 from[1] >= 0
                     && to[1] >= 0
                     && w.is_lift_edge(
-                        [from[0] as u32, from[1] as u32],
-                        [to[0] as u32, to[1] as u32],
+                        [from[0] as i64, from[1] as i64],
+                        [to[0] as i64, to[1] as i64],
                     )
             })
             .unwrap_or(vertical);
@@ -170,7 +170,7 @@ pub struct Shipment {
     pub depth: u32,
     pub mode: String,
     #[serde(default)]
-    pub path: Vec<[u32; 2]>,
+    pub path: Vec<[i64; 2]>,
     #[serde(default)]
     pub legs: Vec<Leg>,
 }

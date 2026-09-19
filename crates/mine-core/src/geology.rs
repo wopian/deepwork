@@ -95,7 +95,7 @@ fn reserve_descriptor(seed: u64, index: usize, reserve: &Reserve) -> Deposit {
     let key = hash(seed ^ (index as u64 + 1).wrapping_mul(0xa0761d6478bd642f));
     Deposit {
         x: 192. + (key % 129) as f64,
-        y: (reserve.depth_metres * crate::geometry::CELLS_PER_METRE + 4) as f64
+        y: (reserve.depth_metres as i64 * crate::geometry::CELLS_PER_METRE + 4) as f64
             + ((key >> 32) % 33) as f64
             - 16.,
         length: reserve.length,
@@ -109,13 +109,13 @@ fn reserve_descriptor(seed: u64, index: usize, reserve: &Reserve) -> Deposit {
         seed: key & !8,
     }
 }
-pub fn sample(seed: u64, profile: usize, x: u32, y: u32, catalogue: &[Material]) -> usize {
+pub fn sample(seed: u64, profile: usize, x: i64, y: i64, catalogue: &[Material]) -> usize {
     locate(seed, profile, x, y, catalogue).0
 }
 pub fn deposit_id(
     seed: u64,
     profile: usize,
-    p: [u32; 2],
+    p: [i64; 2],
     catalogue: &[Material],
 ) -> Option<String> {
     locate(seed, profile, p[0], p[1], catalogue)
@@ -137,21 +137,19 @@ impl Deposit {
 pub fn deposit_cells(
     seed: u64,
     profile: usize,
-    p: [u32; 2],
+    p: [i64; 2],
     catalogue: &[Material],
-) -> Vec<[u32; 2]> {
+) -> Vec<[i64; 2]> {
     let Some(deposit) = locate(seed, profile, p[0], p[1], catalogue).1 else {
         return vec![];
     };
     let extent = deposit.length + deposit.width * 3. + 64.;
     let identity = deposit.identity();
     let mut cells = Vec::new();
-    for y in ((deposit.y - extent).max(0.) as u32)
-        ..=((deposit.y + extent) as u32).min(crate::geometry::MAX_ROWS - 1)
+    for y in ((deposit.y - extent).max(0.) as i64)
+        ..=((deposit.y + extent) as i64).min(crate::geometry::MAX_ROWS - 1)
     {
-        for x in ((deposit.x - extent).max(0.) as u32)
-            ..=((deposit.x + extent) as u32).min(crate::geometry::WIDTH - 1)
-        {
+        for x in ((deposit.x - extent) as i64)..=((deposit.x + extent) as i64) {
             if deposit.contains(x as f64, y as f64)
                 && deposit_id(seed, profile, [x, y], catalogue).as_deref()
                     == Some(identity.as_str())
@@ -165,8 +163,8 @@ pub fn deposit_cells(
 fn locate(
     seed: u64,
     profile: usize,
-    x: u32,
-    y: u32,
+    x: i64,
+    y: i64,
     catalogue: &[Material],
 ) -> (usize, Option<Deposit>) {
     // Irregular, reachable starter reserves; no repeating vertical stripes.
@@ -190,7 +188,7 @@ fn locate(
     // Finite, irregular lenses intersect commissioned drives before later gates.
     // Their world-space descriptors cross chunks; no recurring mineral stripes.
     for (index, reserve) in reserves().iter().enumerate() {
-        if y.abs_diff(reserve.depth_metres * crate::geometry::CELLS_PER_METRE + 4) > 192 {
+        if y.abs_diff(reserve.depth_metres as i64 * crate::geometry::CELLS_PER_METRE + 4) > 192 {
             continue;
         }
         let deposit = reserve_descriptor(seed, index, reserve);
@@ -198,8 +196,8 @@ fn locate(
             return (reserve.feed, Some(deposit));
         }
     }
-    let tx = x as i64 / 256;
-    let ty = y as i64 / 256;
+    let tx = x.div_euclid(256);
+    let ty = y.div_euclid(256);
     // Maximum descriptor reach fits within neighbouring macro tiles, even diagonal branches.
     for gy in (ty - 2)..=(ty + 2) {
         for gx in (tx - 2)..=(tx + 2) {
@@ -275,7 +273,7 @@ mod tests {
         let cat = crate::materials();
         for seed in 42..72 {
             for (index, reserve) in reserves().iter().enumerate() {
-                let top = (reserve_descriptor(seed, index, reserve).y as u32).saturating_sub(96);
+                let top = (reserve_descriptor(seed, index, reserve).y as i64).saturating_sub(96);
                 let mined = (32..crate::geometry::WIDTH - 32)
                     .step_by(4)
                     .flat_map(|x| (top..top + 192).step_by(4).map(move |y| (x, y)))

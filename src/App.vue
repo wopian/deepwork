@@ -107,7 +107,7 @@ async function retirementCancel() {
 }
 const dismissedOffline = ref("");
 const depth = computed(() =>
-  Math.floor(Math.max(...(state.value?.heights ?? [0])) / CELLS_PER_METRE),
+  Math.floor(Math.max(0, ...Object.values(state.value?.heights ?? {})) / CELLS_PER_METRE),
 );
 const filtered = computed(() =>
   materials.filter((m) =>

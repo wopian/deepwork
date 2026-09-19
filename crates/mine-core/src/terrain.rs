@@ -1,24 +1,26 @@
 //! Sparse excavation masks. Each chunk covers 64 × 64 cells; solid geology is seeded.
-use crate::geometry::{bit_index, chunk_id, chunk_origin, CHUNKS_ACROSS};
+use crate::geometry::{
+    bit_index, cell_key, cell_point, chunk_id, chunk_origin, valid_cell, valid_chunk,
+};
 pub use crate::geometry::{MAX_ROWS, WIDTH};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Terrain {
     /// One bit per excavated cell, encoded as bytes to stay exact across JSON/JS.
-    pub chunks: BTreeMap<u32, Vec<u8>>,
+    pub chunks: BTreeMap<i64, Vec<u8>>,
     pub revision: u64,
     #[serde(default)]
-    pub revealed: BTreeMap<u32, Vec<u8>>,
+    pub revealed: BTreeMap<i64, Vec<u8>>,
     /// 255 means unknown. This is the only mineral data sent to the renderer.
     #[serde(default)]
-    pub visible: BTreeMap<u32, Vec<u8>>,
+    pub visible: BTreeMap<i64, Vec<u8>>,
     #[serde(skip)]
-    pub frontier: BTreeSet<u32>,
+    pub frontier: BTreeSet<i64>,
     #[serde(skip)]
-    pub access_frontier: BTreeSet<u32>,
+    pub access_frontier: BTreeSet<i64>,
     #[serde(skip)]
-    pub ore_frontiers: BTreeMap<usize, BTreeSet<u32>>,
+    pub ore_frontiers: BTreeMap<usize, BTreeSet<i64>>,
 }
 impl Default for Terrain {
     fn default() -> Self {
@@ -27,29 +29,38 @@ impl Default for Terrain {
             revision: 0,
             revealed: BTreeMap::new(),
             visible: BTreeMap::new(),
-            frontier: (0..WIDTH).collect(),
-            access_frontier: (0..WIDTH).filter(|&key| Self::access_cell(key)).collect(),
+            frontier: (0..WIDTH).map(|x| cell_key(x, 0)).collect(),
+            access_frontier: (0..WIDTH)
+                .map(|x| cell_key(x, 0))
+                .filter(|&key| Self::access_cell(key))
+                .collect(),
             ore_frontiers: BTreeMap::new(),
         }
     }
 }
 impl Terrain {
-    fn access_cell(key: u32) -> bool {
-        let (x, y) = (key % WIDTH, key / WIDTH);
+    fn access_cell(key: i64) -> bool {
+        let (x, y) = {
+            let [x, y] = cell_point(key);
+            (x, y)
+        };
         if y < crate::geometry::PIT_ROWS {
             x >= 16 + y && x < WIDTH - (16 + (y / 24) * 24)
         } else {
             false
         }
     }
-    fn index_frontier(&mut self, key: u32) {
+    fn index_frontier(&mut self, key: i64) {
         if !self.frontier.contains(&key) {
             return;
         }
         if Self::access_cell(key) {
             self.access_frontier.insert(key);
         } else {
-            let (x, y) = (key % WIDTH, key / WIDTH);
+            let (x, y) = {
+                let [x, y] = cell_point(key);
+                (x, y)
+            };
             if y >= crate::geometry::PIT_ROWS {
                 if let Some(id) = self.known_material(x, y) {
                     self.ore_frontiers.entry(id).or_default().insert(key);
@@ -65,8 +76,8 @@ impl Terrain {
         }
     }
     /// Count an inclusive vertical cut with one map lookup per intersected chunk.
-    pub(crate) fn excavated_in_column(&self, x: u32, first: u32, last: u32) -> u32 {
-        if x >= WIDTH || first > last || first >= MAX_ROWS {
+    pub(crate) fn excavated_in_column(&self, x: i64, first: i64, last: i64) -> i64 {
+        if !valid_cell(x, first) || first > last {
             return 0;
         }
         let last = last.min(MAX_ROWS - 1);
@@ -77,15 +88,15 @@ impl Terrain {
             if let Some(bytes) = self.chunks.get(&chunk_id(x, y)) {
                 for row in y..=end {
                     let bit = bit_index(x, row);
-                    count += u32::from(bytes[bit / 8] & (1 << (bit % 8)) != 0);
+                    count += i64::from(bytes[bit / 8] & (1 << (bit % 8)) != 0);
                 }
             }
             y = end + 1;
         }
         count
     }
-    pub fn contains(&self, x: u32, y: u32) -> bool {
-        if x >= WIDTH || y >= MAX_ROWS {
+    pub fn contains(&self, x: i64, y: i64) -> bool {
+        if !valid_cell(x, y) {
             return false;
         }
         let index = bit_index(x, y);
@@ -94,17 +105,17 @@ impl Terrain {
             .is_some_and(|bytes| bytes[index / 8] & (1 << (index % 8)) != 0)
     }
     /// Check lift clearance with one map lookup per chunk, not per vertical cell.
-    pub fn column_clear(&self, x: u32, first: u32, last: u32) -> bool {
-        if x >= WIDTH || first > last || last >= MAX_ROWS {
+    pub fn column_clear(&self, x: i64, first: i64, last: i64) -> bool {
+        if !valid_cell(x, first) || first > last || last >= MAX_ROWS {
             return false;
         }
-        let byte_x = (x % 64 / 8) as usize;
-        let mask = 1 << (x % 8);
+        let byte_x = (x.rem_euclid(64) / 8) as usize;
+        let mask = 1 << (x.rem_euclid(8));
         for chunk_y in first / 64..=last / 64 {
-            let Some(bytes) = self.chunks.get(&(chunk_y * CHUNKS_ACROSS + x / 64)) else {
+            let Some(bytes) = self.chunks.get(&chunk_id(x, chunk_y * 64)) else {
                 return false;
             };
-            let start = first.saturating_sub(chunk_y * 64);
+            let start = first.saturating_sub(chunk_y * 64).max(0);
             let end = (last - chunk_y * 64).min(63);
             if (start..=end).any(|row| bytes[row as usize * 8 + byte_x] & mask == 0) {
                 return false;
@@ -112,14 +123,14 @@ impl Terrain {
         }
         true
     }
-    pub fn known_material(&self, x: u32, y: u32) -> Option<usize> {
+    pub fn known_material(&self, x: i64, y: i64) -> Option<usize> {
         self.visible
             .get(&chunk_id(x, y))
             .and_then(|pixels| pixels.get(bit_index(x, y)))
             .filter(|&&id| id != 255)
             .map(|&id| id as usize)
     }
-    pub fn is_revealed(&self, x: u32, y: u32) -> bool {
+    pub fn is_revealed(&self, x: i64, y: i64) -> bool {
         let index = bit_index(x, y);
         self.revealed
             .get(&chunk_id(x, y))
@@ -129,15 +140,15 @@ impl Terrain {
         &mut self,
         seed: u64,
         profile: usize,
-        x: u32,
-        y: u32,
-        radius: u32,
+        x: i64,
+        y: i64,
+        radius: i64,
         cat: &[crate::Material],
     ) -> Vec<usize> {
         let mut found = std::collections::BTreeSet::new();
-        for py in y.saturating_sub(radius)..=y.saturating_add(radius).min(MAX_ROWS - 1) {
-            for px in x.saturating_sub(radius)..=x.saturating_add(radius).min(WIDTH - 1) {
-                if px.abs_diff(x).pow(2) + py.abs_diff(y).pow(2) > radius.pow(2)
+        for py in y.saturating_sub(radius).max(0)..=y.saturating_add(radius).min(MAX_ROWS - 1) {
+            for px in x.saturating_sub(radius)..=x.saturating_add(radius) {
+                if px.abs_diff(x).pow(2) + py.abs_diff(y).pow(2) > radius.pow(2) as u64
                     || self.is_revealed(px, py)
                 {
                     continue;
@@ -148,26 +159,27 @@ impl Terrain {
                     1 << (index % 8);
                 let material = crate::geology::sample(seed, profile, px, py, cat);
                 self.visible.entry(id).or_insert_with(|| vec![255; 4096])[index] = material as u8;
-                self.index_frontier(py * WIDTH + px);
+                self.index_frontier(cell_key(px, py));
                 found.insert(material);
                 self.revision += 1;
             }
         }
         found.into_iter().collect()
     }
-    pub fn neighbors(x: u32, y: u32) -> impl Iterator<Item = (u32, u32)> {
+    pub fn neighbors(x: i64, y: i64) -> impl Iterator<Item = (i64, i64)> {
         [
             (x.checked_sub(1), Some(y)),
-            (x.checked_add(1).filter(|v| *v < WIDTH), Some(y)),
-            (Some(x), y.checked_sub(1)),
+            (x.checked_add(1), Some(y)),
+            (Some(x), y.checked_sub(1).filter(|v| *v >= 0)),
             (Some(x), y.checked_add(1).filter(|v| *v < MAX_ROWS)),
         ]
         .into_iter()
         .filter_map(|(x, y)| x.zip(y))
+        .filter(|(x, y)| valid_cell(*x, *y))
     }
-    pub fn excavate(&mut self, x: u32, y: u32) -> bool {
-        let key = y.saturating_mul(WIDTH).saturating_add(x);
-        if x >= WIDTH || y >= MAX_ROWS || !self.frontier.remove(&key) {
+    pub fn excavate(&mut self, x: i64, y: i64) -> bool {
+        let key = cell_key(x, y);
+        if !valid_cell(x, y) || !self.frontier.remove(&key) {
             return false;
         }
         self.access_frontier.remove(&key);
@@ -184,8 +196,8 @@ impl Terrain {
         bytes[index / 8] |= 1 << (index % 8);
         for (nx, ny) in Self::neighbors(x, y) {
             if !self.contains(nx, ny) {
-                self.frontier.insert(ny * WIDTH + nx);
-                self.index_frontier(ny * WIDTH + nx);
+                self.frontier.insert(cell_key(nx, ny));
+                self.index_frontier(cell_key(nx, ny));
             }
         }
         self.revision += 1;
@@ -195,11 +207,14 @@ impl Terrain {
         if self
             .chunks
             .iter()
-            .any(|(id, v)| *id >= (MAX_ROWS + 63) / 64 * CHUNKS_ACROSS || v.len() != 512)
+            .any(|(id, v)| !valid_chunk(*id) || v.len() != 512)
         {
             return Err("Invalid terrain chunk".into());
         }
-        self.frontier = (0..WIDTH).filter(|x| !self.contains(*x, 0)).collect();
+        self.frontier = (0..WIDTH)
+            .filter(|x| !self.contains(*x, 0))
+            .map(|x| cell_key(x, 0))
+            .collect();
         let mut opened = Vec::new();
         for (&chunk, bytes) in &self.chunks {
             for (i, &byte) in bytes.iter().enumerate() {
@@ -207,8 +222,8 @@ impl Terrain {
                     if byte & (1 << bit) != 0 {
                         let index = i * 8 + bit;
                         let (cx, cy) = chunk_origin(chunk);
-                        let x = cx + (index % 64) as u32;
-                        let y = cy + (index / 64) as u32;
+                        let x = cx + (index % 64) as i64;
+                        let y = cy + (index / 64) as i64;
                         if y >= MAX_ROWS {
                             return Err("Terrain exceeds supported depth".into());
                         }
@@ -219,45 +234,54 @@ impl Terrain {
         }
         let mut routes: BTreeMap<_, _> = opened
             .iter()
-            .map(|(x, y)| (y * WIDTH + x, (u32::MAX, y * WIDTH + x)))
+            .map(|(x, y)| (cell_key(*x, *y), (i64::MAX, cell_key(*x, *y))))
             .collect();
         let starts: VecDeque<_> = opened
             .iter()
             .filter(|(_, y)| *y == 0)
-            .map(|(x, _)| *x)
+            .map(|(x, _)| cell_key(*x, 0))
             .collect();
         for key in &starts {
             routes.insert(*key, (0, *key));
         }
         Self::relax_routes(&mut routes, starts);
-        if routes.values().any(|(distance, _)| *distance == u32::MAX) {
+        if routes.values().any(|(distance, _)| *distance == i64::MAX) {
             return Err("Excavation disconnected from surface".into());
         }
         for (x, y) in opened {
             for (nx, ny) in Self::neighbors(x, y) {
                 if !self.contains(nx, ny) {
-                    self.frontier.insert(ny * WIDTH + nx);
-                    self.index_frontier(ny * WIDTH + nx);
+                    self.frontier.insert(cell_key(nx, ny));
+                    self.index_frontier(cell_key(nx, ny));
                 }
             }
         }
         self.rebuild_work_index();
         Ok(())
     }
-    pub fn from_columns(heights: &[u32]) -> Self {
+    pub fn from_columns(heights: &[i64]) -> Self {
+        Self::from_heights(
+            &heights
+                .iter()
+                .enumerate()
+                .map(|(x, h)| (x as i64, *h))
+                .collect(),
+        )
+    }
+    pub fn from_heights(heights: &BTreeMap<i64, i64>) -> Self {
         let mut t = Self::default();
-        for (x, &height) in heights.iter().enumerate() {
+        for (&x, &height) in heights.iter() {
             for y in 0..height {
-                t.excavate(x as u32, y);
+                t.excavate(x as i64, y);
             }
         }
         t
     }
-    fn relax_routes(routes: &mut BTreeMap<u32, (u32, u32)>, mut queue: VecDeque<u32>) {
+    fn relax_routes(routes: &mut BTreeMap<i64, (i64, i64)>, mut queue: VecDeque<i64>) {
         while let Some(key) = queue.pop_front() {
             let distance = routes[&key].0;
-            for (x, y) in Self::neighbors(key % WIDTH, key / WIDTH) {
-                let next = y * WIDTH + x;
+            for (x, y) in Self::neighbors(cell_point(key)[0], cell_point(key)[1]) {
+                let next = cell_key(x, y);
                 if let Some(route) = routes.get_mut(&next) {
                     if route.0 > distance + 1 {
                         *route = (distance + 1, key);
@@ -271,21 +295,21 @@ impl Terrain {
     }
     /// Connectivity diagnostic; gameplay uses the coarse floor/lift portal route.
     /// No per-cell route table is retained during foreground excavation.
-    pub fn surface_route(&self, start: [u32; 2]) -> Vec<[u32; 2]> {
+    pub fn surface_route(&self, start: [i64; 2]) -> Vec<[i64; 2]> {
         if !self.contains(start[0], start[1]) {
             return vec![];
         }
-        let origin = start[1] * WIDTH + start[0];
+        let origin = cell_key(start[0], start[1]);
         let mut parents = BTreeMap::from([(origin, origin)]);
         let mut queue = VecDeque::from([origin]);
         let mut exit = None;
         while let Some(key) = queue.pop_front() {
-            if key < WIDTH {
+            if cell_point(key)[1] == 0 {
                 exit = Some(key);
                 break;
             }
-            for (x, y) in Self::neighbors(key % WIDTH, key / WIDTH) {
-                let next = y * WIDTH + x;
+            for (x, y) in Self::neighbors(cell_point(key)[0], cell_point(key)[1]) {
+                let next = cell_key(x, y);
                 if self.contains(x, y) && !parents.contains_key(&next) {
                     parents.insert(next, key);
                     queue.push_back(next);
@@ -295,10 +319,10 @@ impl Terrain {
         let Some(mut key) = exit else {
             return vec![];
         };
-        let mut path = vec![[key % WIDTH, key / WIDTH]];
+        let mut path = vec![cell_point(key)];
         while key != origin {
             key = parents[&key];
-            path.push([key % WIDTH, key / WIDTH]);
+            path.push(cell_point(key));
         }
         path.reverse();
         let mut turns = vec![start];
@@ -329,6 +353,34 @@ impl Terrain {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn excavation_crosses_both_surface_edges_and_restores_signed_frontiers() {
+        let mut t = Terrain::default();
+        for x in (0..=256).rev() {
+            assert!(t.excavate(x, 0));
+        }
+        for x in (-130..0).rev() {
+            assert!(t.excavate(x, 0));
+        }
+        for x in 257..650 {
+            assert!(t.excavate(x, 0));
+        }
+        for y in 1..90 {
+            assert!(t.excavate(-65, y));
+            assert!(t.excavate(600, y));
+        }
+        let mass = t.count();
+        let frontier = t.frontier.clone();
+        t.reveal(42, 0, -65, 64, 8, &crate::materials());
+        assert!(t.is_revealed(-65, 64));
+        assert!(!t.is_revealed(65, 64));
+        let mut copy: Terrain = serde_json::from_str(&serde_json::to_string(&t).unwrap()).unwrap();
+        copy.rebuild().unwrap();
+        assert_eq!(copy.frontier, frontier);
+        assert_eq!(copy.count(), mass);
+        assert_eq!(copy.surface_route([-65, 89]).last().unwrap()[1], 0);
+        assert!(copy.column_clear(-65, 0, 89));
+    }
     #[test]
     fn new_daylight_connection_shortens_existing_routes() {
         let mut t = Terrain::default();
@@ -396,7 +448,7 @@ mod tests {
         let t = Terrain::from_columns(&heights);
         assert_eq!(t.count(), heights.iter().map(|h| *h as u64).sum::<u64>());
         for (x, h) in heights.iter().enumerate() {
-            assert!(!t.contains(x as u32, *h));
+            assert!(!t.contains(x as i64, *h));
         }
     }
 }
@@ -417,7 +469,7 @@ mod reveal_tests {
             for (index, &material) in pixels.iter().enumerate() {
                 assert_eq!(
                     material != 255,
-                    t.is_revealed(cx + index as u32 % 64, cy + index as u32 / 64)
+                    t.is_revealed(cx + index as i64 % 64, cy + index as i64 / 64)
                 );
             }
         }

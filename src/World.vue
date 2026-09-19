@@ -183,7 +183,7 @@ function draw() {
   rect(terrain, groundLeft, 190, W, (last + 5) * CELL_PIXEL, 0x806044);
   rect(terrain, groundLeft, 188, W, 8, 0x6b8f47);
   rect(terrain, groundLeft, 196, W, 12, 0xd8bc7d);
-  fineTerrain.update(g?.terrain, first, last);
+  fineTerrain.update(g?.terrain, first, last, (-offsetX / scale - 235) / CELL_PIXEL - 64, ((app.screen.width-offsetX) / scale - 235) / CELL_PIXEL + 64);
   // Fixed district slots grow upward, keeping routes and touch camera targets stable.
   const levels = g?.levels ?? {
     conveyor: 10,
@@ -371,7 +371,7 @@ onMounted(async () => {
     } else if (follow) {
       offsetY =
         80 -
-        ((Math.max(...(state.value?.heights ?? [0])) *
+        ((Math.max(0, ...Object.values(state.value?.heights ?? {})) *
           CELL_PIXEL *
           app.screen.width) /
           1100) *

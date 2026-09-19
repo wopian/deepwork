@@ -103,7 +103,7 @@ export interface Game {
       support_work: number;
     } | null;
   };
-  heights: number[];
+  heights: Record<string, number>;
   terrain: {
     chunks: Record<string, number[]>;
     revealed: Record<string, number[]>;

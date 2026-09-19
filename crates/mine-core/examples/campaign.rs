@@ -579,7 +579,7 @@ mod strategy_tests {
     fn construction_shortages_use_known_recipe_feeds_without_reading_geology() {
         let mut g = Game::new(51, 2);
         g.credits = 0;
-        g.heights[0] = 1192;
+        g.heights.insert((0) as i64, 1192);
         for id in ["conveyor", "furnace", "steelworks", "shaft"] {
             g.levels.insert(id.into(), 1);
         }
@@ -596,7 +596,7 @@ mod strategy_tests {
     fn missing_feed_prompts_deeper_survey_until_an_exposed_sample_exists() {
         let mut g = Game::new(51, 2);
         g.credits = 0;
-        g.heights[0] = 800;
+        g.heights.insert((0) as i64, 800);
         for id in ["conveyor", "furnace", "steelworks", "shaft"] {
             g.levels.insert(id.into(), 1);
         }
@@ -631,7 +631,7 @@ mod strategy_tests {
     fn research_retirement_access_temporarily_overrides_extraction_style() {
         let mut g = Game::new(42, 2);
         g.credits = 0;
-        g.heights[0] = 800;
+        g.heights.insert((0) as i64, 800);
         for id in BUILD_ORDER.iter().take_while(|id| **id != "power") {
             g.levels.insert((*id).into(), 1);
         }
@@ -669,7 +669,7 @@ mod strategy_tests {
     #[test]
     fn first_electrolysis_output_precedes_research_retirement() {
         let mut g = Game::new(42, 2);
-        g.heights[0] = 1200;
+        g.heights.insert((0) as i64, 1200);
         g.steel_made = true;
         g.credits = 0;
         g.ranks.insert("excavation".into(), 3);

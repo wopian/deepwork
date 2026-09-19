@@ -1,5 +1,5 @@
 import { Container, Sprite, Texture } from "pixi.js";
-import { CELL_PIXEL, CHUNK, CHUNKS_ACROSS } from "./geometry";
+import { CELL_PIXEL, CHUNK, chunkOrigin } from "./geometry";
 import type { Game } from "./game";
 import { terrainPixels } from "./terrain-pixels";
 /** Only visible chunks get GPU textures. Hidden minerals never enter this class. */
@@ -9,15 +9,18 @@ export class TerrainView {
     number,
     { sprite: Sprite; mask?: number[]; visible?: number[] }
   >();
-  update(terrain: Game["terrain"] | undefined, first: number, last: number) {
+  update(terrain: Game["terrain"] | undefined, first: number, last: number, left: number, right: number) {
     const keep = new Set<number>();
-    for (
-      let cy = Math.floor(first / CHUNK);
-      cy <= Math.floor(last / CHUNK);
-      cy++
-    ) {
-      for (let cx = 0; cx < CHUNKS_ACROSS; cx++) {
-        const id = cy * CHUNKS_ACROSS + cx;
+    // Neutral host ground needs no GPU texture. Allocate only explored viewport
+    // chunks; overview culling has a hard budget even for very large campaigns.
+    const candidates = [...new Set([...Object.keys(terrain?.chunks ?? {}), ...Object.keys(terrain?.visible ?? {})])]
+      .map(Number).map(id => ({id, origin: chunkOrigin(id)}))
+      .filter(({origin:[x,y]}) => x+CHUNK>=left && x<=right && y+CHUNK>=first && y<=last)
+      .sort((a,b) => Math.abs(a.origin[0]-(left+right)/2)+Math.abs(a.origin[1]-(first+last)/2)
+        - Math.abs(b.origin[0]-(left+right)/2)-Math.abs(b.origin[1]-(first+last)/2))
+      .slice(0,768);
+    for (const {id, origin:[x,y]} of candidates) {
+        const cx=x/CHUNK, cy=y/CHUNK;
         keep.add(id);
         const mask = terrain?.chunks[id],
           visible = terrain?.visible[id];
@@ -44,7 +47,6 @@ export class TerrainView {
         sprite.scale.set(CELL_PIXEL);
         this.layer.addChild(sprite);
         this.cache.set(id, { sprite, mask, visible });
-      }
     }
     for (const [id, entry] of this.cache)
       if (!keep.has(id)) {
