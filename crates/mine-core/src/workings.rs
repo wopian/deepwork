@@ -146,6 +146,10 @@ pub struct Workings {
     distance_cache: HashMap<Point, i64>,
     #[serde(skip)]
     distance_cache_at: (usize, bool),
+    #[serde(skip)]
+    candidate_cache: Vec<(i64, Point)>,
+    #[serde(skip)]
+    candidate_stamp: Option<(u64, u64, i64, String, Vec<usize>, Option<Point>, usize)>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VeinSurvey {
@@ -529,133 +533,168 @@ impl Workings {
             let deepest = self.passages.iter().map(|n| n.feet[1]).max().unwrap();
             let access_blocked = depth_limit <= deepest + 17;
             let development = policy == "depth" && !access_blocked;
-            let lookup_all = access_blocked || self.target.is_some();
-            let distance_stamp = (self.passages.len(), lookup_all);
-            if self.distance_cache_at != distance_stamp {
-                self.distance_cache.clear();
-                self.distance_cache_at = distance_stamp;
-            }
-            let mut nearest_distance = |p: Point| {
-                if let Some(&distance) = self.distance_cache.get(&p) {
-                    return distance;
+            let cached = self.candidate_stamp.as_ref().is_some_and(|s| {
+                s.0 == terrain.revision
+                    && s.1 == self.revision
+                    && s.2 == depth_limit
+                    && s.3 == policy
+                    && s.4 == priorities
+                    && s.5 == self.target
+                    && s.6 == self.passages.len()
+            });
+            if !cached {
+                let lookup_all = access_blocked || self.target.is_some();
+                let distance_stamp = (self.passages.len(), lookup_all);
+                if self.distance_cache_at != distance_stamp {
+                    self.distance_cache.clear();
+                    self.distance_cache_at = distance_stamp;
                 }
-                let result = if lookup_all {
-                    // Reuse older surveyed workings when the next equipment gate stops
-                    // access development. The derived spatial index bounds this lookup.
-                    let tx = p[0].div_euclid(64);
-                    let ty = p[1] / 64;
-                    let mut best = i64::MAX;
-                    for ring in 0_i64..=4 {
-                        for dy in -ring..=ring {
-                            for dx in -ring..=ring {
-                                if dx.abs().max(dy.abs()) != ring {
-                                    continue;
-                                }
-                                let x = (tx + dx) * 64;
-                                let y = (ty + dy) * 64;
-                                let lower =
-                                    distance(p, [p[0].clamp(x, x + 63), p[1].clamp(y, y + 63)]);
-                                if lower >= best || lower > 256 {
-                                    continue;
-                                }
-                                if let Some(nodes) = self.node_tiles.get(&(tx + dx, ty + dy)) {
-                                    for &i in nodes {
-                                        best = best.min(distance(self.passages[i].feet, p));
+                let mut nearest_distance = |p: Point| {
+                    if let Some(&distance) = self.distance_cache.get(&p) {
+                        return distance;
+                    }
+                    let result = if lookup_all {
+                        // Reuse older surveyed workings when the next equipment gate stops
+                        // access development. The derived spatial index bounds this lookup.
+                        let tx = p[0].div_euclid(64);
+                        let ty = p[1] / 64;
+                        let mut best = i64::MAX;
+                        for ring in 0_i64..=4 {
+                            for dy in -ring..=ring {
+                                for dx in -ring..=ring {
+                                    if dx.abs().max(dy.abs()) != ring {
+                                        continue;
+                                    }
+                                    let x = (tx + dx) * 64;
+                                    let y = (ty + dy) * 64;
+                                    let lower =
+                                        distance(p, [p[0].clamp(x, x + 63), p[1].clamp(y, y + 63)]);
+                                    if lower >= best || lower > 256 {
+                                        continue;
+                                    }
+                                    if let Some(nodes) = self.node_tiles.get(&(tx + dx, ty + dy)) {
+                                        for &i in nodes {
+                                            best = best.min(distance(self.passages[i].feet, p));
+                                        }
                                     }
                                 }
                             }
+                            let outside = (p[0] - (tx - ring) * 64 + 1)
+                                .min((tx + ring + 1) * 64 - p[0])
+                                .min(p[1] - (ty - ring) * 64 + 1)
+                                .min((ty + ring + 1) * 64 - p[1]);
+                            if best <= outside {
+                                break;
+                            }
                         }
-                        let outside = (p[0] - (tx - ring) * 64 + 1)
-                            .min((tx + ring + 1) * 64 - p[0])
-                            .min(p[1] - (ty - ring) * 64 + 1)
-                            .min((ty + ring + 1) * 64 - p[1]);
-                        if best <= outside {
-                            break;
-                        }
+                        best
+                    } else {
+                        self.passages
+                            .iter()
+                            .rev()
+                            .take(128)
+                            .map(|n| distance(n.feet, p))
+                            .min()
+                            .unwrap_or(i64::MAX)
+                    };
+                    // Bound derived memory even on very wide, old mines. A cache miss
+                    // always computes the same distance; eviction cannot change routes.
+                    if self.distance_cache.len() < 16_384 {
+                        self.distance_cache.insert(p, result);
                     }
-                    best
-                } else {
-                    self.passages
-                        .iter()
-                        .rev()
-                        .take(128)
-                        .map(|n| distance(n.feet, p))
-                        .min()
-                        .unwrap_or(i64::MAX)
+                    result
                 };
-                // Bound derived memory even on very wide, old mines. A cache miss
-                // always computes the same distance; eviction cannot change routes.
-                if self.distance_cache.len() < 16_384 {
-                    self.distance_cache.insert(p, result);
-                }
-                result
-            };
-            let mut candidates: Vec<(i64, Point)> = vec![];
-            // A deposit order persists across individual cuts. Unknown cells never
-            // enter the planner, even when they belong to the selected descriptor.
-            for &p in &self.target_cells {
-                if !terrain.contains(p[0], p[1])
-                    && p[1] < depth_limit
-                    && terrain.known_material(p[0], p[1]).is_some_and(|id| id > 1)
-                    && !self.deferred.contains(&area(p))
-                    && !protected(&self.floor_index, p, &[])
-                {
-                    let near = nearest_distance(p);
-                    if near <= settings().search_radius {
-                        candidates.push((-10000 + near, p));
+                let mut candidates: Vec<(i64, Point)> = vec![];
+                // A deposit order persists across individual cuts. Unknown cells never
+                // enter the planner, even when they belong to the selected descriptor.
+                for &p in &self.target_cells {
+                    if !terrain.contains(p[0], p[1])
+                        && p[1] < depth_limit
+                        && terrain.known_material(p[0], p[1]).is_some_and(|id| id > 1)
+                        && !self.deferred.contains(&area(p))
+                        && !protected(&self.floor_index, p, &[])
+                    {
+                        let near = nearest_distance(p);
+                        if near <= settings().search_radius {
+                            candidates.push((-10000 + near, p));
+                        }
                     }
                 }
-            }
-            // Targets come only from locally sampled frontier cells.
-            for (&id, faces) in &terrain.ore_frontiers {
-                if id <= 1 {
-                    continue;
+                // Targets come only from locally sampled frontier cells.
+                for (&id, faces) in &terrain.ore_frontiers {
+                    if id <= 1 {
+                        continue;
+                    }
+                    for &k in faces {
+                        let p = point(k);
+                        if p[1] < PIT_ROWS
+                            || p[1] >= depth_limit
+                            || self.deferred.contains(&area(p))
+                            || protected(&self.floor_index, p, &[])
+                            || !access_blocked && p[1] + 256 < deepest
+                        {
+                            continue;
+                        }
+                        let near = nearest_distance(p);
+                        if near > 256 {
+                            continue;
+                        }
+                        let bonus = if policy == "vein" && priorities.contains(&id) {
+                            120
+                        } else {
+                            40
+                        };
+                        candidates.push((near as i64 - bonus, p));
+                    }
                 }
-                for &k in faces {
-                    let p = point(k);
-                    if p[1] < PIT_ROWS
-                        || p[1] >= depth_limit
-                        || self.deferred.contains(&area(p))
-                        || protected(&self.floor_index, p, &[])
-                        || !access_blocked && p[1] + 256 < deepest
+                for s in &self.signals {
+                    if s.centre[1] >= depth_limit
+                        || self.exhausted.contains(&key(s.centre))
+                        || self.deferred.contains(&area(s.centre))
+                        || !access_blocked && s.centre[1] + 256 < deepest
                     {
                         continue;
                     }
-                    let near = nearest_distance(p);
-                    if near > 256 {
-                        continue;
+                    let near = nearest_distance(s.centre);
+                    if near <= 256 {
+                        candidates.push((near as i64 - 12 * s.confidence as i64, s.centre));
                     }
-                    let bonus = if policy == "vein" && priorities.contains(&id) {
-                        120
-                    } else {
-                        40
-                    };
-                    candidates.push((near as i64 - bonus, p));
                 }
+                if development {
+                    // Develop access toward deeper surveyed ground. Nearby shallow ore remains
+                    // available when the foreman switches back to an extraction policy.
+                    candidates.retain(|(_, p)| p[1] > deepest + 4);
+                    for (score, p) in &mut candidates {
+                        *score -= (p[1] - deepest) as i64;
+                    }
+                }
+                // Failed searches defer a whole 4x4 area. Keep its best candidate:
+                // any other point in that area becomes ineligible at the same time.
+                let mut areas = BTreeMap::<i64, (i64, Point)>::new();
+                for candidate in candidates {
+                    areas
+                        .entry(area(candidate.1))
+                        .and_modify(|old| *old = (*old).min(candidate))
+                        .or_insert(candidate);
+                }
+                self.candidate_cache = areas.into_values().collect();
+                self.candidate_stamp = (self.candidate_cache.len() <= 16_384).then(|| {
+                    (
+                        terrain.revision,
+                        self.revision,
+                        depth_limit,
+                        policy.into(),
+                        priorities.to_vec(),
+                        self.target,
+                        self.passages.len(),
+                    )
+                });
             }
-            for s in &self.signals {
-                if s.centre[1] >= depth_limit
-                    || self.exhausted.contains(&key(s.centre))
-                    || self.deferred.contains(&area(s.centre))
-                    || !access_blocked && s.centre[1] + 256 < deepest
-                {
-                    continue;
-                }
-                let near = nearest_distance(s.centre);
-                if near <= 256 {
-                    candidates.push((near as i64 - 12 * s.confidence as i64, s.centre));
-                }
-            }
-            if development {
-                // Develop access toward deeper surveyed ground. Nearby shallow ore remains
-                // available when the foreman switches back to an extraction policy.
-                candidates.retain(|(_, p)| p[1] > deepest + 4);
-                for (score, p) in &mut candidates {
-                    *score -= (p[1] - deepest) as i64;
-                }
-            }
-            let goal = candidates
-                .into_iter()
+            let goal = self
+                .candidate_cache
+                .iter()
+                .copied()
+                .filter(|(_, p)| !self.deferred.contains(&area(*p)))
                 .min()
                 .map(|(_, p)| p)
                 .unwrap_or_else(|| {
@@ -683,6 +722,9 @@ impl Workings {
                         ]
                     }
                 });
+            if self.candidate_stamp.is_none() {
+                self.candidate_cache = Vec::new();
+            }
             // Reachable sampled ore becomes a local extraction area, not a new access shaft.
             if !development
                 && terrain
@@ -1654,6 +1696,38 @@ mod development_tests {
             g.levels.insert(id.into(), n);
         }
         g
+    }
+    #[test]
+    fn planner_caches_preserve_policy_priority_and_geometry_transitions() {
+        let cat = crate::materials();
+        let mut cached = fixture(42);
+        for _ in 0..1200 {
+            cached.tick(cat, false);
+        }
+        let mut uncached = cached.clone();
+        for step in 0..1200 {
+            if step % 100 == 0 {
+                let policy = ["bulk", "vein", "depth"][(step / 100) % 3];
+                for game in [&mut cached, &mut uncached] {
+                    game.policy = policy.into();
+                    game.priorities = vec![if step % 200 == 0 { 3 } else { 4 }];
+                    game.workings.search = None;
+                }
+            }
+            uncached.workings.distance_cache.clear();
+            uncached.workings.candidate_stamp = None;
+            cached.tick(cat, false);
+            uncached.tick(cat, false);
+            if step % 100 == 99 {
+                assert_eq!(
+                    serde_json::to_value(&cached).unwrap(),
+                    serde_json::to_value(&uncached).unwrap(),
+                    "step {step}"
+                );
+            }
+        }
+        assert!(cached.workings.distance_cache.len() <= 16_384);
+        assert!(cached.workings.candidate_cache.len() <= 16_384);
     }
     #[test]
     fn shallow_vein_branch_keeps_developing_from_surface() {
