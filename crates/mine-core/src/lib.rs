@@ -3678,7 +3678,8 @@ mod campaign_research_tests {
         assert!(g.action(command()).is_err());
         assert_eq!(g.products, products);
         g.ranks.insert("metallurgy".into(), 7);
-        assert_eq!(g.research_invested(), 700);
+        g.ranks.insert("excavation".into(), 4);
+        assert_eq!(g.research_invested(), 850);
         g.action(command()).unwrap();
         assert!(g.megaproject);
         assert_eq!(g.products.values().sum::<u64>(), 0);

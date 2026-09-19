@@ -16,7 +16,7 @@ Current measured checks:
 - Guided opening: **30/30** seeds pass. First sale 7 seconds, first refined iron 8–10 seconds, improved lift 121–166 seconds and first underground fork 19–46 seconds.
 - Housing-first adverse order: **30/30** seeds pass. First refined iron 19–51 seconds, conveyor 61–106 seconds and improved lift 168–285 seconds.
 - Core sweep ran 117 tests: 115 passed immediately; two assertions still encoded the former two-second loading phase, were corrected, and pass focused reruns. Campaign strategy tests pass **18/18**. Frontend tests pass **30/30**, with Bun 1.4 typecheck and production build successful.
-- Fresh 30-seed scheduled campaign cohort is running from the version-10 executable. Version-9 campaign results below remain historical until that cohort completes.
+- First version-10 campaign pilot completed five seeds at 25.5–27.0 days across all three strategies, below the four-week floor. That cohort is superseded. Headquarters research now requires 800 invested points instead of 700, adding another earned research/retirement cycle without a wall-clock gate. Fresh acceptance remains pending for this retune; version-9 results below stay historical.
 
 ## Implemented
 
