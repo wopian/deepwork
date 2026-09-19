@@ -18,14 +18,14 @@ Current saves use **version 9 / generator 5**. Older campaigns are archived befo
 
 ## Verified in this milestone
 
-- **103 Rust core tests**, including signed route/save validation, cross-boundary geology, hidden-ore privacy, whole-vein selection, connected negative-coordinate branches, lateral depth-gate recovery and exact offline/stepped accounting.
+- **106 Rust core tests**, including signed route/save validation, cross-boundary geology, hidden-ore privacy, whole-vein selection, connected negative-coordinate branches, lateral depth-gate recovery and exact offline/stepped accounting. Pending vein-accuracy work prevents idle skipping; its blocked-network regression reproduces the original failure and now matches stepped revelation.
 - **9 campaign-strategy tests** include selecting surveyed but unexposed cells without reading hidden geology. Baseline strategies now purchase survey accuracy and keep orders tied to missing equipment or headquarters feed without switching away between survey decisions.
 - **12 native persistence/lifecycle tests** cover checkpoint failure, duplicate events, stale ordering and native ownership over WebView signals.
-- **25 Bun tests** pass. Vue/TypeScript checking and production frontend builds run on Windows **Bun 1.4.0**, without WSL dependency installation.
-- Guided opening: **30/30 seeds** sell within 17 seconds, first refined iron in 17–290 seconds (median 23), conveyor in 33–159 seconds (median 123.5).
+- **27 Bun tests** pass. Vue/TypeScript checking and production frontend builds run on Windows **Bun 1.4.0**, without WSL dependency installation.
+- Guided opening: **30/30 seeds** sell within 17 seconds, first refined iron in 17–290 seconds (median 23), conveyor in 33–159 seconds (median 123.5). A stronger junction check confirms actual underground forks in 22–95 seconds on all 30 seeds.
 - Adverse housing-first purchase order: **30/30 seeds** recover. First iron 175–498 seconds; lift purchase 891–1,552 seconds (median 1,127.5). These are deterministic strategies, not human playtests.
 - Continuous steel-first runs across all three geological profiles reach steel/specialisation in 1,073–1,497 seconds. Improved lift median is 1,908 seconds; the slowest profile takes 2,365 seconds, outside the 25–35 minute target. Lift-first adverse runs remain faster.
-- Isolated packaged Windows checks pass anchored two-finger pinch, two-axis pan, production, purchases, import/export, rejection of corrupt imports, reset/archive, stale commands, preferences, background/resume and reload. Child application PATH excludes development runtimes. Desktop/portrait screenshots and emulated touch controls pass.
+- Isolated packaged Windows checks pass anchored two-finger pinch, two-axis pan, production, purchases, import/export, rejection of corrupt imports, reset/archive, stale commands, preferences, background/resume and reload. Child application PATH excludes development runtimes. Desktop/portrait screenshots and emulated touch controls pass. Rotation preserves the inspected world centre and pixel scale; this is asserted in the native harness, not inferred from layout dimensions.
 - Android ARM64 build script produces a debug-signed test APK and verifies v2/v3 signatures and 16 KB ZIP alignment. Rebuild after the last code checkpoint before distribution.
 
 ## Strategy intervention diagnostic
@@ -36,7 +36,7 @@ Three one-hour simulations with identical upgraded equipment compared fixed dept
 
 A 30-minute expanded-terrain Windows run passed at median **58 FPS**, **86.7 MiB** peak JavaScript heap, **30** peak resident terrain textures and a **571,539-byte** compact save. Supported passages grew from 791 to 2,073 with 1,000 simulated workers represented by at most 250 sprites. Save/reload and portrait touch checks passed. The original harness falsely flagged equipment changes because JSON key order differed; recursive comparison confirms unchanged values and zero gameplay commands during measurement. Its report and corrected assessment are preserved separately.
 
-The final 30-seed scheduled campaign uses survey purchases and public whole-vein orders. An earlier strategy that never bought survey accuracy is retained only as diagnostic evidence. Each visit now writes a full state checkpoint for reproducible diagnosis. A second endurance case tests a selected vein in older workings. Headquarters remains targeted at 28–42 days with two daily 12-minute visits; final campaign acceptance remains pending.
+The final 30-seed scheduled campaign uses survey purchases and public whole-vein orders. An earlier strategy that never bought survey accuracy is retained only as diagnostic evidence. Each visit now writes a full state checkpoint for reproducible diagnosis. The selected-vein endurance case also passed: 58 FPS median, 76.7 MiB peak JavaScript heap, 29 resident textures, 348,524-byte save, 636 added passages and 21,520 excavated cells. Its order survived reload with zero measurement gameplay commands. A final-build endurance case additionally measures Rust process memory and simulation time. The campaign baseline executable comes from checkpoint `3967bd4`; subsequent cache optimizations, portrait rotation and idle-survey correction have separate regression evidence. Headquarters remains targeted at 28–42 days with two daily 12-minute visits; final campaign acceptance remains pending.
 
 ## Practical limits
 
