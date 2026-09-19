@@ -80,7 +80,8 @@ fn main() {
         }
         let pass = first_sale.is_some_and(|s| s <= 60)
             && first_iron.is_some_and(|s| s <= if mode == "guided" { 300 } else { 1800 })
-            && branch.is_some();
+            && branch.is_some()
+            && (mode != "adverse" || shaft.is_some());
         failed |= !pass;
         println!(
             "{}",

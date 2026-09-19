@@ -6,7 +6,7 @@ const runs = () =>
     policy: "depth",
     events: [
       { seconds: 0, upgrade: "worker" },
-      { seconds: 240, upgrade: "conveyor" },
+      { seconds: 120, upgrade: "conveyor" },
       { seconds: 1, upgrade: "furnace" },
       { seconds: 150, product: "iron" },
       { seconds: 1, unlock: "tactics" },
