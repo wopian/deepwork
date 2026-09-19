@@ -378,6 +378,22 @@ onMounted(start);
                     >
                     <small
                       class="upgrade-blocker"
+                      v-if="
+                        state?.upgrade_previews[u[0]]?.lift_depth_after != null
+                      "
+                    >
+                      Lift reach after upgrade:
+                      {{
+                        format(state.upgrade_previews[u[0]].lift_depth_after!)
+                      }}
+                      m. Current support, pump and ventilation equipment permits
+                      {{
+                        format(state.upgrade_previews[u[0]].access_depth_after!)
+                      }}
+                      m.
+                    </small>
+                    <small
+                      class="upgrade-blocker"
                       v-if="state?.purchase_blockers[u[0]]"
                       >{{ state.purchase_blockers[u[0]] }}</small
                     >

@@ -154,7 +154,12 @@ export interface Game {
   purchase_blockers: Record<string, string>;
   upgrade_previews: Record<
     string,
-    { machine_percent: number; line_percent: number }
+    {
+      machine_percent: number;
+      line_percent: number;
+      lift_depth_after?: number | null;
+      access_depth_after?: number | null;
+    }
   >;
   retirement_award: number;
   site_objectives: string[];

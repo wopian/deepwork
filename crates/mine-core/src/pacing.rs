@@ -16,6 +16,7 @@ pub struct Pacing {
     pub capacity_growth: f64,
     pub worker_rate: f64,
     pub haul_rate: f64,
+    pub lift_depth_per_level: u32,
     pub sorting_rate: f64,
     pub refining_rate: f64,
     pub research_base: u64,
@@ -73,6 +74,7 @@ pub fn validate() -> Result<(), String> {
         .iter()
         .any(|&v| v == 0 || v > 100)
         || p.tactics_depth >= 48
+        || !(100..=1000).contains(&p.lift_depth_per_level)
         || !(100..=300).contains(&p.specialisation_depth)
         || p.headquarters_starting.len() != 5
         || p.headquarters_starting.iter().any(|(branch, grants)| {

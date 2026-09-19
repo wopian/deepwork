@@ -379,7 +379,7 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
                 act(g, "buy", "worker", 0);
             }
         }
-        if g.depth() + 20 >= 300 * (1 + g.level("shaft")) && g.credits >= g.cost("shaft") {
+        if g.depth() + 20 >= g.lift_depth_limit() && g.credits >= g.cost("shaft") {
             act(g, "buy", "shaft", 0);
         }
         for id in [
@@ -407,15 +407,7 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
             .get(id)
             .is_some_and(|faces| !faces.is_empty())
     });
-    let equipment_limit = (300 * (1 + g.level("shaft"))).min(if g.level("supports") == 0 {
-        300
-    } else if g.level("pump") == 0 {
-        700
-    } else if g.level("ventilation") == 0 {
-        1500
-    } else {
-        200000
-    });
+    let equipment_limit = g.equipment_depth_limit();
     let material_shortage = g
         .pinned
         .as_ref()
@@ -449,7 +441,7 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
             _ => "depth",
         }
     };
-    let policy = if !selected_required && g.depth() + 4 >= 300 * (1 + g.level("shaft")) {
+    let policy = if !selected_required && g.depth() + 4 >= g.lift_depth_limit() {
         "bulk"
     } else {
         policy

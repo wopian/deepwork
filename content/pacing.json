@@ -31,6 +31,7 @@
   "capacity_growth": 1.12,
   "worker_rate": 1.0,
   "haul_rate": 1.0,
+  "lift_depth_per_level": 300,
   "sorting_rate": 2.0,
   "refining_rate": 2.0,
   "research_base": 5,

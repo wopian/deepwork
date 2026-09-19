@@ -24,6 +24,8 @@ fn work_budget(rate: u64, tick: u64) -> u64 {
 pub struct UpgradePreview {
     pub machine_percent: f64,
     pub line_percent: f64,
+    pub lift_depth_after: Option<u32>,
+    pub access_depth_after: Option<u32>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Material {
@@ -429,6 +431,20 @@ impl Game {
         };
         (base * growth.powi(n as i32)).ceil() as u64
     }
+    pub fn lift_depth_limit(&self) -> u32 {
+        300 + self.level("shaft") * pacing::get().lift_depth_per_level
+    }
+    pub fn equipment_depth_limit(&self) -> u32 {
+        self.lift_depth_limit().min(if self.level("supports") == 0 {
+            300
+        } else if self.level("pump") == 0 {
+            700
+        } else if self.level("ventilation") == 0 {
+            1500
+        } else {
+            200000
+        })
+    }
     pub fn research_invested(&self) -> u64 {
         self.ranks
             .values()
@@ -737,6 +753,8 @@ impl Game {
             result.insert(
                 id.into(),
                 UpgradePreview {
+                    lift_depth_after: (id == "shaft").then(|| next.lift_depth_limit()),
+                    access_depth_after: (id == "shaft").then(|| next.equipment_depth_limit()),
                     machine_percent: if before[stage] > 0. {
                         100. * (after[stage] / before[stage] - 1.)
                     } else {
@@ -959,16 +977,7 @@ impl Game {
                     }
                 }
             }
-            let limit = (300 * (1 + self.level("shaft"))).min(if self.level("supports") == 0 {
-                300
-            } else if self.level("pump") == 0 {
-                700
-            } else if self.level("ventilation") == 0 {
-                1500
-            } else {
-                200000
-            }) as i64
-                * geometry::CELLS_PER_METRE;
+            let limit = self.equipment_depth_limit() as i64 * geometry::CELLS_PER_METRE;
             self.workings
                 .prepare_deposit_order(self.seed, self.profile, cat);
             self.workings.advance(
@@ -1002,7 +1011,7 @@ impl Game {
         self.dig_remainder = work % 20;
         let digs = (self.dig_progress / 1000) as u32;
         self.dig_progress %= 1000;
-        let depth_limit = 300 * (1 + self.level("shaft"));
+        let depth_limit = self.lift_depth_limit();
         for _ in 0..digs.min(12800) {
             if ore_total + (mined + 1) * CELL_MASS > cap {
                 break;
@@ -3009,6 +3018,30 @@ mod offline_event_tests {
 #[cfg(test)]
 mod shaft_access_tests {
     use super::*;
+    #[test]
+    fn lift_preview_preserves_independent_support_water_and_heat_gates() {
+        let mut g = Game::default();
+        assert_eq!(g.lift_depth_limit(), 300);
+        g.levels.insert("shaft".into(), 10);
+        assert_eq!(
+            g.lift_depth_limit(),
+            300 + 10 * pacing::get().lift_depth_per_level
+        );
+        assert_eq!(g.equipment_depth_limit(), 300);
+        g.levels.insert("supports".into(), 1);
+        assert_eq!(g.equipment_depth_limit(), 700);
+        g.levels.insert("pump".into(), 1);
+        assert_eq!(g.equipment_depth_limit(), 1500);
+        let previews = g.upgrade_previews();
+        assert_eq!(previews["shaft"].access_depth_after, Some(1500));
+        assert_eq!(
+            previews["shaft"].lift_depth_after,
+            Some(300 + 11 * pacing::get().lift_depth_per_level)
+        );
+        g.levels.insert("ventilation".into(), 1);
+        assert_eq!(g.equipment_depth_limit(), g.lift_depth_limit());
+    }
+
     #[test]
     fn basic_supported_access_requires_no_iron_or_shaft_purchase() {
         let mut g = Game::default();

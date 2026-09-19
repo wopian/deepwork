@@ -2,6 +2,7 @@
 import { chromium } from "playwright-core";
 import { mkdir } from "node:fs/promises";
 import { CELL_PIXEL } from "../src/geometry";
+import { checkReadability } from "./readability-check";
 
 const [input, output] = Bun.argv.slice(2);
 if (!input || !output)
@@ -28,7 +29,15 @@ Object.assign(game, {
   selected_vein: null,
   quotes: {},
   purchase_blockers: {},
-  upgrade_previews: {},
+  // Deliberately synthetic UI contract; Rust tests verify these fields' calculation.
+  upgrade_previews: {
+    shaft: {
+      machine_percent: 12,
+      line_percent: 0,
+      lift_depth_after: 4500,
+      access_depth_after: 1500,
+    },
+  },
   pinned_inputs: {},
   research_invested: 0,
   retirement_award: 0,
@@ -109,11 +118,26 @@ try {
         throw new Error(`${name}: supported passage outside fitted viewport`);
     }
     await page.screenshot({ path: `${output}/${name}.png`, fullPage: true });
+    await page.getByRole("button", { name: "Equipment", exact: true }).click();
+    const lift = page.locator(".upgrade").filter({
+      has: page.getByText("Shaft & lift", { exact: true }),
+    });
+    await lift.scrollIntoViewIfNeeded();
+    const label = (await lift.innerText()).replace(/\s+/g, " ");
+    if (
+      !label.includes("Lift reach after upgrade: 4,500 m.") ||
+      !label.includes("equipment permits 1,500 m.")
+    )
+      throw new Error(`${name}: lift preview omitted reach or equipment gate`);
+    const readability = await checkReadability(page, `${name} lift preview`);
+    await page.screenshot({ path: `${output}/${name}-lift.png`, fullPage: true });
     observations.push({
       name,
       passages: passages.length,
       camera,
       allPassagesFit: true,
+      syntheticLiftPreview: true,
+      readability,
     });
   }
   if (errors.length) throw new Error(errors.join("\n"));
