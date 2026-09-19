@@ -94,6 +94,7 @@ fn main() {
         "{}",
         serde_json::json!({"seed":seed,"seconds":seconds,"depth":g.depth(),"passages":g.workings.passages.len(),"lifts":routes,"signals":g.workings.signals.len(),"cells":g.excavated,"status":g.workings.status})
     );
+    g.validate().expect("generated fixture must be importable");
     if let Some(path) = args.get(4) {
         std::fs::write(path, serde_json::to_vec(&g).unwrap()).unwrap();
     }

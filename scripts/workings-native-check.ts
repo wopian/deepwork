@@ -75,6 +75,18 @@ try {
     buffer: Buffer.from(fixture),
   });
   await page.waitForTimeout(2000);
+  const imported = JSON.parse(
+    await page.evaluate(() =>
+      (window as any).__TAURI_INTERNALS__.invoke("export_save"),
+    ),
+  );
+  if (
+    imported.workers !== fixtureState.workers ||
+    imported.workings.passages.length < fixtureState.workings.passages.length
+  )
+    throw new Error(
+      `Stress fixture rejected: ${await page.locator("body").innerText()}`,
+    );
   await page.getByRole("button", { name: "Operations", exact: true }).click();
   await page.getByRole("button", { name: "Follow crew", exact: true }).click();
   await page

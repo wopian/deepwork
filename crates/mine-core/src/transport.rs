@@ -594,7 +594,7 @@ fn valid_legs(legs: &[Leg]) -> bool {
                     "carrying" | "wheelbarrow" | "conveyor" | "minecart" | "train" | "lift"
                 )
                 && [leg.from, leg.to].iter().all(|p| {
-                    (0..=576).contains(&p[0])
+                    (-crate::geometry::MAX_X..crate::geometry::MAX_X).contains(&(p[0] as i64))
                         && (-24..crate::geometry::MAX_ROWS as i32).contains(&p[1])
                 })
         })
@@ -602,6 +602,28 @@ fn valid_legs(legs: &[Leg]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn expanded_signed_routes_survive_save_validation() {
+        let (legs, _) = crate::logistics::route(
+            &[[-2048, 256], [4096, 256], [256, 256], [256, 0]],
+            &BTreeMap::new(),
+            1.,
+        );
+        let mut network = Network::default();
+        network.configure(&legs, UNITS, 1);
+        assert!(network.valid(crate::materials().len()));
+        let restored: Network =
+            serde_json::from_str(&serde_json::to_string(&network).unwrap()).unwrap();
+        assert!(restored.valid(crate::materials().len()));
+        let mut invalid = restored;
+        invalid.segments[0].legs.push(Leg {
+            from: [crate::geometry::MAX_X as i32, 0],
+            to: [256, 0],
+            mode: "carrying".into(),
+            milliseconds: 1000,
+        });
+        assert!(!invalid.valid(crate::materials().len()));
+    }
     #[test]
     fn cached_configuration_matches_rebuilding_through_upgrades_and_reload() {
         let mut cached = Network::default();
