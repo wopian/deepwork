@@ -47,3 +47,11 @@ The native `save_roundtrip` example independently passes full-state equality for
 Late-material investigation found that benchmark priorities followed ordinary recipe ingredients but omitted eligible trace-feed sources. A pinned lift also suppressed headquarters ingredient priorities. The corrected strategy follows public trace definitions, prefers discovered eligible minerals, respects stock already in the residue ledger and counts residue production as progress. It never queries hidden geology. Fourteen strategy/checkpoint tests pass. Checkpoint fingerprints now include strategy source.
 
 The preceding 300-research run produced four diagnostic headquarters completions at days 29, 30.5, 31 and 31.5 before this correction. All 30 seeds restart fresh for final acceptance; those earlier observations are not substituted into the new report.
+
+## Lift-access retune after source-aware timing failure
+
+The frozen source-aware baseline was stopped with 18 completed campaigns. Even the earliest possible 30-seed rare-earth median was 28.251 days, so the unchanged 21–28-day gate could no longer pass. All seeds remain represented in the preserved lower-bound diagnostic. Headquarters completions ranged from 29.5 to 55.5 days; this is diagnostic evidence, not final acceptance.
+
+Lift reach now comes from validated pacing content and one shared Rust calculation. Candidate gain is 400 m per level, with initial 300 m access and support/water/heat gates unchanged. Upgrade cards show lift reach separately from actual equipment-permitted depth. Desktop and portrait synthetic-preview checks pass readability; Rust tests verify authoritative calculations. No geology, save format, material mass or recipe quantities changed.
+
+A separate benchmark recovery fix bounds unrelated depth progress using public mineral tiers, while honouring revealed deeper required targets. This prevents a strategy from treating a 7 km detour as continued progress toward missing aluminium feed. Fresh 30-seed candidate validation remains pending.
