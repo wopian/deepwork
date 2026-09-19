@@ -360,8 +360,14 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
         });
     // Styles choose specialisation and headquarters investment. All competent
     // strategies can develop retirement access or follow essential construction feed.
-    let policy = if g.level("shaft") > 0 && g.depth() < 300 && g.research_invested() < research_goal
-    {
+    let selected_required = g
+        .workings
+        .target
+        .and_then(|p| g.terrain.known_material(p[0], p[1]))
+        .is_some_and(|id| g.priorities.contains(&id));
+    let policy = if selected_required {
+        "vein"
+    } else if g.level("shaft") > 0 && g.depth() < 300 && g.research_invested() < research_goal {
         "depth"
     } else if g.level("shaft") > 0 && material_shortage && !g.priorities.is_empty() {
         if sampled_required_feed || g.depth() + 4 >= equipment_limit {
@@ -376,7 +382,7 @@ fn strategy(g: &mut Game, style: &str, attentive: bool) {
             _ => "depth",
         }
     };
-    let policy = if g.depth() + 4 >= 300 * (1 + g.level("shaft")) {
+    let policy = if !selected_required && g.depth() + 4 >= 300 * (1 + g.level("shaft")) {
         "bulk"
     } else {
         policy
@@ -806,6 +812,26 @@ mod strategy_tests {
             g.workings.target.is_none(),
             "fulfilled investment releases its order"
         );
+    }
+    #[test]
+    fn scheduled_decisions_preserve_required_whole_vein_policy_between_surveys() {
+        let mut g = Game::new(42, 2);
+        g.credits = 0;
+        for id in ["furnace", "conveyor", "steelworks", "shaft"] {
+            g.levels.insert(id.into(), 1);
+        }
+        let p = (210..260)
+            .map(|x| [x, 24])
+            .find(|p| g.cell(p[0], p[1], materials()) == 3)
+            .unwrap();
+        g.terrain
+            .reveal(g.seed, g.profile, p[0], p[1], 0, materials());
+        g.pinned = Some("supports".into());
+        direct_known_feed(&mut g, &[3], 1200);
+        g.ticks = 100; // Between the scheduled 30-second deposit decisions.
+        strategy(&mut g, "bulk", false);
+        assert_eq!(g.workings.target, Some(p));
+        assert_eq!(g.policy, "vein");
     }
     #[test]
     fn first_visit_funds_processing_before_stockpiling_late_industry_inputs() {
