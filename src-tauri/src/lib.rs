@@ -133,6 +133,9 @@ impl From<Game> for Snapshot {
         for station in &mut game.transport.stations {
             station.routing.clear();
         }
+        for front in &mut game.mining_fronts {
+            front.route.clear();
+        }
         Self {
             selected_vein,
             access_depth_limit,
@@ -853,12 +856,31 @@ mod bounded_cargo_snapshot_tests {
                 duration_ms: 4_098_000,
                 legs: vec![leg; 4096],
             });
+        game.mining_fronts.push(mine_core::fronts::MiningFront {
+            id: "front".into(),
+            deposit: "deposit".into(),
+            material: 3,
+            face: [0, 16],
+            crew: 1,
+            haulers: 1,
+            progress: 0,
+            work_remainder: 0,
+            transfer_remainder: 0,
+            stockpile: 0,
+            capacity: mine_core::geometry::UNITS,
+            route: vec![[0, 16]; 4096],
+            route_id: 0,
+            selected: false,
+            status: "Excavating".into(),
+            blocker: String::new(),
+        });
         let snapshot = Snapshot::from(game.clone());
         assert_eq!(snapshot.shipments[0].legs.len(), 1);
         assert!(snapshot.game.transport.segments[0].legs.is_empty());
         assert!(snapshot.game.transport.segments[0].batches[0]
             .legs
             .is_empty());
+        assert!(snapshot.game.mining_fronts[0].route.is_empty());
         assert_eq!(snapshot.game.transport.mass(), game.transport.mass());
         assert_eq!(game.transport.segments[0].batches[0].legs.len(), 4096);
         assert!(serde_json::to_vec(&snapshot).unwrap().len() < 100_000);
