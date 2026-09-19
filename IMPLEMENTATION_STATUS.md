@@ -1,6 +1,22 @@
 # Implementation status — shaft-first expanded mines
 
-Current saves use **version 9 / generator 5**. Older campaigns are archived before a fresh campaign is created; accessibility, audio and display preferences are kept separately. Old campaign benchmarks do not validate this version.
+Current saves use **version 10 / generator 5**. Older campaigns are archived before a fresh campaign is created; accessibility, audio and display preferences are kept separately. Old campaign benchmarks do not validate this version.
+
+## Version 10 multi-front milestone
+
+- Up to eight independent ore faces operate at once. Each face owns crew, work progress, route, stockpile and blocker state; headquarters excavation ranks raise the cap to twelve. A full face pauses locally while other crews keep digging.
+- Whole-vein orders receive at least 60% of available diggers. Remaining crews maintain access and distinct required feeds such as iron, coal and limestone. Automatic planning and transport priorities use visible construction needs without reading hidden geology.
+- Basic access now sinks one deterministic supported 8 m shaft before anonymous survey signals can pull development sideways. Guaranteed iron is discovered through normal local exposure. Guided lift purchases no longer depend on seed luck.
+- Transport uses a one-second loading phase, 1.2x baseline haul rate, mode floors and at least 30% in-transit headroom over a full cycle. Starter conveyors need no power; powered lifts and trains still respect supply. Station buffer upgrades remain independent.
+- Fine mine cells render at one logical pixel. Headframe, vehicles, cargo and worker positions share shaft geometry; active digger sprites spread across real mining fronts. Front route history is removed from UI snapshots while authoritative save routes remain intact.
+- Headquarters ranks now grant shaft-first effects: excavation/front capacity/support speed, logistics branch rate/buffers, metallurgy recovery/power demand, prospecting refinements/accuracy and reclamation recovery. Retired open-pit grants were removed.
+
+Current measured checks:
+
+- Guided opening: **30/30** seeds pass. First sale 7 seconds, first refined iron 8–10 seconds, improved lift 121–166 seconds and first underground fork 19–46 seconds.
+- Housing-first adverse order: **30/30** seeds pass. First refined iron 19–51 seconds, conveyor 61–106 seconds and improved lift 168–285 seconds.
+- Core sweep ran 117 tests: 115 passed immediately; two assertions still encoded the former two-second loading phase, were corrected, and pass focused reruns. Campaign strategy tests pass **18/18**. Frontend tests pass **30/30**, with Bun 1.4 typecheck and production build successful.
+- Fresh 30-seed scheduled campaign cohort is running from the version-10 executable. Version-9 campaign results below remain historical until that cohort completes.
 
 ## Implemented
 
@@ -48,7 +64,7 @@ Checkpoint handling now retains the highest recorded timestamp across clock roll
 
 Three one-hour simulations with identical upgraded equipment compared fixed depth policy against priorities based only on discovered commodity prices. Credit changes were **+58.0%, −15.0%, and −20.5%**; the vein policy reached 174–360 metres versus 2,796–3,200 metres for depth policy. These fixture runs demonstrate a production/access tradeoff, not a guaranteed active-play bonus or campaign acceptance. No timed power multiplier is involved.
 
-## Full campaign acceptance
+## Archived version 9 full campaign acceptance
 
 The fresh 30-seed cohort **passes all six existing overall median gates**, with **30/30 headquarters completions**. Seeds 42–71 cover ten bulk, ten precision and ten reclamation strategies. Each receives two 12-minute visits per day, 50% offline rate and the eight-real-hour cap. The observation horizon remains 56 days; no seed, failure or slow observation was excluded.
 

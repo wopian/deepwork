@@ -1,4 +1,6 @@
-# Shaft-first campaign balance evidence
+# Archived version 9 shaft-first campaign evidence
+
+This cohort predates save version 10, independent mining fronts, new starter shaft and transport retune. It remains reproducible historical evidence, but does not validate current campaign pacing. Current version-10 results belong in this document only after all 30 fresh seeds finish.
 
 ## Full campaign acceptance
 
