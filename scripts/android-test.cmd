@@ -27,6 +27,7 @@ if errorlevel 1 (
   if errorlevel 1 exit /b 1
   popd
 )
+bun.exe "%ROOT%\scripts\check-elf-alignment.ts" "%ROOT%\src-tauri\gen\android\app\src\main\jniLibs\arm64-v8a\libdeepwork_lib.so" || exit /b 1
 set "TOOLS=%ANDROID_HOME%\build-tools\35.0.0"
 set "SOURCE=%ROOT%\src-tauri\gen\android\app\build\outputs\apk\arm64\release\app-arm64-release-unsigned.apk"
 set "OUTPUT=%OUT%\Deepwork-shaft-first-arm64-test.apk"
