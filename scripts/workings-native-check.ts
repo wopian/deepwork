@@ -16,6 +16,9 @@ const duration = Number(process.argv[3] ?? 30);
 const inputLocked = process.argv.includes("--locked-input");
 const priorityOrder = process.argv.includes("--priority");
 const inspectControls = process.argv.includes("--inspect");
+const fixturePath =
+  process.argv.find((arg) => arg.startsWith("--fixture="))?.slice(10) ??
+  "target/workings-fixture.json";
 const canonical = (value: any): any =>
   Array.isArray(value)
     ? value.map(canonical)
@@ -74,9 +77,9 @@ try {
     document.body.append(marker);
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
-  const fixtureState = JSON.parse(
-    await readFile("target/workings-fixture.json", "utf8"),
-  );
+  const fixtureState = JSON.parse(await readFile(fixturePath, "utf8"));
+  // Fixtures measure foreground behavior; do not catch up their diagnostic timestamps.
+  fixtureState.last_saved = 0;
   if (duration >= 1800) {
     for (const upgrade of await Bun.file("content/upgrades.json").json())
       fixtureState.levels[upgrade.id] = 50;
@@ -368,6 +371,11 @@ try {
         setupCommands: measurementStartSequence - fixtureState.last_sequence,
         saveBytes: Buffer.byteLength(save),
         fixtureWorkers: fixtureState.workers,
+        fixturePath,
+        fixtureDepth:
+          Math.max(
+            ...fixtureState.workings.passages.map((p: any) => p.feet[1]),
+          ) / 4,
         gameplayCommands:
           measuredState.last_sequence - measurementStartSequence,
         inspectionCommands: g.last_sequence - measuredState.last_sequence,
