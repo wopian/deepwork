@@ -438,6 +438,9 @@ footer b {
 .offline button {
   margin-left: auto;
 }
+.save-error {
+  color: #e5a34d;
+}
 .catalogue > p,
 .card > p,
 .card > h2 {

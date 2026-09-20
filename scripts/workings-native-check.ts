@@ -2,6 +2,7 @@
 import { chromium } from "playwright-core";
 import { chunkOrigin } from "../src/geometry";
 import { checkOreInspection } from "./ore-inspection-check";
+import { installSaveDecoder } from "./save-container";
 import {
   mkdtemp,
   mkdir,
@@ -70,6 +71,7 @@ try {
   browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
   const context = browser.contexts()[0]!;
   const page = context.pages()[0]!;
+  await installSaveDecoder(context, page);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.locator("canvas").waitFor();
@@ -102,9 +104,7 @@ try {
   });
   await page.waitForTimeout(2000);
   const imported = JSON.parse(
-    await page.evaluate(() =>
-      (window as any).__TAURI_INTERNALS__.invoke("export_save"),
-    ),
+    await page.evaluate(() => (window as any).__DEEPWORK_TEST_EXPORT__()),
   );
   if (
     imported.workers !== fixtureState.workers ||
@@ -213,9 +213,7 @@ try {
   const samples = [];
   const nativeMemory = [];
   const measurementState = JSON.parse(
-    await page.evaluate(() =>
-      (window as any).__TAURI_INTERNALS__.invoke("export_save"),
-    ),
+    await page.evaluate(() => (window as any).__DEEPWORK_TEST_EXPORT__()),
   );
   const measurementStarted = Date.now();
   for (let n = 0; n < duration; n++) {
@@ -255,9 +253,7 @@ try {
   }
   const measurementEnded = Date.now();
   const measuredState = JSON.parse(
-    await page.evaluate(() =>
-      (window as any).__TAURI_INTERNALS__.invoke("export_save"),
-    ),
+    await page.evaluate(() => (window as any).__DEEPWORK_TEST_EXPORT__()),
   );
   await page.evaluate(() => {
     (window as any).__deepworkUnlockPerformanceInput?.();
@@ -340,7 +336,7 @@ try {
     fullPage: true,
   });
   const save = await page.evaluate(() =>
-    (window as any).__TAURI_INTERNALS__.invoke("export_save"),
+    (window as any).__DEEPWORK_TEST_EXPORT__(),
   );
   await writeFile(join(out, "checkpoint.json"), save);
   const g = JSON.parse(save);
@@ -351,9 +347,7 @@ try {
   await page.locator("canvas").waitFor();
   await page.waitForTimeout(1000);
   const resumed = JSON.parse(
-    await page.evaluate(() =>
-      (window as any).__TAURI_INTERNALS__.invoke("export_save"),
-    ),
+    await page.evaluate(() => (window as any).__DEEPWORK_TEST_EXPORT__()),
   );
   if (
     resumed.ticks < before ||

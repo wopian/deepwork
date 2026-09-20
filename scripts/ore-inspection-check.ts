@@ -48,9 +48,7 @@ export async function checkOreInspection(page: Page, mode: "mouse" | "touch") {
     });
   const save = async () =>
     JSON.parse(
-      await page.evaluate(() =>
-        (window as any).__TAURI_INTERNALS__.invoke("export_save"),
-      ),
+      await page.evaluate(() => (window as any).__DEEPWORK_TEST_EXPORT__()),
     );
   try {
     if (

@@ -9,6 +9,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { decodeSave, installSaveDecoder } from "./save-container";
 const stressSeconds = Math.max(0, Number(process.argv[3] ?? 0));
 const output = resolve(process.argv[2] ?? "test-results");
 await mkdir(output, { recursive: true });
@@ -53,6 +54,7 @@ try {
   browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
   const context = browser.contexts()[0]!;
   const page = context.pages()[0] ?? (await context.waitForEvent("page"));
+  await installSaveDecoder(context, page);
   page.on("console", (msg) => console.log("WEBVIEW", msg.type(), msg.text()));
   page.on("pageerror", (e) => console.log("WEBVIEW ERROR", e.message));
   console.log("Native URL", page.url());
@@ -74,6 +76,8 @@ try {
   const invoke = async (command: string, args: Record<string, unknown> = {}) =>
     page.evaluate(
       async ({ command, args }) => {
+        if (command === "export_save")
+          return (window as any).__DEEPWORK_TEST_EXPORT__();
         return (window as any).__TAURI_INTERNALS__.invoke(command, args);
       },
       { command, args },
@@ -97,12 +101,15 @@ try {
   });
   if (purchased.workers !== advanced.workers + 1)
     throw new Error("Worker purchase failed");
-  const disk = JSON.parse(await readFile(join(saves, "mine.json"), "utf8"));
+  const disk = decodeSave(await readFile(join(saves, "mine.deepwork")));
   if (disk.workers !== purchased.workers)
     throw new Error("Purchase was not checkpointed");
   let rejected = false;
   try {
-    await invoke("import_save", { data: '{"version":999}' });
+    await invoke("import_save", {
+      data: '{"version":999}',
+      encoding: "json",
+    });
   } catch {
     rejected = true;
   }
@@ -111,7 +118,10 @@ try {
   malformedQuote.transport.stations[0].quote = "NaN";
   rejected = false;
   try {
-    await invoke("import_save", { data: JSON.stringify(malformedQuote) });
+    await invoke("import_save", {
+      data: JSON.stringify(malformedQuote),
+      encoding: "json",
+    });
   } catch {
     rejected = true;
   }
@@ -139,9 +149,7 @@ try {
   await page.getByRole("button", { name: "Logistics", exact: true }).click();
   await page.getByLabel("Cargo scheduling").selectOption("preferred");
   await page.waitForFunction(async () => {
-    const data = await (window as any).__TAURI_INTERNALS__.invoke(
-      "export_save",
-    );
+    const data = await (window as any).__DEEPWORK_TEST_EXPORT__();
     return JSON.parse(data).cargo_policy === "preferred";
   });
   await page.getByRole("button", { name: "Close panel", exact: true }).click();
@@ -150,9 +158,9 @@ try {
   const downloadEvent = page.waitForEvent("download", { timeout: 15000 });
   await page.getByRole("button", { name: "Export save", exact: true }).click();
   const download = await downloadEvent;
-  const exportedPath = join(data, "exported-save.json");
+  const exportedPath = join(data, "exported-save.deepwork");
   await download.saveAs(exportedPath);
-  const exported = JSON.parse(await readFile(exportedPath, "utf8"));
+  const exported = decodeSave(await readFile(exportedPath));
   if (
     exported.workers !== purchased.workers ||
     exported.cargo_policy !== "preferred"
@@ -160,7 +168,7 @@ try {
     throw new Error("UI export lost authoritative state");
   await page.locator('input[type="file"]').setInputFiles(exportedPath);
   await page.waitForFunction(async (previousIdentity) => {
-    const raw = await (window as any).__TAURI_INTERNALS__.invoke("export_save");
+    const raw = await (window as any).__DEEPWORK_TEST_EXPORT__();
     return JSON.parse(raw).campaign_id !== previousIdentity;
   }, exported.campaign_id);
   const imported = JSON.parse(await invoke("export_save"));
@@ -196,9 +204,8 @@ try {
     await page.locator('input[type="file"]').setInputFiles(fixturePath);
     await page.waitForFunction(
       async () =>
-        JSON.parse(
-          await (window as any).__TAURI_INTERNALS__.invoke("export_save"),
-        ).workers === 1000,
+        JSON.parse(await (window as any).__DEEPWORK_TEST_EXPORT__()).workers ===
+        1000,
     );
     await page.getByRole("button", { name: "Operations", exact: true }).click();
     await page
@@ -415,8 +422,8 @@ try {
   );
   await page.waitForFunction(
     (preferred) =>
-      (window as any).__TAURI_INTERNALS__
-        .invoke("export_save")
+      (window as any)
+        .__DEEPWORK_TEST_EXPORT__()
         .then(
           (raw: string) =>
             JSON.parse(raw).transport.stations[0].preferred === preferred,
@@ -430,8 +437,8 @@ try {
       .getByRole("button", { name: "Select express route", exact: true }),
   );
   await page.waitForFunction(() =>
-    (window as any).__TAURI_INTERNALS__
-      .invoke("export_save")
+    (window as any)
+      .__DEEPWORK_TEST_EXPORT__()
       .then((raw: string) => JSON.parse(raw).transport.express === 1),
   );
   const canUpgradeBuffer =
@@ -442,8 +449,7 @@ try {
   }
   await page.waitForFunction(
     ({ level, preferred }) => {
-      const world = (window as any).__TAURI_INTERNALS__;
-      return world.invoke("export_save").then((raw: string) => {
+      return (window as any).__DEEPWORK_TEST_EXPORT__().then((raw: string) => {
         const transport = JSON.parse(raw).transport;
         return (
           transport.express === 1 &&

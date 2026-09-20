@@ -77,6 +77,19 @@ const headquartersBenefits: Record<string, string[]> = {
 };
 const showReset = ref(false);
 const resetText = ref("");
+const saveStatus = computed(() => {
+  const status = state.value?.save_status;
+  if (!status?.last_success) return "Waiting for first checkpoint";
+  const bytes = status.bytes;
+  const size =
+    bytes < 1024
+      ? `${bytes} B`
+      : bytes < 1024 * 1024
+        ? `${(bytes / 1024).toFixed(1)} KB`
+        : `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+  return `Saved ${new Date(status.last_success * 1000).toLocaleString()} · ${size} · Format ${status.format}`;
+});
+const saveError = computed(() => state.value?.save_status.error ?? "");
 async function confirmReset() {
   if (await resetCampaign(resetText.value)) {
     showReset.value = false;
@@ -1294,6 +1307,10 @@ onMounted(start);
             Export a portable checkpoint, import another campaign, or archive
             this operation before starting again.
           </p>
+          <p class="panel-copy save-status">{{ saveStatus }}</p>
+          <p v-if="saveError" class="panel-copy save-error" role="alert">
+            {{ saveError }}
+          </p>
           <div class="action-row vertical-actions">
             <button
               :disabled="!state"
@@ -1308,7 +1325,7 @@ onMounted(start);
             <label class="import"
               >Import save<input
                 type="file"
-                accept=".json"
+                accept=".deepwork,.json"
                 @change="
                   (e: Event) => {
                     const f = (e.target as HTMLInputElement).files?.[0];

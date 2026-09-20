@@ -7,6 +7,12 @@ import { preferences, purchaseSound } from "./preferences";
 export const materials = catalogue;
 export interface Game {
   campaign_id: string;
+  save_status: {
+    last_success: number;
+    bytes: number;
+    format: number;
+    error: string;
+  };
   requires_reset: boolean;
   enabled_recipes: string[];
   paused_recipes: string[];
@@ -336,13 +342,14 @@ export async function act(kind: string, target = "", value = 0) {
 }
 export async function exportSave() {
   try {
-    const data = await invoke<string>("export_save");
+    const data = await invoke<ArrayBuffer | number[]>("export_save");
+    const bytes = data instanceof ArrayBuffer ? data : new Uint8Array(data);
     const url = URL.createObjectURL(
-      new Blob([data], { type: "application/json" }),
+      new Blob([bytes], { type: "application/octet-stream" }),
     );
     const a = document.createElement("a");
     a.href = url;
-    a.download = "deepwork-save.json";
+    a.download = "deepwork-save.deepwork";
     a.click();
     URL.revokeObjectURL(url);
   } catch (e) {
@@ -351,13 +358,26 @@ export async function exportSave() {
 }
 export async function importSave(file: File) {
   try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const first = bytes.find((byte) => ![9, 10, 13, 32].includes(byte));
+    const legacyJson =
+      file.name.toLowerCase().endsWith(".json") || first === 0x7b;
     state.value = await invoke<Game>("import_save", {
-      data: await file.text(),
+      data: legacyJson ? new TextDecoder().decode(bytes) : bytesToBase64(bytes),
+      encoding: legacyJson ? "json" : "base64",
     });
     terrainEpoch.value++;
   } catch (e) {
     error.value = String(e);
   }
+}
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
 }
 
 export async function resetCampaign(confirmation: string) {
