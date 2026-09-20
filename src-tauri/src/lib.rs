@@ -1,6 +1,7 @@
 mod persistence;
+use base64::Engine;
 use mine_core::{materials, Action, Game};
-use persistence::{recover, save};
+use persistence::save;
 use std::{
     fs,
     path::PathBuf,
@@ -43,9 +44,17 @@ struct Runtime {
     suspended: AtomicBool,
     lifecycle: mpsc::Sender<LifecycleRequest>,
     epoch: AtomicU64,
-    legacy: Mutex<Option<String>>,
+    legacy: Mutex<Option<Vec<u8>>>,
     path: PathBuf,
+    save_status: Mutex<SaveStatus>,
     channel: Mutex<Option<Channel<Update>>>,
+}
+#[derive(Clone, Default, serde::Serialize)]
+struct SaveStatus {
+    last_success: u64,
+    bytes: u64,
+    format: u32,
+    error: String,
 }
 #[derive(Clone, serde::Serialize)]
 struct Update {
@@ -72,6 +81,7 @@ struct Snapshot {
     research_invested: u64,
     upgrade_previews: std::collections::BTreeMap<String, mine_core::UpgradePreview>,
     purchase_blockers: std::collections::BTreeMap<String, String>,
+    save_status: SaveStatus,
 }
 impl From<Game> for Snapshot {
     fn from(mut game: Game) -> Self {
@@ -109,9 +119,6 @@ impl From<Game> for Snapshot {
         let shipments = game.transport.visual();
         for segment in &mut game.transport.segments {
             segment.legs.clear();
-            for batch in &mut segment.batches {
-                batch.legs.clear();
-            }
         }
         // Persistence retains search internals; rendering receives only public knowledge.
         game.workings.search = None;
@@ -158,8 +165,38 @@ impl From<Game> for Snapshot {
             retirement_award,
             upgrade_previews,
             purchase_blockers,
+            save_status: SaveStatus::default(),
         }
     }
+}
+
+fn snapshot_for(game: Game, state: &Runtime) -> Snapshot {
+    let mut snapshot: Snapshot = game.into();
+    snapshot.save_status = state
+        .save_status
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default();
+    snapshot
+}
+
+fn persist(state: &Runtime, game: &Game) -> Result<persistence::SaveStats, String> {
+    let stats = match save(&state.path, game) {
+        Ok(stats) => stats,
+        Err(error) => {
+            if let Ok(mut status) = state.save_status.lock() {
+                status.error = format!("Save failed: {error}");
+            }
+            return Err(error);
+        }
+    };
+    *state.save_status.lock().map_err(|e| e.to_string())? = SaveStatus {
+        last_success: game.last_saved,
+        bytes: stats.bytes,
+        format: stats.format,
+        error: String::new(),
+    };
+    Ok(stats)
 }
 #[derive(Default)]
 struct Stream {
@@ -221,7 +258,10 @@ async fn connect(channel: Channel<Update>, handle: tauri::AppHandle) -> Result<S
     tauri::async_runtime::spawn_blocking(move || {
         let state = handle.state::<Runtime>();
         *state.channel.lock().map_err(|e| e.to_string())? = Some(channel);
-        let snapshot = state.game.lock().map_err(|e| e.to_string())?.clone().into();
+        let snapshot = snapshot_for(
+            state.game.lock().map_err(|e| e.to_string())?.clone(),
+            &state,
+        );
         Ok(snapshot)
     })
     .await
@@ -247,13 +287,13 @@ fn checkpoint_gap(
     path: &std::path::Path,
     from: u64,
     timestamp: u64,
-) -> Result<(), String> {
+) -> Result<persistence::SaveStats, String> {
     let mut candidate = game.clone();
     candidate.last_saved = candidate.last_saved.max(from);
     candidate.advance_offline(timestamp, &materials());
-    save(path, &candidate)?;
+    let stats = save(path, &candidate)?;
     *game = candidate;
-    Ok(())
+    Ok(stats)
 }
 fn transition_epoch(
     state: &Runtime,
@@ -272,11 +312,11 @@ fn transition_epoch(
         } else {
             candidate.advance_offline(timestamp, &materials());
         }
-        save(&state.path, &candidate)?;
+        persist(state, &candidate)?;
         *game = candidate;
         state.suspended.store(background, Ordering::Relaxed);
     }
-    Ok(game.clone().into())
+    Ok(snapshot_for(game.clone(), state))
 }
 #[tauri::command]
 async fn set_background(background: bool, handle: tauri::AppHandle) -> Result<Snapshot, String> {
@@ -324,19 +364,20 @@ fn command_current(
     let mut candidate = g.clone();
     candidate.action(action)?;
     candidate.last_saved = candidate.last_saved.max(now());
-    save(&state.path, &candidate)?;
+    persist(state, &candidate)?;
     *g = candidate;
-    Ok(g.clone().into())
+    Ok(snapshot_for(g.clone(), state))
 }
 #[tauri::command]
-fn export_save(state: State<Runtime>) -> Result<String, String> {
+fn export_save(state: State<Runtime>) -> Result<tauri::ipc::Response, String> {
     if let Some(raw) = state.legacy.lock().map_err(|e| e.to_string())?.as_ref() {
-        return Ok(raw.clone());
+        return Ok(tauri::ipc::Response::new(raw.clone()));
     }
-    persistence::encode(&*state.game.lock().map_err(|e| e.to_string())?)
+    let data = persistence::encode_container(&*state.game.lock().map_err(|e| e.to_string())?)?;
+    Ok(tauri::ipc::Response::new(data))
 }
 #[tauri::command]
-fn import_save(data: String, state: State<Runtime>) -> Result<Snapshot, String> {
+fn import_save(data: String, encoding: String, state: State<Runtime>) -> Result<Snapshot, String> {
     let mut game = state.game.lock().map_err(|e| e.to_string())?;
     if state.suspended.load(Ordering::Relaxed) {
         return Err("Resume the game before importing a save".into());
@@ -344,12 +385,30 @@ fn import_save(data: String, state: State<Runtime>) -> Result<Snapshot, String> 
     if game.legacy_pending {
         return Err("Archive the legacy campaign before importing".into());
     }
-    let mut candidate = persistence::decode(&data)?;
+    let bytes = match encoding.as_str() {
+        "base64" => {
+            let encoded_limit = persistence::MAX_CONTAINER_BYTES.div_ceil(3) * 4;
+            if data.len() > encoded_limit {
+                return Err("Compressed save exceeds 16 MiB".into());
+            }
+            base64::engine::general_purpose::STANDARD
+                .decode(data)
+                .map_err(|_| "Invalid base64 save data")?
+        }
+        "json" => {
+            if data.len() > persistence::MAX_LEGACY_BYTES {
+                return Err("Legacy save exceeds 128 MiB".into());
+            }
+            data.into_bytes()
+        }
+        _ => return Err("Unsupported import encoding".into()),
+    };
+    let mut candidate = persistence::decode_bytes(&bytes)?;
     candidate.campaign_id = fresh_identity().to_string();
     candidate.advance_offline(now(), &materials());
-    save(&state.path, &candidate)?;
+    persist(&state, &candidate)?;
     *game = candidate.clone();
-    Ok(candidate.into())
+    Ok(snapshot_for(candidate, &state))
 }
 fn fresh_identity() -> u64 {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -382,19 +441,84 @@ fn reset_current(
     let mut legacy = state.legacy.lock().map_err(|e| e.to_string())?;
     let raw = match legacy.as_ref() {
         Some(raw) => raw.clone(),
-        None => persistence::encode(&game)?,
+        None => persistence::encode_container(&game)?,
     };
     let seed = fresh_identity();
     let mut candidate = Game::new(seed, 1);
     candidate.last_saved = candidate.last_saved.max(now());
     persistence::archive(&state.path, &raw, &seed.to_string())?;
-    save(&state.path, &candidate)?;
+    persist(state, &candidate)?;
     *game = candidate;
     *legacy = None;
     state.epoch.fetch_add(1, Ordering::SeqCst);
     state.suspended.store(false, Ordering::Relaxed);
-    Ok(game.clone().into())
+    Ok(snapshot_for(game.clone(), state))
 }
+
+fn open_save(dir: &std::path::Path) -> Result<(Game, Option<Vec<u8>>, SaveStatus), String> {
+    let path = dir.join("mine.deepwork");
+    let old_path = dir.join("mine.json");
+    if let Some(raw) = persistence::incompatible_source(&path)? {
+        let mut game = Game::default();
+        game.legacy_pending = true;
+        return Ok((game, Some(raw), SaveStatus::default()));
+    }
+    let active = persistence::recover_source(&path);
+    if let Ok(Some((saved, raw))) = &active {
+        let mut game = saved.clone();
+        game.legacy_pending = false;
+        return Ok((
+            game.clone(),
+            None,
+            SaveStatus {
+                last_success: game.last_saved,
+                bytes: raw.len() as u64,
+                format: game.version,
+                error: String::new(),
+            },
+        ));
+    }
+    let incompatible = persistence::incompatible_source(&old_path)?;
+    if let Some(raw) = incompatible {
+        let mut game = Game::default();
+        game.legacy_pending = true;
+        return Ok((game, Some(raw), SaveStatus::default()));
+    }
+    match persistence::recover_source(&old_path) {
+        Ok(Some((mut game, raw))) => {
+            let archive_id = format!("pre-v11-{}", fresh_identity());
+            persistence::archive(&path, &raw, &archive_id)?;
+            game.legacy_pending = false;
+            let stats = save(&path, &game)?;
+            Ok((
+                game.clone(),
+                None,
+                SaveStatus {
+                    last_success: game.last_saved,
+                    bytes: stats.bytes,
+                    format: stats.format,
+                    error: String::new(),
+                },
+            ))
+        }
+        Ok(None) => match active {
+            Err(error) => Err(error),
+            Ok(None) => Ok((
+                Game::new(fresh_identity(), 1),
+                None,
+                SaveStatus::default(),
+            )),
+            Ok(Some(_)) => unreachable!(),
+        },
+        Err(legacy_error) => match active {
+            Err(active_error) => Err(format!(
+                "Active save recovery failed: {active_error}; legacy recovery failed: {legacy_error}"
+            )),
+            _ => Err(legacy_error),
+        },
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -418,16 +542,9 @@ pub fn run() {
             fs::create_dir_all(&dir)?;
             let save_lock =
                 persistence::lock(&dir.join("mine.lock")).map_err(std::io::Error::other)?;
-            let path = dir.join("mine.json");
-            let legacy = persistence::legacy_source(&path).map_err(std::io::Error::other)?;
-            let mut game = if legacy.is_some() {
-                Game::default()
-            } else {
-                recover(&path)
-                    .map_err(std::io::Error::other)?
-                    .unwrap_or_else(|| Game::new(fresh_identity(), 1))
-            };
-            game.legacy_pending = legacy.is_some();
+            let path = dir.join("mine.deepwork");
+            let (game, legacy, save_status) =
+                open_save(&dir).map_err(std::io::Error::other)?;
             let (lifecycle, requests) = mpsc::channel::<LifecycleRequest>();
             app.manage(Runtime {
                 _save_lock: save_lock,
@@ -437,6 +554,7 @@ pub fn run() {
                 epoch: AtomicU64::new(0),
                 legacy: Mutex::new(legacy),
                 path,
+                save_status: Mutex::new(save_status),
                 channel: Mutex::new(None),
             });
             let lifecycle_handle = app.handle().clone();
@@ -453,7 +571,11 @@ pub fn run() {
                     let result = if accepted {
                         transition_epoch(&state, request.background, request.timestamp, request.epoch)
                     } else {
-                        state.game.lock().map(|game| game.clone().into()).map_err(|e| e.to_string())
+                        state
+                            .game
+                            .lock()
+                            .map(|game| snapshot_for(game.clone(), &state))
+                            .map_err(|e| e.to_string())
                     };
                     if let Err(error) = &result {
                         let _ = lifecycle_handle.emit("mine-lifecycle-error", error.clone());
@@ -508,27 +630,51 @@ pub fn run() {
                         // A lifecycle resume may already have consumed this clock gap.
                         let gap_start = previous.max(g.last_saved);
                         if current.saturating_sub(gap_start) > 2 {
-                            if let Err(e) = checkpoint_gap(&mut g, &state.path, gap_start, current) {
-                                eprintln!("Resume save failed: {e}");
-                                // Retry from the last committed state. Do not publish
-                                // catch-up rewards or replace the interval on failure.
-                                next_tick = std::time::Instant::now() + std::time::Duration::from_secs(1);
-                                continue;
+                            match checkpoint_gap(&mut g, &state.path, gap_start, current) {
+                                Ok(stats) => {
+                                    if let Ok(mut status) = state.save_status.lock() {
+                                        *status = SaveStatus {
+                                            last_success: g.last_saved,
+                                            bytes: stats.bytes,
+                                            format: stats.format,
+                                            error: String::new(),
+                                        };
+                                    }
+                                }
+                                Err(e) => {
+                                    if let Ok(mut status) = state.save_status.lock() {
+                                        status.error = format!("Save failed: {e}");
+                                    }
+                                    eprintln!("Resume save failed: {e}");
+                                    // Retry from the last committed state. Do not publish
+                                    // catch-up rewards or replace the interval on failure.
+                                    next_tick = std::time::Instant::now()
+                                        + std::time::Duration::from_secs(1);
+                                    continue;
+                                }
                             }
                             next_tick = std::time::Instant::now();
                         } else {
                             g.tick(&cat, false);
                         }
                         if g.ticks % 600 == 0 {
-                            g.last_saved = g.last_saved.max(now());
-                            if let Err(e) = save(&state.path, &g) {
-                                eprintln!("Save failed: {e}")
+                            let mut candidate = g.clone();
+                            candidate.last_saved = candidate.last_saved.max(now());
+                            match persist(&state, &candidate) {
+                                Ok(_) => *g = candidate,
+                                Err(e) => eprintln!("Save failed: {e}"),
                             }
                         }
                         if g.ticks % 4 == 0 {
                             if let Ok(channel) = state.channel.lock() {
                                 if let Some(c) = channel.as_ref() {
-                                    if c.send(stream.update(&g)).is_err() {
+                                    let mut update = stream.update(&g);
+                                    update.state.save_status = state
+                                        .save_status
+                                        .lock()
+                                        .map(|status| status.clone())
+                                        .unwrap_or_default();
+                                    if c.send(update).is_err() {
                                         stream = Stream::default();
                                     }
                                 }
@@ -575,11 +721,12 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 let state = handle.state::<Runtime>();
                 if let Ok(mut g) = state.game.lock() {
+                    let mut candidate = g.clone();
                     if !state.suspended.load(Ordering::Relaxed) {
-                        g.last_saved = g.last_saved.max(now());
+                        candidate.last_saved = candidate.last_saved.max(now());
                     }
-                    if !g.legacy_pending {
-                        let _ = save(&state.path, &g);
+                    if !candidate.legacy_pending && persist(&state, &candidate).is_ok() {
+                        *g = candidate;
                     }
                 };
             }
@@ -678,7 +825,7 @@ mod lifecycle_tests {
         assert_eq!(game.ticks, 200);
         assert_eq!(game.last_saved, 120);
         assert_eq!(
-            serde_json::to_value(recover(&path).unwrap().unwrap()).unwrap(),
+            serde_json::to_value(persistence::recover(&path).unwrap().unwrap()).unwrap(),
             serde_json::to_value(&game).unwrap()
         );
         fs::remove_dir_all(directory).unwrap();
@@ -699,6 +846,7 @@ mod lifecycle_tests {
             epoch: AtomicU64::new(0),
             legacy: Mutex::new(None),
             path: directory.join("mine.json"),
+            save_status: Mutex::new(SaveStatus::default()),
             channel: Mutex::new(None),
         };
         transition_background(&state, true, 100).unwrap();
@@ -710,7 +858,7 @@ mod lifecycle_tests {
         let repeated = transition_background(&state, false, 140).unwrap();
         assert_eq!(repeated.game.ticks, 200);
         assert!(transition_epoch(&state, true, 150, 999).is_err());
-        let recovered = recover(&state.path).unwrap().unwrap();
+        let recovered = persistence::recover(&state.path).unwrap().unwrap();
         assert_eq!(recovered.last_saved, 120);
         assert_eq!(recovered.ticks, 200);
         transition_background(&state, true, 160).unwrap();
@@ -724,6 +872,118 @@ mod lifecycle_tests {
         assert_eq!(restored_clock.game.offline.as_ref().unwrap().effective, 0);
         drop(state);
         fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod save_migration_tests {
+    use super::*;
+
+    fn directory(label: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "deepwork-{label}-{}-{}",
+            std::process::id(),
+            fresh_identity()
+        ));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn legacy(game: &Game) -> Vec<u8> {
+        let mut old = game.clone();
+        old.version = 10;
+        serde_json::to_vec(&old).unwrap()
+    }
+
+    #[test]
+    fn version_ten_is_archived_exactly_before_atomic_conversion() {
+        let directory = directory("v10-conversion");
+        let old_path = directory.join("mine.json");
+        let mut original = Game::default();
+        original.credits = 42;
+        let raw = legacy(&original);
+        fs::write(&old_path, &raw).unwrap();
+
+        let (migrated, pending, status) = open_save(&directory).unwrap();
+        assert_eq!(migrated.campaign_id, original.campaign_id);
+        assert_eq!(migrated.credits, 42);
+        assert_eq!(migrated.version, mine_core::VERSION);
+        assert!(pending.is_none());
+        assert_eq!(status.format, mine_core::VERSION);
+        assert_eq!(fs::read(&old_path).unwrap(), raw);
+        assert_eq!(
+            persistence::load(&directory.join("mine.deepwork"))
+                .unwrap()
+                .campaign_id,
+            original.campaign_id
+        );
+        let archived = fs::read_dir(directory.join("archives"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        assert_eq!(fs::read(archived).unwrap(), raw);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn failed_archive_leaves_legacy_campaign_and_active_slot_untouched() {
+        let directory = directory("v10-rollback");
+        let old_path = directory.join("mine.json");
+        let raw = legacy(&Game::default());
+        fs::write(&old_path, &raw).unwrap();
+        fs::write(directory.join("archives"), b"blocked").unwrap();
+
+        assert!(open_save(&directory).is_err());
+        assert_eq!(fs::read(&old_path).unwrap(), raw);
+        assert!(!directory.join("mine.deepwork").exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn recovery_prefers_new_backup_before_legacy_primary() {
+        let directory = directory("recovery-order");
+        let path = directory.join("mine.deepwork");
+        let mut first = Game::default();
+        first.credits = 12;
+        persistence::save(&path, &first).unwrap();
+        let backup_bytes = fs::read(&path).unwrap();
+        let mut second = first.clone();
+        second.credits = 34;
+        persistence::save(&path, &second).unwrap();
+        fs::write(&path, b"broken primary").unwrap();
+        let mut old = first.clone();
+        old.credits = 56;
+        fs::write(directory.join("mine.json"), legacy(&old)).unwrap();
+
+        let (recovered, _, status) = open_save(&directory).unwrap();
+        assert_eq!(recovered.credits, 12);
+        assert_eq!(status.bytes, backup_bytes.len() as u64);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn unsupported_json_and_container_remain_exportable_for_reset() {
+        let json_directory = directory("unsupported-json");
+        let mut old = Game::default();
+        old.version = 9;
+        let raw = serde_json::to_vec(&old).unwrap();
+        fs::write(json_directory.join("mine.json"), &raw).unwrap();
+        let (placeholder, pending, _) = open_save(&json_directory).unwrap();
+        assert!(placeholder.legacy_pending);
+        assert_eq!(pending.unwrap(), raw);
+        assert!(!json_directory.join("mine.deepwork").exists());
+        fs::remove_dir_all(json_directory).unwrap();
+
+        let container_directory = directory("unsupported-container");
+        let mut raw = persistence::encode_container(&Game::default()).unwrap();
+        raw[8..10].copy_from_slice(&2u16.to_le_bytes());
+        fs::write(container_directory.join("mine.deepwork"), &raw).unwrap();
+        let (placeholder, pending, _) = open_save(&container_directory).unwrap();
+        assert!(placeholder.legacy_pending);
+        assert_eq!(pending.unwrap(), raw);
+        fs::remove_dir_all(container_directory).unwrap();
     }
 }
 
@@ -742,6 +1002,7 @@ mod reset_tests {
             epoch: AtomicU64::new(0),
             legacy: Mutex::new(None),
             path: directory.join("mine.json"),
+            save_status: Mutex::new(SaveStatus::default()),
             channel: Mutex::new(None),
         };
         let id = state.game.lock().unwrap().campaign_id.clone();
@@ -765,7 +1026,10 @@ mod reset_tests {
             .path();
         assert_eq!(persistence::load(&archive).unwrap().research, 100);
         assert_eq!(
-            recover(&state.path).unwrap().unwrap().campaign_id,
+            persistence::recover(&state.path)
+                .unwrap()
+                .unwrap()
+                .campaign_id,
             fresh.game.campaign_id
         );
         drop(state);
@@ -846,27 +1110,34 @@ mod bounded_cargo_snapshot_tests {
             milliseconds: 1000,
         };
         game.transport.segments[0].legs = vec![leg.clone(); 4096];
+        game.transport.routes.insert(
+            1,
+            vec![vec![leg.clone(); 4096], Vec::new(), Vec::new(), Vec::new()],
+        );
+        game.transport.current_route = 1;
         game.transport.segments[0]
             .batches
             .push(mine_core::transport::Batch {
-                route: 0,
+                route: 1,
                 material: 3,
                 amount: 1234,
-                remaining_ms: 4_098_000,
-                duration_ms: 4_098_000,
-                legs: vec![leg; 4096],
+                remaining_ms: 4_097_000,
+                duration_ms: 4_097_000,
             });
         game.mining_fronts.push(mine_core::fronts::MiningFront {
             id: "front".into(),
             deposit: "deposit".into(),
             material: 3,
             face: [0, 16],
+            position: [0, 16],
             crew: 1,
             haulers: 1,
             progress: 0,
+            cut_work: 0,
             work_remainder: 0,
             transfer_remainder: 0,
             stockpile: 0,
+            stockpiles: std::collections::BTreeMap::new(),
             capacity: mine_core::geometry::UNITS,
             route: vec![[0, 16]; 4096],
             route_id: 0,
@@ -877,12 +1148,9 @@ mod bounded_cargo_snapshot_tests {
         let snapshot = Snapshot::from(game.clone());
         assert_eq!(snapshot.shipments[0].legs.len(), 1);
         assert!(snapshot.game.transport.segments[0].legs.is_empty());
-        assert!(snapshot.game.transport.segments[0].batches[0]
-            .legs
-            .is_empty());
         assert!(snapshot.game.mining_fronts[0].route.is_empty());
         assert_eq!(snapshot.game.transport.mass(), game.transport.mass());
-        assert_eq!(game.transport.segments[0].batches[0].legs.len(), 4096);
+        assert_eq!(game.transport.routes[&1][0].len(), 4096);
         assert!(serde_json::to_vec(&snapshot).unwrap().len() < 100_000);
     }
 }

@@ -1,10 +1,30 @@
 //! Durable local checkpoints. Keep the last valid primary as backup.
+use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use mine_core::Game;
 use std::{
     fs::{self, File, OpenOptions},
-    io::Write,
-    path::Path,
+    io::{Read, Write},
+    path::{Path, PathBuf},
 };
+const MAGIC: &[u8; 8] = b"DWRKSAVE";
+const CONTAINER_VERSION: u16 = 1;
+const GZIP_CODEC: u8 = 1;
+const HEADER_BYTES: usize = 20;
+pub const MAX_CONTAINER_BYTES: usize = 16 * 1024 * 1024;
+const MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
+pub const MAX_LEGACY_BYTES: usize = 128 * 1024 * 1024;
+
+#[derive(Clone, Copy, Debug)]
+pub struct SaveStats {
+    pub bytes: u64,
+    pub format: u32,
+}
+
+fn sidecar(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(suffix);
+    PathBuf::from(name)
+}
 pub fn lock(path: &Path) -> Result<File, String> {
     let file = OpenOptions::new()
         .read(true)
@@ -18,26 +38,111 @@ pub fn lock(path: &Path) -> Result<File, String> {
     Ok(file)
 }
 pub fn load(path: &Path) -> Result<Game, String> {
-    if fs::metadata(path).map_err(|e| e.to_string())?.len() > 32_000_000 {
-        return Err("Save exceeds 32 MB".into());
-    }
-    let raw = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    decode(&raw)
+    let data = fs::read(path).map_err(|e| e.to_string())?;
+    decode_bytes(&data)
 }
+#[cfg(test)]
 pub fn recover(path: &Path) -> Result<Option<Game>, String> {
-    let backup = path.with_extension("bak");
+    let backup = sidecar(path, ".bak");
     if !path.exists() && !backup.exists() {
         return Ok(None);
     }
     load(path).or_else(|_| load(&backup)).map(Some)
 }
+pub fn recover_source(path: &Path) -> Result<Option<(Game, Vec<u8>)>, String> {
+    let backup = sidecar(path, ".bak");
+    let old_backup = path.with_extension("bak");
+    if !path.exists() && !backup.exists() && !old_backup.exists() {
+        return Ok(None);
+    }
+    for candidate in [path, backup.as_path(), old_backup.as_path()] {
+        let Ok(data) = fs::read(candidate) else {
+            continue;
+        };
+        if let Ok(game) = decode_bytes(&data) {
+            return Ok(Some((game, data)));
+        }
+    }
+    Err("Primary and previous-good saves are invalid".into())
+}
+
+pub fn decode_bytes(data: &[u8]) -> Result<Game, String> {
+    if data.starts_with(MAGIC) {
+        return decode_container(data);
+    }
+    if data.len() > MAX_LEGACY_BYTES {
+        return Err("Legacy save exceeds 128 MiB".into());
+    }
+    let raw = std::str::from_utf8(data).map_err(|_| "Legacy save is not UTF-8")?;
+    decode(raw)
+}
+
+pub fn encode_container(game: &Game) -> Result<Vec<u8>, String> {
+    let payload = encode(game)?.into_bytes();
+    if payload.len() > MAX_PAYLOAD_BYTES {
+        return Err("Save payload exceeds 64 MiB".into());
+    }
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(&payload).map_err(|e| e.to_string())?;
+    let compressed = encoder.finish().map_err(|e| e.to_string())?;
+    let mut container = Vec::with_capacity(HEADER_BYTES + compressed.len());
+    container.extend_from_slice(MAGIC);
+    container.extend_from_slice(&CONTAINER_VERSION.to_le_bytes());
+    container.push(GZIP_CODEC);
+    container.push(0);
+    container.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+    container.extend_from_slice(&compressed);
+    if container.len() > MAX_CONTAINER_BYTES {
+        return Err("Compressed save exceeds 16 MiB".into());
+    }
+    Ok(container)
+}
+
+fn decode_container(data: &[u8]) -> Result<Game, String> {
+    let payload = container_payload(data)?;
+    let raw = std::str::from_utf8(&payload).map_err(|_| "Save payload is not UTF-8")?;
+    decode(raw)
+}
+
+fn container_payload(data: &[u8]) -> Result<Vec<u8>, String> {
+    if data.len() > MAX_CONTAINER_BYTES {
+        return Err("Compressed save exceeds 16 MiB".into());
+    }
+    if data.len() < HEADER_BYTES {
+        return Err("Truncated save container".into());
+    }
+    let version = u16::from_le_bytes([data[8], data[9]]);
+    if version != CONTAINER_VERSION {
+        return Err("Unsupported save container version".into());
+    }
+    if data[10] != GZIP_CODEC || data[11] != 0 {
+        return Err("Unsupported save compression".into());
+    }
+    let expected = u64::from_le_bytes(data[12..20].try_into().unwrap());
+    if expected > MAX_PAYLOAD_BYTES as u64 {
+        return Err("Save payload exceeds 64 MiB".into());
+    }
+    let mut payload = Vec::with_capacity(expected as usize);
+    GzDecoder::new(&data[HEADER_BYTES..])
+        .take(expected + 1)
+        .read_to_end(&mut payload)
+        .map_err(|e| format!("Invalid compressed save: {e}"))?;
+    if payload.len() as u64 != expected {
+        return Err("Save payload length mismatch".into());
+    }
+    Ok(payload)
+}
+
 pub fn decode(raw: &str) -> Result<Game, String> {
-    if raw.len() > 32_000_000 {
-        return Err("Save exceeds 32 MB".into());
+    if raw.len() > MAX_LEGACY_BYTES {
+        return Err("Legacy save exceeds 128 MiB".into());
     }
     let mut header: serde_json::Value = serde_json::from_str(raw).map_err(|e| e.to_string())?;
-    if header.get("version").and_then(|v| v.as_u64()) != Some(mine_core::VERSION as u64) {
-        return Err("Unsupported save version; archive and start a fresh campaign".into());
+    let version = header.get("version").and_then(|v| v.as_u64());
+    if version != Some(10) && version != Some(11) {
+        return Err(format!(
+            "Unsupported save version {version:?}; archive and start a fresh campaign"
+        ));
     }
     let compact = match header.get("terrain_encoding").and_then(|v| v.as_str()) {
         None => false,
@@ -97,7 +202,11 @@ pub fn encode(game: &Game) -> Result<String, String> {
             .collect();
         value["terrain"][name] = serde_json::to_value(encoded).map_err(|e| e.to_string())?;
     }
-    serde_json::to_string(&value).map_err(|e| e.to_string())
+    let encoded = serde_json::to_string(&value).map_err(|e| e.to_string())?;
+    if encoded.len() > MAX_PAYLOAD_BYTES {
+        return Err("Save payload exceeds 64 MiB".into());
+    }
+    Ok(encoded)
 }
 fn decode_chunks(
     value: &serde_json::Value,
@@ -137,14 +246,11 @@ fn decode_chunks(
         })
         .collect()
 }
-pub fn save(path: &Path, game: &Game) -> Result<(), String> {
+pub fn save(path: &Path, game: &Game) -> Result<SaveStats, String> {
     game.validate()?;
-    let temp = path.with_extension("tmp");
-    let backup = path.with_extension("bak");
-    let data = encode(game)?.into_bytes();
-    if data.len() > 32_000_000 {
-        return Err("Save exceeds 32 MB".into());
-    }
+    let temp = sidecar(path, ".tmp");
+    let backup = sidecar(path, ".bak");
+    let data = encode_container(game)?;
     {
         let mut f = File::create(&temp).map_err(|e| e.to_string())?;
         f.write_all(&data).map_err(|e| e.to_string())?;
@@ -159,7 +265,11 @@ pub fn save(path: &Path, game: &Game) -> Result<(), String> {
             .and_then(|f| f.sync_all())
             .map_err(|e| e.to_string())?;
     }
-    fs::rename(&temp, path).map_err(|e| e.to_string())
+    fs::rename(&temp, path).map_err(|e| e.to_string())?;
+    Ok(SaveStats {
+        bytes: data.len() as u64,
+        format: mine_core::VERSION,
+    })
 }
 #[cfg(test)]
 mod tests {
@@ -215,10 +325,10 @@ mod tests {
         save(&p, &g).unwrap();
         save(&p, &g).unwrap();
         fs::write(&p, b"broken").unwrap();
-        let recovered = load(&p.with_extension("bak")).unwrap();
+        let recovered = load(&sidecar(&p, ".bak")).unwrap();
         save(&p, &recovered).unwrap();
         assert!(load(&p).is_ok());
-        assert!(load(&p.with_extension("bak")).is_ok());
+        assert!(load(&sidecar(&p, ".bak")).is_ok());
     }
     #[test]
     fn compact_terrain_roundtrip_preserves_masks_and_rejects_expansion() {
@@ -247,6 +357,56 @@ mod tests {
         assert!(decode(&broken.to_string()).is_err());
     }
     #[test]
+    fn compressed_container_roundtrip_rejects_corruption_and_bombs() {
+        let game = Game::default();
+        let encoded = encode_container(&game).unwrap();
+        assert!(encoded.starts_with(MAGIC));
+        assert!(encoded.len() < encode(&game).unwrap().len());
+        let restored = decode_bytes(&encoded).unwrap();
+        assert_eq!(
+            serde_json::to_value(restored).unwrap(),
+            serde_json::to_value(game).unwrap()
+        );
+
+        let mut corrupt = encoded.clone();
+        *corrupt.last_mut().unwrap() ^= 0xff;
+        assert!(decode_bytes(&corrupt).is_err());
+        assert!(decode_bytes(&encoded[..encoded.len() - 4]).is_err());
+
+        let mut bomb = encoded;
+        bomb[12..20].copy_from_slice(&((MAX_PAYLOAD_BYTES as u64) + 1).to_le_bytes());
+        assert_eq!(
+            decode_bytes(&bomb).err().unwrap(),
+            "Save payload exceeds 64 MiB"
+        );
+    }
+    #[test]
+    fn version_ten_json_migrates_transport_without_reset() {
+        let mut game = Game::default();
+        game.version = 10;
+        let raw = serde_json::to_vec(&game).unwrap();
+        let restored = decode_bytes(&raw).unwrap();
+        assert_eq!(restored.version, mine_core::VERSION);
+        assert_eq!(restored.campaign_id, game.campaign_id);
+        assert!(restored.transport.valid(mine_core::materials().len()));
+    }
+    #[test]
+    fn migrated_save_load_keeps_deterministic_tick_parity() {
+        let mut old = Game::default();
+        old.version = 10;
+        let mut uninterrupted = decode_bytes(&serde_json::to_vec(&old).unwrap()).unwrap();
+        let checkpoint = encode_container(&uninterrupted).unwrap();
+        let mut restored = decode_bytes(&checkpoint).unwrap();
+        for _ in 0..1_000 {
+            uninterrupted.tick(&mine_core::materials(), false);
+            restored.tick(&mine_core::materials(), false);
+        }
+        assert_eq!(
+            serde_json::to_value(restored).unwrap(),
+            serde_json::to_value(uninterrupted).unwrap()
+        );
+    }
+    #[test]
     fn unknown_versions_rejected() {
         let mut g = Game::default();
         g.version = 999;
@@ -254,44 +414,68 @@ mod tests {
     }
 }
 
-/// Inspect the header before attempting to decode an incompatible world.
-pub fn legacy_source(path: &Path) -> Result<Option<String>, String> {
-    for candidate in [path.to_path_buf(), path.with_extension("bak")] {
+/// Find first valid but unsupported checkpoint in normal recovery order. It
+/// remains exportable/resettable instead of being mistaken for corruption.
+pub fn incompatible_source(path: &Path) -> Result<Option<Vec<u8>>, String> {
+    for candidate in [
+        path.to_path_buf(),
+        sidecar(path, ".bak"),
+        path.with_extension("bak"),
+    ] {
         if !candidate.exists() {
             continue;
         }
-        if fs::metadata(&candidate).map_err(|e| e.to_string())?.len() > 32_000_000 {
-            return Err("Save exceeds 32 MB".into());
-        }
-        let raw = fs::read_to_string(&candidate).map_err(|e| e.to_string())?;
-        if let Ok(header) = serde_json::from_str::<serde_json::Value>(&raw) {
-            if let Some(version) = header.get("version").and_then(|v| v.as_u64()) {
-                if version > mine_core::VERSION as u64 {
-                    return Err("Unsupported newer save version".into());
-                }
-                if version < mine_core::VERSION as u64 {
-                    return Ok(Some(raw));
-                }
-                if version == mine_core::VERSION as u64 {
-                    return Ok(None);
-                }
+        let raw = fs::read(&candidate).map_err(|e| e.to_string())?;
+        if raw.starts_with(MAGIC) {
+            if raw.len() > MAX_CONTAINER_BYTES {
+                continue;
             }
+            if raw.len() >= 10 && u16::from_le_bytes([raw[8], raw[9]]) != CONTAINER_VERSION {
+                return Ok(Some(raw));
+            }
+        } else if raw.len() > MAX_LEGACY_BYTES {
+            continue;
+        }
+        let payload = if raw.starts_with(MAGIC) {
+            let Ok(payload) = container_payload(&raw) else {
+                continue;
+            };
+            payload
+        } else {
+            raw.clone()
+        };
+        let Ok(header) = serde_json::from_slice::<serde_json::Value>(&payload) else {
+            continue;
+        };
+        let Some(version) = header.get("version").and_then(|v| v.as_u64()) else {
+            continue;
+        };
+        if !matches!(version, 10 | 11) {
+            return Ok(Some(raw));
+        }
+        if decode_bytes(&raw).is_ok() {
+            return Ok(None);
         }
     }
     Ok(None)
 }
-pub fn archive(path: &Path, raw: &str, id: &str) -> Result<(), String> {
+pub fn archive(path: &Path, raw: &[u8], id: &str) -> Result<(), String> {
     let directory = path
         .parent()
         .ok_or("Missing save directory")?
         .join("archives");
     fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+    let extension = if raw.starts_with(MAGIC) {
+        "deepwork"
+    } else {
+        "json"
+    };
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(directory.join(format!("campaign-{id}.json")))
+        .open(directory.join(format!("campaign-{id}.{extension}")))
         .map_err(|e| e.to_string())?;
-    file.write_all(raw.as_bytes())
+    file.write_all(raw)
         .and_then(|_| file.sync_all())
         .map_err(|e| e.to_string())
 }
