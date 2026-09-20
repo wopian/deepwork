@@ -14,7 +14,7 @@ pub use geometry::WIDTH;
 use geometry::{CELL_MASS, UNITS};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-pub const VERSION: u32 = 10;
+pub const VERSION: u32 = 11;
 /// Deterministic fractional throughput without storing idle production credit.
 /// `rate` is thousandths of one work unit per tick; no multiplication by full age.
 fn work_budget(rate: u64, tick: u64) -> u64 {
@@ -1455,6 +1455,12 @@ impl Game {
         } else {
             &mut self.ore
         };
+        self.transport.protect_routes(
+            self.mining_fronts
+                .iter()
+                .map(|front| front.route_id)
+                .filter(|route| *route != 0),
+        );
         let haul_budget = self.transport.tick(
             self.ticks,
             source,
@@ -2482,8 +2488,24 @@ impl Game {
         }
     }
     pub fn migrate(&mut self) -> Result<(), String> {
-        if self.version != VERSION {
-            return Err("This save requires a fresh campaign; export or archive it first".into());
+        match self.version {
+            10 => {
+                self.transport
+                    .protect_routes(self.mining_fronts.iter().map(|front| front.route_id));
+                let remap = self.transport.compact_routes()?;
+                for front in &mut self.mining_fronts {
+                    if front.route_id != 0 {
+                        front.route_id = remap.get(&front.route_id).copied().unwrap_or(0);
+                    }
+                }
+                self.version = VERSION;
+            }
+            VERSION => {}
+            _ => {
+                return Err(
+                    "This save requires a fresh campaign; export or archive it first".into(),
+                )
+            }
         }
         for (index, contract) in self.contracts.iter().enumerate() {
             if contract.complete {
@@ -3178,7 +3200,6 @@ mod throughput_tests {
             amount: segment_capacity,
             remaining_ms: 10000,
             duration_ms: 10000,
-            legs: vec![],
         });
         g.tick(&materials(), false);
         assert_eq!(g.flow_window[1], 0);
@@ -3251,7 +3272,6 @@ mod offline_idle_tests {
             amount: 1000,
             remaining_ms: 30000,
             duration_ms: 30000,
-            legs: vec![],
         });
         assert!(!g.quiescent(&materials()));
     }
@@ -3494,7 +3514,6 @@ mod offline_event_tests {
                     amount: 1000,
                     remaining_ms: 31000,
                     duration_ms: 31000,
-                    legs: vec![],
                 });
                 let mut b = a.clone();
                 a.advance_offline(700, &cat);

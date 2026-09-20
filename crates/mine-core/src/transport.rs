@@ -4,8 +4,10 @@ use crate::{
     logistics::{order_cargo, Leg},
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 const LOADING_MS: u32 = 1000;
+const MAX_ROUTES: usize = 1024;
+const MAX_ROUTE_LEGS: usize = 250_000;
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Station {
     pub id: String,
@@ -76,7 +78,6 @@ pub struct Batch {
     pub amount: u64,
     pub remaining_ms: u32,
     pub duration_ms: u32,
-    pub legs: Vec<Leg>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Segment {
@@ -101,12 +102,16 @@ pub struct Network {
     pub source: Vec<RoutedCargo>,
     #[serde(default)]
     pub current_route: u64,
+    #[serde(default)]
+    next_route: u64,
     #[serde(skip)]
     configured_legs: Option<Vec<Leg>>,
     #[serde(skip)]
     configured_rate: u64,
     #[serde(skip)]
     configured_capacity: u32,
+    #[serde(skip)]
+    protected_routes: BTreeSet<u64>,
     pub stations: Vec<Station>,
     pub segments: Vec<Segment>,
     pub express: usize,
@@ -171,9 +176,11 @@ impl Default for Network {
             routes: BTreeMap::new(),
             source: vec![],
             current_route: 0,
+            next_route: 1,
             configured_legs: None,
             configured_rate: 0,
             configured_capacity: 0,
+            protected_routes: BTreeSet::new(),
             stations,
             segments,
             express: 0,
@@ -289,8 +296,21 @@ impl Network {
         }
         let itinerary: Vec<_> = self.segments.iter().map(|s| s.legs.clone()).collect();
         if self.routes.get(&self.current_route) != Some(&itinerary) {
-            self.current_route += 1;
-            self.routes.insert(self.current_route, itinerary);
+            if let Some((&route, _)) = self.routes.iter().find(|(_, saved)| *saved == &itinerary) {
+                self.current_route = route;
+            } else {
+                self.next_route = self.next_route.max(
+                    self.routes
+                        .keys()
+                        .next_back()
+                        .copied()
+                        .unwrap_or(0)
+                        .saturating_add(1),
+                );
+                self.current_route = self.next_route;
+                self.next_route = self.next_route.saturating_add(1);
+                self.routes.insert(self.current_route, itinerary);
+            }
         }
     }
     pub fn register_source(&mut self, material: usize, amount: u64) {
@@ -300,6 +320,14 @@ impl Network {
         if self.routes.contains_key(&route) {
             put(&mut self.source, material, amount, route);
         }
+    }
+    pub fn protect_routes(&mut self, routes: impl IntoIterator<Item = u64>) {
+        self.protected_routes.clear();
+        self.protected_routes.extend(
+            routes
+                .into_iter()
+                .filter(|route| self.routes.contains_key(route)),
+        );
     }
     pub fn has_route(&self, route: u64) -> bool {
         self.routes.contains_key(&route)
@@ -316,17 +344,25 @@ impl Network {
     pub fn visual(&self) -> Vec<VisualCargo> {
         self.segments
             .iter()
-            .flat_map(|s| &s.batches)
-            .filter(|b| !b.legs.is_empty())
-            .map(|b| {
+            .enumerate()
+            .flat_map(|(index, segment)| {
+                segment.batches.iter().filter_map(move |batch| {
+                    self.routes
+                        .get(&batch.route)?
+                        .get(index)
+                        .map(|legs| (batch, legs))
+                })
+            })
+            .filter(|(_, legs)| !legs.is_empty())
+            .map(|(b, legs)| {
                 // Render only the occupied leg. Sending every historic shaft edge
                 // per batch makes IPC grow with both mine depth and vehicle count.
                 let mut elapsed = b
                     .duration_ms
                     .saturating_sub(b.remaining_ms)
                     .saturating_sub(LOADING_MS);
-                let mut leg = b.legs.last().unwrap();
-                for next in &b.legs {
+                let mut leg = legs.last().unwrap();
+                for next in legs {
                     leg = next;
                     if elapsed <= next.milliseconds {
                         break;
@@ -360,6 +396,7 @@ impl Network {
         boost: bool,
         power_permille: u64,
     ) -> u64 {
+        let terminal = self.stations.len() - 1;
         for (&id, &q) in ore.iter().filter(|(_, q)| **q > 0) {
             let tracked: u64 = self
                 .source
@@ -371,7 +408,7 @@ impl Network {
                 put(&mut self.source, id, q - tracked, self.current_route);
             }
         }
-        for station in &mut self.stations {
+        for station in self.stations.iter_mut().take(terminal) {
             for (&id, &q) in station.cargo.iter().filter(|(_, q)| **q > 0) {
                 let tracked: u64 = station
                     .routing
@@ -391,7 +428,7 @@ impl Network {
             }
         }
         // Drain processing intake before advancing upstream arrivals.
-        let last = self.stations.len() - 1;
+        let last = terminal;
         let mut room = output_cap.saturating_sub(output.values().sum());
         let mut dispatched = 0;
         let destination = &mut self.stations[last];
@@ -401,7 +438,6 @@ impl Network {
             *output.entry(id).or_default() += n;
             room -= n;
             dispatched += n;
-            take(&mut destination.routing, id, n);
         }
         self.stations[last].outgoing += dispatched;
         for index in (0..self.segments.len()).rev() {
@@ -428,7 +464,9 @@ impl Network {
                     space -= n;
                     *station.cargo.entry(batch.material).or_default() += n;
                     station.incoming += n;
-                    put(&mut station.routing, batch.material, n, batch.route);
+                    if index + 1 < terminal {
+                        put(&mut station.routing, batch.material, n, batch.route);
+                    }
                     segment.blocked |= batch.amount > 0;
                     if batch.amount > 0 {
                         segment.blocker = format!("{} full", station.name);
@@ -510,7 +548,6 @@ impl Network {
                             amount: lot.amount,
                             remaining_ms: duration,
                             duration_ms: duration,
-                            legs: legs.clone(),
                         });
                     } else {
                         put(&mut station.routing, id, lot.amount, lot.route);
@@ -532,11 +569,12 @@ impl Network {
                 segment.blocker = "Vehicle capacity full".into();
             }
         }
-        let mut used = std::collections::BTreeSet::from([self.current_route]);
+        let mut used = BTreeSet::from([self.current_route]);
         used.extend(self.source.iter().map(|l| l.route));
         used.extend(
             self.stations
                 .iter()
+                .take(terminal)
                 .flat_map(|s| s.routing.iter().map(|l| l.route)),
         );
         used.extend(
@@ -544,29 +582,119 @@ impl Network {
                 .iter()
                 .flat_map(|s| s.batches.iter().map(|b| b.route)),
         );
+        used.extend(self.protected_routes.iter().copied());
         self.routes.retain(|id, _| used.contains(id));
         initial - space
     }
+
+    /// Re-index duplicate v10 itineraries and discard route ownership that has
+    /// already reached processing intake. Route ids are private save details.
+    pub fn compact_routes(&mut self) -> Result<BTreeMap<u64, u64>, String> {
+        let old_routes = std::mem::take(&mut self.routes);
+        let mut by_itinerary = HashMap::<Vec<Vec<Leg>>, u64>::new();
+        let mut routes = BTreeMap::new();
+        let mut remap = BTreeMap::new();
+        let mut next = 1u64;
+        for (old, itinerary) in old_routes {
+            let route = if let Some(route) = by_itinerary.get(&itinerary) {
+                *route
+            } else {
+                let route = next;
+                next = next.checked_add(1).ok_or("Route identity overflow")?;
+                by_itinerary.insert(itinerary.clone(), route);
+                routes.insert(route, itinerary);
+                route
+            };
+            remap.insert(old, route);
+        }
+        let rewrite = |route: &mut u64| -> Result<(), String> {
+            *route = *remap.get(route).ok_or("Missing transport route")?;
+            Ok(())
+        };
+        if !routes.is_empty() {
+            rewrite(&mut self.current_route)?;
+        }
+        for lot in &mut self.source {
+            rewrite(&mut lot.route)?;
+        }
+        let terminal = self.stations.len().saturating_sub(1);
+        for station in self.stations.iter_mut().take(terminal) {
+            for lot in &mut station.routing {
+                rewrite(&mut lot.route)?;
+            }
+            coalesce(&mut station.routing)?;
+        }
+        if let Some(station) = self.stations.last_mut() {
+            station.routing.clear();
+        }
+        for segment in &mut self.segments {
+            for batch in &mut segment.batches {
+                rewrite(&mut batch.route)?;
+            }
+        }
+        let old_protected = std::mem::take(&mut self.protected_routes);
+        for mut route in old_protected {
+            rewrite(&mut route)?;
+            self.protected_routes.insert(route);
+        }
+        coalesce(&mut self.source)?;
+        self.routes = routes;
+        self.next_route = next;
+        self.retain_live_routes();
+        Ok(remap)
+    }
+
+    fn retain_live_routes(&mut self) {
+        let terminal = self.stations.len().saturating_sub(1);
+        let mut used = BTreeSet::from([self.current_route]);
+        used.extend(self.source.iter().map(|lot| lot.route));
+        used.extend(
+            self.stations
+                .iter()
+                .take(terminal)
+                .flat_map(|station| station.routing.iter().map(|lot| lot.route)),
+        );
+        used.extend(
+            self.segments
+                .iter()
+                .flat_map(|segment| segment.batches.iter().map(|batch| batch.route)),
+        );
+        used.extend(self.protected_routes.iter().copied());
+        self.routes.retain(|route, _| used.contains(route));
+    }
+
     pub fn sources_match(&self, ore: &BTreeMap<usize, u64>) -> bool {
         routing_matches(&self.source, ore, &self.routes)
     }
     pub fn valid(&self, materials: usize) -> bool {
         self.current_route < 1_000_000_000_000
+            && self.next_route > self.routes.keys().next_back().copied().unwrap_or(0)
+            && self.next_route < 1_000_000_000_000
             && self.source.iter().all(|l| {
                 l.material < materials
                     && l.amount > 0
                     && l.amount <= 1_000_000_000_000
                     && self.routes.contains_key(&l.route)
             })
-            && self.routes.len() <= 8192
+            && self.routes.len() <= MAX_ROUTES
+            && self
+                .routes
+                .values()
+                .flat_map(|route| route.iter())
+                .map(Vec::len)
+                .sum::<usize>()
+                <= MAX_ROUTE_LEGS
             && self.source.len() <= 32768
             && self
                 .routes
                 .values()
                 .all(|r| r.len() == 4 && r.iter().all(|legs| valid_legs(legs)))
-            && self.stations.iter().all(|s| {
-                routing_matches(&s.routing, &s.cargo, &self.routes)
-                    && s.routing.len() <= 32768
+            && self.stations.iter().enumerate().all(|(index, s)| {
+                (if index + 1 == self.stations.len() {
+                    s.routing.is_empty()
+                } else {
+                    routing_matches(&s.routing, &s.cargo, &self.routes)
+                }) && s.routing.len() <= 32768
                     && s.routing.iter().all(|l| {
                         l.material < materials
                             && l.amount <= 1_000_000_000_000
@@ -587,7 +715,7 @@ impl Network {
                         .iter()
                         .all(|(id, q)| *id < materials && *q <= 1_000_000_000_000)
             })
-            && self.segments.iter().all(|s| {
+            && self.segments.iter().enumerate().all(|(index, s)| {
                 s.name.len() <= 64
                     && s.capacity <= 1_000_000_000_000
                     && s.rate <= 1_000_000_000_000
@@ -606,10 +734,36 @@ impl Network {
                             && b.remaining_ms <= b.duration_ms
                             && b.duration_ms > 0
                             && b.duration_ms <= 100_000_000
-                            && valid_legs(&b.legs)
+                            && self.routes.get(&b.route).is_some_and(|route| {
+                                route.get(index).is_some_and(|legs| {
+                                    b.duration_ms
+                                        == LOADING_MS
+                                            + legs.iter().map(|leg| leg.milliseconds).sum::<u32>()
+                                })
+                            })
                     })
             })
     }
+}
+
+fn coalesce(lots: &mut Vec<RoutedCargo>) -> Result<(), String> {
+    let mut compact = BTreeMap::<(usize, u64), u64>::new();
+    for lot in lots.drain(..) {
+        let amount = compact.entry((lot.material, lot.route)).or_default();
+        *amount = amount
+            .checked_add(lot.amount)
+            .ok_or("Transport cargo overflow")?;
+    }
+    *lots = compact
+        .into_iter()
+        .filter(|(_, amount)| *amount > 0)
+        .map(|((material, route), amount)| RoutedCargo {
+            material,
+            amount,
+            route,
+        })
+        .collect();
+    Ok(())
 }
 fn routing_matches(
     lots: &[RoutedCargo],
@@ -722,6 +876,99 @@ mod tests {
             assert_eq!(ore_a, ore_b);
             assert_eq!(out_a, out_b);
         }
+    }
+
+    #[test]
+    fn configuring_known_itineraries_reuses_route_identity() {
+        let mut network = Network::default();
+        let first = Leg {
+            from: [32, 200],
+            to: [256, 200],
+            mode: "conveyor".into(),
+            milliseconds: 1200,
+        };
+        let second = Leg {
+            from: [480, 200],
+            to: [256, 200],
+            mode: "conveyor".into(),
+            milliseconds: 1300,
+        };
+        network.configure(std::slice::from_ref(&first), UNITS, 0);
+        let first_id = network.current_route;
+        network.configure(std::slice::from_ref(&second), UNITS, 0);
+        let second_id = network.current_route;
+        for _ in 0..1000 {
+            network.configure(std::slice::from_ref(&first), UNITS, 0);
+            assert_eq!(network.current_route, first_id);
+            network.configure(std::slice::from_ref(&second), UNITS, 0);
+            assert_eq!(network.current_route, second_id);
+        }
+        assert_eq!(network.routes.len(), 2);
+    }
+
+    #[test]
+    fn migration_compacts_duplicate_routes_and_terminal_labels() {
+        let leg = Leg {
+            from: [256, 300],
+            to: [256, 0],
+            mode: "lift".into(),
+            milliseconds: 3000,
+        };
+        let itinerary = vec![Vec::new(), Vec::new(), vec![leg], Vec::new()];
+        let protected_itinerary = vec![
+            vec![Leg {
+                from: [320, 300],
+                to: [256, 300],
+                mode: "carrying".into(),
+                milliseconds: 500,
+            }],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ];
+        let mut network = Network::default();
+        network.routes.insert(17, itinerary.clone());
+        network.routes.insert(29, itinerary);
+        network.routes.insert(41, protected_itinerary);
+        network.protect_routes([41]);
+        network.current_route = 29;
+        network.next_route = 30;
+        network.stations[2].cargo.insert(3, 500);
+        network.stations[2].routing = vec![
+            RoutedCargo {
+                material: 3,
+                amount: 200,
+                route: 17,
+            },
+            RoutedCargo {
+                material: 3,
+                amount: 300,
+                route: 29,
+            },
+        ];
+        network.stations[4].cargo.insert(4, 700);
+        network.stations[4].routing.push(RoutedCargo {
+            material: 4,
+            amount: 700,
+            route: 29,
+        });
+        network.segments[2].batches.push(Batch {
+            route: 29,
+            material: 3,
+            amount: 100,
+            remaining_ms: 4000,
+            duration_ms: 4000,
+        });
+        let mass = network.mass();
+        let remap = network.compact_routes().unwrap();
+        assert_eq!(network.routes.len(), 2);
+        assert_eq!(remap[&17], remap[&29]);
+        assert!(network.routes.contains_key(&remap[&41]));
+        assert_eq!(network.stations[2].routing.len(), 1);
+        assert_eq!(network.stations[2].routing[0].amount, 500);
+        assert!(network.stations[4].routing.is_empty());
+        assert_eq!(network.mass(), mass);
+        assert!(network.valid(crate::materials().len()));
     }
     #[test]
     fn import_rejects_unknown_routes_and_unlabelled_station_material() {
@@ -875,7 +1122,6 @@ mod tests {
                 amount: UNITS,
                 remaining_ms: 1000,
                 duration_ms: 1000,
-                legs: vec![],
             });
         }
         n.tick(
@@ -964,13 +1210,16 @@ mod visual_payload_tests {
                 milliseconds: 3000,
             },
         ];
+        network
+            .routes
+            .insert(1, vec![legs.clone(), Vec::new(), Vec::new(), Vec::new()]);
+        network.current_route = 1;
         network.segments[0].batches.push(Batch {
-            route: 0,
+            route: 1,
             material: 3,
             amount: 1234,
             remaining_ms: 5000,
             duration_ms: 5000,
-            legs: legs.clone(),
         });
         for (remaining, index, elapsed) in [
             (5000, 0, 0.),
