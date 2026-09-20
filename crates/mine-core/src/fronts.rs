@@ -8,6 +8,7 @@ use crate::{
     Material,
 };
 use serde::{Deserialize, Serialize};
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub type Point = [i64; 2];
@@ -18,14 +19,25 @@ pub struct MiningFront {
     pub deposit: String,
     pub material: usize,
     pub face: Point,
+    /// Last fully excavated work position. Render workers here while the next
+    /// full-height cut is still solid.
+    #[serde(default)]
+    pub position: Point,
     pub crew: u32,
     pub haulers: u32,
     pub progress: u64,
+    /// Work needed to atomically finish the current full-clearance cut.
+    #[serde(default)]
+    pub cut_work: u64,
     #[serde(default)]
     pub work_remainder: u64,
     #[serde(default)]
     pub transfer_remainder: u64,
     pub stockpile: u64,
+    /// Exact material ownership for full-clearance cuts. `stockpile` remains
+    /// the total used by capacity and public telemetry.
+    #[serde(default)]
+    pub stockpiles: BTreeMap<usize, u64>,
     pub capacity: u64,
     pub route: Vec<Point>,
     #[serde(default)]
@@ -33,6 +45,27 @@ pub struct MiningFront {
     pub selected: bool,
     pub status: String,
     pub blocker: String,
+}
+
+/// Seven cells wide by eight high: enough for the five-pixel worker body and
+/// pick swing, and identical to commissioned passage/lift clearance.
+pub fn clearance_cells(face: Point) -> Vec<Point> {
+    let mut cells = Vec::with_capacity(56);
+    for x in face[0].saturating_sub(3)..=face[0].saturating_add(3) {
+        for y in face[1].saturating_sub(7).max(0)..=face[1] {
+            cells.push([x, y]);
+        }
+    }
+    // Frontier excavation must start at the exposed face. Increasing distance
+    // then guarantees every later cell touches an already opened cell.
+    cells.sort_by_key(|cell| {
+        (
+            cell[0].abs_diff(face[0]) + cell[1].abs_diff(face[1]),
+            Reverse(cell[1]),
+            cell[0],
+        )
+    });
+    cells
 }
 
 #[derive(Clone)]
@@ -177,12 +210,15 @@ pub fn refresh(
                 deposit: candidate.deposit.clone(),
                 material: candidate.material,
                 face: candidate.face,
+                position: candidate.route.last().copied().unwrap_or(candidate.face),
                 crew: 0,
                 haulers: 0,
                 progress: 0,
+                cut_work: 0,
                 work_remainder: 0,
                 transfer_remainder: 0,
                 stockpile: 0,
+                stockpiles: BTreeMap::new(),
                 capacity,
                 route: candidate.route.clone(),
                 route_id: 0,
@@ -190,10 +226,30 @@ pub fn refresh(
                 status: "Awaiting crew".into(),
                 blocker: String::new(),
             });
+        if front.stockpiles.is_empty() && front.stockpile > 0 {
+            front.stockpiles.insert(front.material, front.stockpile);
+        }
+        if front.position == [0, 0] {
+            front.position = front.route.last().copied().unwrap_or(front.face);
+        }
+        let existing_face = front.face;
+        let keep_existing_face = !terrain.contains(existing_face[0], existing_face[1])
+            && terrain.known_material(existing_face[0], existing_face[1])
+                == Some(candidate.material)
+            && geology::deposit_id(seed, profile, existing_face, catalogue).as_deref()
+                == Some(candidate.deposit.as_str());
         front.id = candidate.id;
         front.deposit = candidate.deposit;
         front.material = candidate.material;
-        front.face = candidate.face;
+        let next_face = if keep_existing_face {
+            existing_face
+        } else {
+            candidate.face
+        };
+        if next_face != front.face {
+            front.cut_work = 0;
+        }
+        front.face = next_face;
         // Keep cargo ownership stable while a face advances through one vein.
         // Route replacement happens after existing cargo drains or the route
         // ceases to exist, avoiding a new network itinerary per mined cell.
@@ -351,10 +407,18 @@ pub fn valid(fronts: &[MiningFront], materials: usize, max_fronts: usize) -> boo
                 && !front.id.is_empty()
                 && !front.deposit.is_empty()
                 && crate::geometry::valid_cell(front.face[0], front.face[1])
-                && front.progress < 1000
+                && crate::geometry::valid_cell(front.position[0], front.position[1])
+                && front.progress <= 1_000_000_000
+                && front.cut_work <= 56_000
                 && front.work_remainder < 20
                 && front.transfer_remainder < 20
                 && front.stockpile <= front.capacity
+                && (front.stockpiles.is_empty()
+                    || front.stockpiles.values().sum::<u64>() == front.stockpile)
+                && front
+                    .stockpiles
+                    .keys()
+                    .all(|material| *material < materials)
                 && front.capacity <= 1_000_000_000_000
                 && front.route.len() <= 1_000_000
                 && front.route_id < 1_000_000_000_000
@@ -375,12 +439,15 @@ mod tests {
             deposit: id.into(),
             material,
             face: [256, 1],
+            position: [256, 1],
             crew: 0,
             haulers: 0,
             progress: 0,
+            cut_work: 0,
             work_remainder: 0,
             transfer_remainder: 0,
             stockpile: 0,
+            stockpiles: BTreeMap::new(),
             capacity: 20 * UNITS,
             route: vec![[256, 0]],
             route_id: 0,
@@ -426,5 +493,18 @@ mod tests {
         assert_eq!(fronts[0].blocker, "Work-face stockpile full");
         assert_eq!(fronts[1].crew, 3);
         assert_eq!(fronts.iter().map(|front| front.haulers).sum::<u32>(), 1);
+    }
+
+    #[test]
+    fn extraction_clearance_fits_worker_without_thin_suspended_strips() {
+        let cells = clearance_cells([256, 200]);
+        assert_eq!(cells.len(), 56);
+        for x in 253..=259 {
+            let mut column: Vec<_> = cells.iter().filter(|cell| cell[0] == x).collect();
+            column.sort_by_key(|cell| cell[1]);
+            assert_eq!(column.len(), 8);
+            assert_eq!(column.first().unwrap()[1], 193);
+            assert_eq!(column.last().unwrap()[1], 200);
+        }
     }
 }

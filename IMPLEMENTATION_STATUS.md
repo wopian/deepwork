@@ -9,14 +9,15 @@ Current saves use **version 10 / generator 5**. Older campaigns are archived bef
 - Basic access now sinks one deterministic supported 8 m shaft before anonymous survey signals can pull development sideways. Guaranteed iron is discovered through normal local exposure. Guided lift purchases no longer depend on seed luck.
 - Transport uses a one-second loading phase, 1.2x baseline haul rate, mode floors and at least 30% in-transit headroom over a full cycle. Starter conveyors need no power; powered lifts and trains still respect supply. Station buffer upgrades remain independent.
 - Fine mine cells render at one logical pixel. Headframe, vehicles, cargo and worker positions share shaft geometry; active digger sprites spread across real mining fronts. Front route history is removed from UI snapshots while authoritative save routes remain intact.
+- Ore faces now commit complete **7×8-cell** cuts, matching the five-pixel worker body, pick swing and existing passage clearance. A worker stays at the last finished cut until the next chamber is open. Full-height cuts remove thin suspended dirt strips; every host-rock or secondary-ore cell keeps exact work, mass, buffer and transport ownership.
 - Headquarters ranks now grant shaft-first effects: excavation/front capacity/support speed, logistics branch rate/buffers, metallurgy recovery/power demand, prospecting refinements/accuracy and reclamation recovery. Retired open-pit grants were removed.
 
 Current measured checks:
 
-- Guided opening: **30/30** seeds pass. First sale 7 seconds, first refined iron 8–10 seconds, improved lift 121–166 seconds and first underground fork 19–46 seconds.
-- Housing-first adverse order: **30/30** seeds pass. First refined iron 19–51 seconds, conveyor 61–106 seconds and improved lift 168–285 seconds.
-- Core sweep ran 117 tests: 115 passed immediately; two assertions still encoded the former two-second loading phase, were corrected, and pass focused reruns. Campaign strategy tests pass **18/18**. Frontend tests pass **30/30**, with Bun 1.4 typecheck and production build successful.
-- First version-10 campaign pilot completed five seeds at 25.5–27.0 days across all three strategies, below the four-week floor. That cohort is superseded. Headquarters research now requires 800 invested points instead of 700, adding another earned research/retirement cycle without a wall-clock gate. Fresh acceptance remains pending for this retune; version-9 results below stay historical.
+- Guided opening after full-clearance extraction: **30/30** seeds pass. First sale 7 seconds, first refined iron 8–10 seconds, improved lift 144–180 seconds and first underground fork 11–60 seconds.
+- Housing-first adverse order: **30/30** seeds pass. First refined iron 17–37 seconds, conveyor 72–104 seconds and improved lift 215–280 seconds.
+- Release core sweep passes **119/119**. Campaign strategy/checkpoint tests pass **19/19**. Frontend tests pass **30/30**, with Bun 1.4 typecheck and production build successful.
+- First version-10 campaign pilot completed five seeds at 25.5–27.0 days across all three strategies, below the four-week floor. That cohort is superseded. Headquarters research now requires 800 invested points instead of 700. The later pre-clearance cohort was stopped because worker-sized cuts change excavation geometry; fresh 30-seed campaign acceptance remains pending. Version-9 results below stay historical.
 
 ## Implemented
 

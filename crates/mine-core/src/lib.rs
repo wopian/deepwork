@@ -590,8 +590,12 @@ impl Game {
                     + self
                         .mining_fronts
                         .iter()
-                        .filter(|front| front.material == id)
-                        .map(|front| front.stockpile)
+                        .map(|front| {
+                            front.stockpiles.get(&id).copied().unwrap_or_else(|| {
+                                u64::from(front.stockpiles.is_empty() && front.material == id)
+                                    * front.stockpile
+                            })
+                        })
                         .sum::<u64>()
                     + self
                         .transport
@@ -1200,49 +1204,109 @@ impl Game {
                 continue;
             }
             let work = self.dig_rate_for(crew);
-            let front = &mut self.mining_fronts[index];
-            let work = work + front.work_remainder;
-            front.progress += work / 20;
-            front.work_remainder = work % 20;
-            let digs = (front.progress / 1000).min(512) as usize;
-            front.progress %= 1000;
-            for _ in 0..digs {
-                if front.stockpile + CELL_MASS > front.capacity {
+            {
+                let front = &mut self.mining_fronts[index];
+                let work = work + front.work_remainder;
+                front.progress += work / 20;
+                front.work_remainder = work % 20;
+            }
+            // Commit one complete worker-sized cut at a time. Partial one-pixel
+            // cuts never become visible, and every removed cell still consumes
+            // its normal work and enters the work-face material ledger.
+            for _ in 0..512 {
+                let face = self.mining_fronts[index].face;
+                if self.mining_fronts[index].cut_work == 0 {
+                    let solid = fronts::clearance_cells(face)
+                        .into_iter()
+                        .filter(|[x, y]| !self.terrain.contains(*x, *y))
+                        .count() as u64;
+                    if solid > 0 {
+                        self.mining_fronts[index].cut_work = solid * 1000;
+                    }
+                }
+                let required_work = self.mining_fronts[index].cut_work;
+                if required_work > 0 && self.mining_fronts[index].progress < required_work {
+                    break;
+                }
+                let solid: Vec<_> = fronts::clearance_cells(face)
+                    .into_iter()
+                    .filter(|[x, y]| !self.terrain.contains(*x, *y))
+                    .map(|[x, y]| ([x, y], self.cell(x, y, cat)))
+                    .collect();
+                if solid.is_empty() {
+                    claimed.remove(&face);
+                    let next = fronts::next_face(
+                        &self.mining_fronts[index],
+                        &self.terrain,
+                        self.seed,
+                        self.profile,
+                        cat,
+                        &claimed,
+                    );
+                    let Some(next) = next else {
+                        let front = &mut self.mining_fronts[index];
+                        front.status = "Deposit exhausted".into();
+                        front.crew = 0;
+                        break;
+                    };
+                    self.mining_fronts[index].position = face;
+                    self.mining_fronts[index].face = next;
+                    self.mining_fronts[index].cut_work = 0;
+                    claimed.insert(next);
+                    continue;
+                }
+                let required_work = solid.len() as u64 * 1000;
+                self.mining_fronts[index].cut_work = required_work;
+                if self.mining_fronts[index].progress < required_work {
+                    break;
+                }
+                let mass = solid.len() as u64 * CELL_MASS;
+                let front = &self.mining_fronts[index];
+                if front.stockpile + mass > front.capacity {
+                    let front = &mut self.mining_fronts[index];
                     front.status = "Paused".into();
                     front.blocker = "Work-face stockpile full".into();
                     break;
                 }
-                let [x, y] = front.face;
-                if self.terrain.known_material(x, y) != Some(front.material)
-                    || !self.terrain.excavate(x, y)
-                {
-                    break;
+                self.mining_fronts[index].progress -= required_work;
+                self.mining_fronts[index].cut_work = 0;
+                for ([x, y], material) in solid {
+                    if !self.terrain.excavate(x, y) {
+                        continue;
+                    }
+                    self.heights.excavate_to(x, y + 1);
+                    self.removed.push(Cell { x, y, material });
+                    if self.removed.len() > 512 {
+                        self.removed.drain(..256);
+                    }
+                    let front = &mut self.mining_fronts[index];
+                    front.stockpile += CELL_MASS;
+                    *front.stockpiles.entry(material).or_default() += CELL_MASS;
+                    self.terrain.reveal(self.seed, self.profile, x, y, 1, cat);
+                    self.excavated += 1;
+                    mined += 1;
+                    if self.discoveries.insert(material) {
+                        self.site_discoveries += 1;
+                    }
                 }
-                self.heights.excavate_to(x, y + 1);
-                self.removed.push(Cell {
-                    x,
-                    y,
-                    material: front.material,
-                });
-                if self.removed.len() > 512 {
-                    self.removed.drain(..256);
-                }
-                front.stockpile += CELL_MASS;
-                self.terrain.reveal(self.seed, self.profile, x, y, 1, cat);
-                self.excavated += 1;
-                mined += 1;
-                if self.discoveries.insert(front.material) {
-                    self.site_discoveries += 1;
-                }
-                claimed.remove(&front.face);
-                let next =
-                    fronts::next_face(front, &self.terrain, self.seed, self.profile, cat, &claimed);
+                claimed.remove(&face);
+                let next = fronts::next_face(
+                    &self.mining_fronts[index],
+                    &self.terrain,
+                    self.seed,
+                    self.profile,
+                    cat,
+                    &claimed,
+                );
+                let front = &mut self.mining_fronts[index];
+                front.position = face;
                 let Some(next) = next else {
                     front.status = "Deposit exhausted".into();
                     front.crew = 0;
                     break;
                 };
                 front.face = next;
+                front.cut_work = 0;
                 claimed.insert(next);
             }
         }
@@ -1333,19 +1397,39 @@ impl Game {
                 (front.haulers as f64 * pacing::get().haul_rate * UNITS as f64) as u64
             };
             front.transfer_remainder += rate;
-            let budget = front.transfer_remainder / 20;
+            let mut budget = front.transfer_remainder / 20;
             front.transfer_remainder %= 20;
-            let room = cap.saturating_sub(self.ore.values().sum());
-            let amount = front.stockpile.min(budget).min(room);
-            if amount > 0 {
+            let mut room = cap.saturating_sub(self.ore.values().sum());
+            if front.stockpiles.is_empty() && front.stockpile > 0 {
+                front.stockpiles.insert(front.material, front.stockpile);
+            }
+            let mut materials: Vec<_> = front.stockpiles.keys().copied().collect();
+            materials.sort_by_key(|material| (*material != front.material, *material));
+            let mut transferred = 0;
+            for material in materials {
+                let available = front.stockpiles.get(&material).copied().unwrap_or(0);
+                let amount = available.min(budget).min(room);
+                if amount == 0 {
+                    continue;
+                }
+                let remaining = available - amount;
+                if remaining == 0 {
+                    front.stockpiles.remove(&material);
+                } else {
+                    front.stockpiles.insert(material, remaining);
+                }
                 front.stockpile -= amount;
-                *self.ore.entry(front.material).or_default() += amount;
+                transferred += amount;
+                budget -= amount;
+                room -= amount;
+                *self.ore.entry(material).or_default() += amount;
                 self.transport
-                    .register_source_route(front.material, amount, front.route_id);
-            } else if front.stockpile > 0 && rate == 0 {
+                    .register_source_route(material, amount, front.route_id);
+            }
+            if transferred == 0 && front.stockpile > 0 && rate == 0 {
                 front.status = "Waiting for haul crew".into();
                 front.blocker = "No haul crew assigned".into();
-            } else if front.stockpile > 0 && room == 0 {
+            } else if transferred == 0 && front.stockpile > 0 && room == 0 {
                 front.status = "Blocked".into();
                 front.blocker = "Underground transfer full".into();
             }
@@ -1880,8 +1964,11 @@ impl Game {
                     .filter(|front| front.crew > 0 && front.stockpile < front.capacity)
                     .filter_map(|front| {
                         let rate = self.dig_rate_for(front.crew);
+                        let required = front.cut_work.max(1000);
                         (rate > 0).then(|| {
-                            ((1000 - front.progress) * 20 - front.work_remainder).div_ceil(rate)
+                            (required.saturating_sub(front.progress) * 20)
+                                .saturating_sub(front.work_remainder)
+                                .div_ceil(rate)
                         })
                     })
                     .min()
@@ -1904,7 +1991,7 @@ impl Game {
                         continue;
                     }
                     let work = rate * skip + front.work_remainder;
-                    front.progress = (front.progress + work / 20) % 1000;
+                    front.progress += work / 20;
                     front.work_remainder = work % 20;
                 }
                 if (self.ticks - 1) / 20 != (self.ticks + skip - 1) / 20 {
@@ -2564,6 +2651,61 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn mining_front_commits_full_clearance_and_owns_every_removed_material() {
+        let cat = materials();
+        let mut g = Game::new(42, 1);
+        g.ticks = 1; // Keep the explicit fixture front for this tick.
+        g.workers = 12;
+        g.workings.initialise();
+        for y in 0..=300 {
+            assert!(g.terrain.excavate(400, y));
+        }
+        let face = [401, 300];
+        let newly_cut = fronts::clearance_cells(face)
+            .iter()
+            .filter(|[x, y]| !g.terrain.contains(*x, *y))
+            .count() as u64;
+        let material = g.cell(face[0], face[1], &cat);
+        g.mining_fronts.push(fronts::MiningFront {
+            id: "fixture".into(),
+            deposit: "fixture".into(),
+            material,
+            face,
+            position: [256, geometry::PIT_ROWS - 1],
+            crew: 1,
+            haulers: 0,
+            progress: newly_cut * 1000,
+            cut_work: 0,
+            work_remainder: 0,
+            transfer_remainder: 0,
+            stockpile: 0,
+            stockpiles: BTreeMap::new(),
+            capacity: 100 * UNITS,
+            route: vec![],
+            route_id: 0,
+            selected: true,
+            status: "Excavating".into(),
+            blocker: String::new(),
+        });
+        g.tick(&cat, false);
+        let front = &g.mining_fronts[0];
+        assert!(
+            front.progress < newly_cut * 1000,
+            "progress={}",
+            front.progress
+        );
+        let cleared = fronts::clearance_cells(face)
+            .iter()
+            .filter(|[x, y]| g.terrain.contains(*x, *y))
+            .count();
+        assert_eq!(cleared, 56);
+        assert_eq!(front.position, face);
+        assert_eq!(front.stockpile, newly_cut * CELL_MASS);
+        assert_eq!(front.stockpiles.values().sum::<u64>(), front.stockpile);
+        assert!(front.stockpiles.len() >= 1);
+    }
+
     #[test]
     fn processing_telemetry_reports_real_output_and_sales_reservations() {
         let mut g = Game::new(42, 1);
@@ -3713,6 +3855,9 @@ mod retired_start_tests {
         assert!(g.products.get("iron").copied().unwrap_or(0) >= 4 * UNITS);
         assert!(g.products.get("coke").copied().unwrap_or(0) >= UNITS);
         assert!(g.products.get("lime").copied().unwrap_or(0) >= UNITS);
+        // This contract verifies protected construction feed, independent of
+        // the separate credit-earning pace exercised by opening scenarios.
+        g.credits = 100_000;
         for target in ["steelworks", "shaft"] {
             g.action(Action {
                 sequence: g.last_sequence + 1,

@@ -85,10 +85,13 @@ export interface Game {
     deposit: string;
     material: number;
     face: [number, number];
+    position: [number, number];
     crew: number;
     haulers: number;
     progress: number;
+    cut_work: number;
     stockpile: number;
+    stockpiles: Record<number, number>;
     capacity: number;
     route: [number, number][];
     selected: boolean;

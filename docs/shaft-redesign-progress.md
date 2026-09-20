@@ -4,6 +4,12 @@ The signed-coordinate expansion, whole-vein orders, contextual desktop/mobile wo
 
 See [implementation status](../IMPLEMENTATION_STATUS.md) for current checks, measured opening results, campaign/endurance status and remaining physical-device acceptance. That document supersedes the earlier fixed-width checkpoint and its incomplete-feature list.
 
+## Worker-sized extraction clearance
+
+Independent ore faces commit complete seven-cell-wide, eight-cell-high cuts. This matches worker/pick sprites and existing commissioned passage clearance, so vein extraction cannot leave one-pixel crawlspaces or suspended one/two-pixel dirt strips. Cuts appear only when all required cell work is available; workers remain at the previous completed face meanwhile. Mixed host rock and ore retain exact per-material work-face ledgers and traverse the same bounded transport network.
+
+Current regression: 119/119 release core tests, 19/19 campaign strategy/checkpoint tests and 30/30 Bun tests pass. Production build succeeds. Thirty guided and thirty housing-first adverse openings pass after the geometry change. Full campaign timing requires a fresh cohort because older reports used single-cell extraction fronts.
+
 ## Final endurance and direct ore interaction
 
 The third 30-minute Windows endurance run passed: median 58 FPS, peak JavaScript heap 80.1 MiB, native working set 39.4 MiB, native private memory 12.1 MiB, 29 resident chunks, 333,578-byte save. Measured simulation/wall time was 1,819.3/1,819.293 seconds. No gameplay commands occurred during measurement. Native memory excludes the WebView and GPU processes.

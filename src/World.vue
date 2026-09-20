@@ -541,7 +541,8 @@ onMounted(async () => {
             g?.mining_fronts.filter((front) => front.crew > 0) ?? [];
           const front = active[i % Math.max(1, active.length)];
           const cell = g?.removed[Math.max(0, g.removed.length - 1 - i)];
-          const feet = front?.face ?? (cell ? [cell.x, cell.y] : undefined);
+          const feet =
+            front?.position ?? front?.face ?? (cell ? [cell.x, cell.y] : undefined);
           if (feet) {
             x = MINE_ORIGIN_X + feet[0]! * CELL_PIXEL + (i % 2) * 3;
             y = SURFACE_Y + (feet[1]! + 1) * CELL_PIXEL;
