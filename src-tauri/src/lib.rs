@@ -1,5 +1,4 @@
 mod persistence;
-use base64::Engine;
 use mine_core::{materials, Action, Game};
 use persistence::save;
 use std::{
@@ -385,25 +384,7 @@ fn import_save(data: String, encoding: String, state: State<Runtime>) -> Result<
     if game.legacy_pending {
         return Err("Archive the legacy campaign before importing".into());
     }
-    let bytes = match encoding.as_str() {
-        "base64" => {
-            let encoded_limit = persistence::MAX_CONTAINER_BYTES.div_ceil(3) * 4;
-            if data.len() > encoded_limit {
-                return Err("Compressed save exceeds 16 MiB".into());
-            }
-            base64::engine::general_purpose::STANDARD
-                .decode(data)
-                .map_err(|_| "Invalid base64 save data")?
-        }
-        "json" => {
-            if data.len() > persistence::MAX_LEGACY_BYTES {
-                return Err("Legacy save exceeds 128 MiB".into());
-            }
-            data.into_bytes()
-        }
-        _ => return Err("Unsupported import encoding".into()),
-    };
-    let mut candidate = persistence::decode_bytes(&bytes)?;
+    let mut candidate = persistence::decode_import(&data, &encoding)?;
     candidate.campaign_id = fresh_identity().to_string();
     candidate.advance_offline(now(), &materials());
     persist(&state, &candidate)?;

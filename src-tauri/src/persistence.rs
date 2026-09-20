@@ -1,4 +1,5 @@
 //! Durable local checkpoints. Keep the last valid primary as backup.
+use base64::Engine;
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use mine_core::Game;
 use std::{
@@ -85,6 +86,28 @@ pub fn decode_bytes(data: &[u8]) -> Result<Game, String> {
     }
     let raw = std::str::from_utf8(data).map_err(|_| "Legacy save is not UTF-8")?;
     decode(raw)
+}
+
+pub fn decode_import(data: &str, encoding: &str) -> Result<Game, String> {
+    match encoding {
+        "base64" => {
+            let encoded_limit = MAX_CONTAINER_BYTES.div_ceil(3) * 4;
+            if data.len() > encoded_limit {
+                return Err("Compressed save exceeds 16 MiB".into());
+            }
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(data)
+                .map_err(|_| "Invalid base64 save data")?;
+            decode_bytes(&bytes)
+        }
+        "json" => {
+            if data.len() > MAX_LEGACY_BYTES {
+                return Err("Legacy save exceeds 128 MiB".into());
+            }
+            decode_bytes(data.as_bytes())
+        }
+        _ => Err("Unsupported import encoding".into()),
+    }
 }
 
 pub fn encode_container(game: &Game) -> Result<Vec<u8>, String> {
@@ -399,6 +422,26 @@ mod tests {
         assert_eq!(restored.version, mine_core::VERSION);
         assert_eq!(restored.campaign_id, game.campaign_id);
         assert!(restored.transport.valid(mine_core::materials().len()));
+    }
+    #[test]
+    fn json_ipc_import_accepts_binary_container_and_legacy_json() {
+        let game = Game::default();
+        let container = encode_container(&game).unwrap();
+        let base64 = base64::engine::general_purpose::STANDARD.encode(container);
+        assert_eq!(
+            decode_import(&base64, "base64").unwrap().campaign_id,
+            game.campaign_id
+        );
+
+        let mut old = game.clone();
+        old.version = 10;
+        let json = serde_json::to_string(&old).unwrap();
+        assert_eq!(
+            decode_import(&json, "json").unwrap().version,
+            mine_core::VERSION
+        );
+        assert!(decode_import("not base64", "base64").is_err());
+        assert!(decode_import(&json, "unknown").is_err());
     }
     #[test]
     fn migrated_save_load_keeps_deterministic_tick_parity() {
