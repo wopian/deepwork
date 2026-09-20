@@ -898,6 +898,7 @@ fn main() {
         for _ in 0..workers {
             let sender = sender.clone();
             let next = &next;
+            let completed = &completed;
             scope.spawn(move || loop {
                 let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if index >= seeds {
