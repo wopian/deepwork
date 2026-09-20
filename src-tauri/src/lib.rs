@@ -956,10 +956,19 @@ mod save_migration_tests {
         let mut old = first.clone();
         old.credits = 56;
         fs::write(directory.join("mine.json"), legacy(&old)).unwrap();
+        let mut old_backup = first.clone();
+        old_backup.credits = 78;
+        fs::write(directory.join("mine.bak"), legacy(&old_backup)).unwrap();
 
         let (recovered, _, status) = open_save(&directory).unwrap();
         assert_eq!(recovered.credits, 12);
         assert_eq!(status.bytes, backup_bytes.len() as u64);
+
+        let mut appended = path.as_os_str().to_os_string();
+        appended.push(".bak");
+        fs::write(PathBuf::from(appended), b"broken backup").unwrap();
+        let (recovered, _, _) = open_save(&directory).unwrap();
+        assert_eq!(recovered.credits, 56);
         fs::remove_dir_all(directory).unwrap();
     }
 

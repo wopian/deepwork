@@ -25,6 +25,17 @@ fn sidecar(path: &Path, suffix: &str) -> PathBuf {
     name.push(suffix);
     PathBuf::from(name)
 }
+fn recovery_candidates(path: &Path) -> Vec<PathBuf> {
+    let mut candidates = vec![path.to_path_buf()];
+    if path
+        .extension()
+        .is_some_and(|extension| extension == "json")
+    {
+        candidates.push(path.with_extension("bak"));
+    }
+    candidates.push(sidecar(path, ".bak"));
+    candidates
+}
 pub fn lock(path: &Path) -> Result<File, String> {
     let file = OpenOptions::new()
         .read(true)
@@ -50,13 +61,12 @@ pub fn recover(path: &Path) -> Result<Option<Game>, String> {
     load(path).or_else(|_| load(&backup)).map(Some)
 }
 pub fn recover_source(path: &Path) -> Result<Option<(Game, Vec<u8>)>, String> {
-    let backup = sidecar(path, ".bak");
-    let old_backup = path.with_extension("bak");
-    if !path.exists() && !backup.exists() && !old_backup.exists() {
+    let candidates = recovery_candidates(path);
+    if candidates.iter().all(|candidate| !candidate.exists()) {
         return Ok(None);
     }
-    for candidate in [path, backup.as_path(), old_backup.as_path()] {
-        let Ok(data) = fs::read(candidate) else {
+    for candidate in candidates {
+        let Ok(data) = fs::read(&candidate) else {
             continue;
         };
         if let Ok(game) = decode_bytes(&data) {
@@ -417,11 +427,7 @@ mod tests {
 /// Find first valid but unsupported checkpoint in normal recovery order. It
 /// remains exportable/resettable instead of being mistaken for corruption.
 pub fn incompatible_source(path: &Path) -> Result<Option<Vec<u8>>, String> {
-    for candidate in [
-        path.to_path_buf(),
-        sidecar(path, ".bak"),
-        path.with_extension("bak"),
-    ] {
+    for candidate in recovery_candidates(path) {
         if !candidate.exists() {
             continue;
         }
