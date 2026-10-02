@@ -1,6 +1,8 @@
 # Implementation status — shaft-first expanded mines
 
-Current saves use **version 12 / generator 5**. Versions 10 and 11 migrate without campaign reset or geology changes. Accessibility, audio and display preferences remain separate. Earlier campaign benchmarks remain historical evidence.
+Current saves use **version 12**, supporting **generators 5 and 6**. New mines use generator 6. Existing mines retain generator 5; versions 10 and 11 migrate without campaign reset or geology changes. Accessibility, audio and display preferences remain separate. Earlier campaign benchmarks remain historical evidence.
+
+Generator 6 assigns all 54 ore materials explicit geological profiles. Mineral family controls dimensions, orientation, occurrence weight and compatible companions. Connected lobes and splays merge same-mineral veins; coherent margins and zones combine compatible minerals under one deposit identity. Starter reserves remain exact. Sampled yield estimates exceed 1,500 primary cells per authored feed across seeds 42–71 and all three site profiles. New generation notes and validation live in [natural veins](docs/natural-veins.md). Generator 5 campaign evidence does not establish generator 6 calendar pacing.
 
 ## Version 12 progressive mine
 

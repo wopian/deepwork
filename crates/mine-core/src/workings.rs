@@ -210,11 +210,22 @@ impl Workings {
     }
 
     pub fn prepare_deposit_order(&mut self, seed: u64, profile: usize, cat: &[crate::Material]) {
+        self.prepare_deposit_order_versioned(seed, profile, 5, cat)
+    }
+    pub fn prepare_deposit_order_versioned(
+        &mut self,
+        seed: u64,
+        profile: usize,
+        version: u32,
+        cat: &[crate::Material],
+    ) {
         self.index_passages();
         if self.target_cells.is_empty() {
             if let Some(anchor) = self.target {
-                self.target_deposit = crate::geology::deposit_id(seed, profile, anchor, cat);
-                self.target_cells = crate::geology::deposit_cells(seed, profile, anchor, cat);
+                self.target_deposit =
+                    crate::geology::deposit_id_versioned(seed, profile, version, anchor, cat);
+                self.target_cells =
+                    crate::geology::deposit_cells_versioned(seed, profile, version, anchor, cat);
             }
         }
     }
@@ -245,6 +256,17 @@ impl Workings {
         cat: &[crate::Material],
         accuracy: i64,
     ) -> Vec<usize> {
+        self.refine_survey_versioned(terrain, seed, profile, 5, cat, accuracy)
+    }
+    pub fn refine_survey_versioned(
+        &mut self,
+        terrain: &mut Terrain,
+        seed: u64,
+        profile: usize,
+        version: u32,
+        cat: &[crate::Material],
+        accuracy: i64,
+    ) -> Vec<usize> {
         let stage = accuracy.min(2);
         if stage == 0 || self.passages.is_empty() {
             return vec![];
@@ -261,7 +283,7 @@ impl Workings {
         let Some((id, anchor)) = next else {
             return vec![];
         };
-        let cells = crate::geology::deposit_cells(seed, profile, anchor, cat);
+        let cells = crate::geology::deposit_cells_versioned(seed, profile, version, anchor, cat);
         let remaining: Vec<_> = cells
             .into_iter()
             .filter(|p| !terrain.contains(p[0], p[1]))
@@ -295,7 +317,7 @@ impl Workings {
         };
         let mut found = BTreeSet::new();
         for p in visible {
-            found.extend(terrain.reveal(seed, profile, p[0], p[1], 0, cat));
+            found.extend(terrain.reveal_versioned(seed, profile, version, p[0], p[1], 0, cat));
         }
         self.veins.get_mut(&id).unwrap().stage = stage;
         self.revision += 1;
@@ -341,6 +363,18 @@ impl Workings {
         upgraded: bool,
         directed: bool,
     ) -> Vec<usize> {
+        self.survey_versioned(terrain, seed, profile, 5, cat, upgraded, directed)
+    }
+    pub fn survey_versioned(
+        &mut self,
+        terrain: &mut Terrain,
+        seed: u64,
+        profile: usize,
+        version: u32,
+        cat: &[crate::Material],
+        upgraded: bool,
+        directed: bool,
+    ) -> Vec<usize> {
         if self.passages.is_empty() {
             return vec![];
         }
@@ -350,7 +384,15 @@ impl Workings {
         } else {
             settings().signal_radius
         };
-        let mut found = terrain.reveal(seed, profile, at[0], at[1], settings().sample_radius, cat);
+        let mut found = terrain.reveal_versioned(
+            seed,
+            profile,
+            version,
+            at[0],
+            at[1],
+            settings().sample_radius,
+            cat,
+        );
         let mut measured = false;
         for by in
             (at[1].saturating_sub(radius).max(0) / 32)..=((at[1] + radius).min(MAX_ROWS - 1) / 32)
@@ -371,8 +413,14 @@ impl Workings {
                 let mut anchor = None;
                 for oy in [4, 12, 20, 28] {
                     for ox in [4, 12, 20, 28] {
-                        let id =
-                            crate::geology::sample(seed, profile, bx * 32 + ox, by * 32 + oy, cat);
+                        let id = crate::geology::sample_versioned(
+                            seed,
+                            profile,
+                            version,
+                            bx * 32 + ox,
+                            by * 32 + oy,
+                            cat,
+                        );
                         if id > 1 {
                             hits += 1;
                             anchor.get_or_insert([bx * 32 + ox, by * 32 + oy]);
@@ -381,7 +429,9 @@ impl Workings {
                 }
                 if hits >= 2 {
                     if let Some(anchor) = anchor {
-                        if let Some(id) = crate::geology::deposit_id(seed, profile, anchor, cat) {
+                        if let Some(id) = crate::geology::deposit_id_versioned(
+                            seed, profile, version, anchor, cat,
+                        ) {
                             self.veins
                                 .entry(id)
                                 .or_insert(VeinSurvey { anchor, stage: 0 });

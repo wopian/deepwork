@@ -93,24 +93,32 @@ fn candidates(
     workings: &Workings,
     seed: u64,
     profile: usize,
+    version: u32,
     catalogue: &[Material],
     required: &BTreeSet<usize>,
     priorities: &[usize],
 ) -> Vec<Candidate> {
     // Sixteen-cell face buckets permit several crews around a large vein while
     // keeping identities stable as each face advances through fine cells.
-    let mut groups = BTreeMap::<(String, i64, i64), (usize, Vec<Point>)>::new();
+    let mut groups = BTreeMap::<(String, i64, i64, usize), (usize, Vec<Point>)>::new();
     for (&material, cells) in &terrain.ore_frontiers {
         if material <= 1 {
             continue;
         }
         for &key in cells {
             let face = cell_point(key);
-            let Some(deposit) = geology::deposit_id(seed, profile, face, catalogue) else {
+            let Some(deposit) =
+                geology::deposit_id_versioned(seed, profile, version, face, catalogue)
+            else {
                 continue;
             };
             groups
-                .entry((deposit, face[0].div_euclid(16), face[1].div_euclid(16)))
+                .entry((
+                    deposit,
+                    face[0].div_euclid(16),
+                    face[1].div_euclid(16),
+                    if version == 6 { material } else { 0 },
+                ))
                 .or_insert_with(|| (material, Vec::new()))
                 .1
                 .push(face);
@@ -119,7 +127,7 @@ fn candidates(
     let selected = workings.target_deposit.as_deref();
     groups
         .into_iter()
-        .filter_map(|((deposit, bx, by), (material, faces))| {
+        .filter_map(|((deposit, bx, by, _), (material, faces))| {
             let mut faces = faces;
             faces.sort_by_key(|face| (face[1], face[0].abs_diff(WIDTH / 2), face[0]));
             let face = faces.into_iter().find(|face| {
@@ -131,7 +139,11 @@ fn candidates(
                 return None;
             }
             Some(Candidate {
-                id: format!("{deposit}:{bx}:{by}"),
+                id: if version == 6 {
+                    format!("{deposit}:{bx}:{by}:{material}")
+                } else {
+                    format!("{deposit}:{bx}:{by}")
+                },
                 selected: selected == Some(deposit.as_str()),
                 required: required.contains(&material),
                 priority: priorities
@@ -162,8 +174,35 @@ pub fn refresh(
     max_fronts: usize,
     buffer_level: u32,
 ) {
+    refresh_versioned(
+        fronts,
+        terrain,
+        workings,
+        seed,
+        profile,
+        5,
+        catalogue,
+        required,
+        priorities,
+        max_fronts,
+        buffer_level,
+    )
+}
+pub fn refresh_versioned(
+    fronts: &mut Vec<MiningFront>,
+    terrain: &Terrain,
+    workings: &Workings,
+    seed: u64,
+    profile: usize,
+    version: u32,
+    catalogue: &[Material],
+    required: &BTreeSet<usize>,
+    priorities: &[usize],
+    max_fronts: usize,
+    buffer_level: u32,
+) {
     let candidates = sorted_candidates(
-        terrain, workings, seed, profile, catalogue, required, priorities,
+        terrain, workings, seed, profile, version, catalogue, required, priorities,
     );
     refresh_faces(
         fronts,
@@ -172,6 +211,7 @@ pub fn refresh(
         workings,
         seed,
         profile,
+        version,
         catalogue,
         max_fronts,
         buffer_level,
@@ -185,6 +225,7 @@ pub(crate) fn refresh_cached(
     workings: &Workings,
     seed: u64,
     profile: usize,
+    version: u32,
     catalogue: &[Material],
     required: &BTreeSet<usize>,
     priorities: &[usize],
@@ -200,6 +241,7 @@ pub(crate) fn refresh_cached(
         &workings.target_deposit,
         seed,
         profile,
+        version,
         required,
         priorities,
     )
@@ -207,7 +249,7 @@ pub(crate) fn refresh_cached(
     let stamp = stamp.finish();
     if cache.stamp != Some(stamp) {
         cache.faces = Arc::new(sorted_candidates(
-            terrain, workings, seed, profile, catalogue, required, priorities,
+            terrain, workings, seed, profile, version, catalogue, required, priorities,
         ));
         cache.stamp = Some(stamp);
     }
@@ -218,6 +260,7 @@ pub(crate) fn refresh_cached(
         workings,
         seed,
         profile,
+        version,
         catalogue,
         max_fronts,
         buffer_level,
@@ -229,12 +272,13 @@ fn sorted_candidates(
     workings: &Workings,
     seed: u64,
     profile: usize,
+    version: u32,
     catalogue: &[Material],
     required: &BTreeSet<usize>,
     priorities: &[usize],
 ) -> Vec<Candidate> {
     let mut candidates = candidates(
-        terrain, workings, seed, profile, catalogue, required, priorities,
+        terrain, workings, seed, profile, version, catalogue, required, priorities,
     );
     candidates.sort_by_key(|c| {
         (
@@ -256,6 +300,7 @@ fn refresh_faces(
     workings: &Workings,
     seed: u64,
     profile: usize,
+    version: u32,
     catalogue: &[Material],
     max_fronts: usize,
     buffer_level: u32,
@@ -340,7 +385,8 @@ fn refresh_faces(
             && terrain.worker_reachable(crate::crew::stand_near(existing_face, terrain, workings))
             && terrain.known_material(existing_face[0], existing_face[1])
                 == Some(candidate.material)
-            && geology::deposit_id(seed, profile, existing_face, catalogue).as_deref()
+            && geology::deposit_id_versioned(seed, profile, version, existing_face, catalogue)
+                .as_deref()
                 == Some(candidate.deposit.as_str());
         // A bucket describes candidate selection, not work ownership. Keep the
         // identity of a surviving front so advancing ore does not replace crew jobs.
@@ -478,9 +524,23 @@ pub fn next_face(
     catalogue: &[Material],
     claimed: &BTreeSet<Point>,
 ) -> Option<Point> {
+    next_face_versioned(
+        front, terrain, workings, seed, profile, 5, catalogue, claimed,
+    )
+}
+pub fn next_face_versioned(
+    front: &MiningFront,
+    terrain: &Terrain,
+    workings: &Workings,
+    seed: u64,
+    profile: usize,
+    version: u32,
+    catalogue: &[Material],
+    claimed: &BTreeSet<Point>,
+) -> Option<Point> {
     let matches = |face: &Point| {
         !claimed.contains(face)
-            && geology::deposit_id(seed, profile, *face, catalogue).as_deref()
+            && geology::deposit_id_versioned(seed, profile, version, *face, catalogue).as_deref()
                 == Some(front.deposit.as_str())
             && {
                 let position = crate::crew::stand_near(*face, terrain, workings);
@@ -581,6 +641,7 @@ mod tests {
                     &game.workings,
                     game.seed,
                     game.profile,
+                    5,
                     crate::materials(),
                     &required,
                     &priorities,
@@ -649,6 +710,7 @@ mod tests {
             &Workings::default(),
             42,
             0,
+            5,
             crate::materials(),
             2,
             0,
@@ -671,6 +733,7 @@ mod tests {
             &Workings::default(),
             42,
             0,
+            5,
             crate::materials(),
             2,
             0,

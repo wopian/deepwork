@@ -1,0 +1,348 @@
+{
+  "generated_at": "2026-10-02T19:00:20.812Z",
+  "save_version": 12,
+  "generator_version": 6,
+  "first_feature_commit": "a046dcb",
+  "current_directory": "test-results/natural-veins-final",
+  "source_sha256": {
+    "crates/mine-core/src/geology.rs": "1f05e266f503a0916906441fd38f8f69bed2f0f767bf580b0b16fddc5fe9ecee",
+    "crates/mine-core/src/geology/natural.rs": "43228e518df81bfc5b7893c100f1cb74852430cac9955c4082ac6b1c5eb795f8",
+    "crates/mine-core/src/geometry.rs": "974ee461d9a57cba84fa2c9ad2e50281b8843a2c180dc613b82b924cfb7be63a",
+    "crates/mine-core/src/lib.rs": "6189736356f35fb765ab15005f02d17886be15a819034246ca2f8c3f2b9084a0",
+    "crates/mine-core/src/fronts.rs": "d4292b3a1a18bc8ecca21f5700a58c7d54a1620a93d876a8a3b3cba956e74e84",
+    "crates/mine-core/src/terrain.rs": "317fdc2fa0acf3dafbcf97ae25338d06aab965001f9b86b04cb8def818e1f944",
+    "crates/mine-core/src/workings.rs": "e3d472b0806ae4f43209f5e8f12666ee9b581559d712656e54df7d60fcf11bee",
+    "src-tauri/src/lib.rs": "0abff0ee4df42d8a1ba14a38ddc72f0d795b09894a4acbc2063cbae10d4331f7"
+  },
+  "generator": {
+    "atlas_counts": {
+      "Bastnaesite": {
+        "1": 97343,
+        "2": 645,
+        "9": 1251,
+        "12": 6,
+        "16": 4445,
+        "17": 491,
+        "19": 255,
+        "31": 69,
+        "35": 522,
+        "44": 1077,
+        "53": 6949,
+        "54": 728,
+        "55": 907
+      },
+      "Bauxite": {
+        "1": 92096,
+        "2": 673,
+        "3": 724,
+        "5": 9304,
+        "10": 3590,
+        "12": 134,
+        "24": 8167
+      },
+      "Chalcopyrite": {
+        "1": 80710,
+        "2": 535,
+        "4": 8352,
+        "6": 8202,
+        "8": 10042,
+        "11": 1903,
+        "12": 386,
+        "19": 4558
+      },
+      "Coal": {
+        "1": 77281,
+        "3": 15404,
+        "4": 1900,
+        "5": 6289,
+        "6": 6102,
+        "7": 4666,
+        "8": 423,
+        "10": 1493,
+        "11": 1130
+      },
+      "Hematite": {
+        "1": 84559,
+        "3": 19767,
+        "4": 1022,
+        "5": 5853,
+        "7": 2279,
+        "8": 200,
+        "10": 1008
+      },
+      "Mica": {
+        "1": 90388,
+        "2": 705,
+        "3": 9326,
+        "4": 6842,
+        "8": 1132,
+        "12": 699,
+        "19": 5596
+      },
+      "Quartz": {
+        "1": 90809,
+        "2": 9451,
+        "3": 7997,
+        "7": 809,
+        "8": 321,
+        "12": 1423,
+        "19": 964,
+        "25": 93,
+        "28": 592,
+        "43": 2229
+      },
+      "Spodumene": {
+        "1": 108044,
+        "2": 491,
+        "12": 335,
+        "42": 5818
+      }
+    },
+    "fingerprints": {
+      "5": {
+        "compute_ms": 807,
+        "fingerprint": "35fda104e31a4a54",
+        "samples": 220242
+      },
+      "6": {
+        "compute_ms": 119,
+        "fingerprint": "fac9d0d1fa347b33",
+        "samples": 220242
+      }
+    },
+    "generator_version": 6,
+    "legacy_preserved": true,
+    "native_fixture": {
+      "cells": 25252,
+      "depth": 100,
+      "generator_version": 6
+    }
+  },
+  "openings": [
+    {
+      "mode": "guided",
+      "code": 0,
+      "seeds": 3,
+      "passed": 3,
+      "failures": []
+    },
+    {
+      "mode": "adverse",
+      "code": 0,
+      "seeds": 3,
+      "passed": 3,
+      "failures": []
+    },
+    {
+      "mode": "released",
+      "code": 0,
+      "seeds": 3,
+      "passed": 3,
+      "failures": []
+    }
+  ],
+  "initial_generator": {
+    "directory": "test-results/natural-veins",
+    "generator": {
+      "atlas_counts": {
+        "Bastnaesite": {
+          "1": 96610,
+          "2": 645,
+          "9": 1254,
+          "12": 30,
+          "16": 4580,
+          "17": 505,
+          "19": 371,
+          "31": 69,
+          "35": 472,
+          "44": 1442,
+          "53": 7105,
+          "54": 695,
+          "55": 910
+        },
+        "Bauxite": {
+          "1": 91375,
+          "2": 667,
+          "3": 780,
+          "5": 9304,
+          "10": 3710,
+          "12": 133,
+          "24": 8719
+        },
+        "Chalcopyrite": {
+          "1": 80356,
+          "2": 617,
+          "4": 6344,
+          "6": 8202,
+          "8": 11646,
+          "11": 1903,
+          "12": 387,
+          "19": 5233
+        },
+        "Coal": {
+          "1": 77776,
+          "3": 15404,
+          "4": 1490,
+          "5": 6289,
+          "6": 6102,
+          "7": 4666,
+          "8": 338,
+          "10": 1493,
+          "11": 1130
+        },
+        "Hematite": {
+          "1": 84823,
+          "3": 19767,
+          "4": 799,
+          "5": 5853,
+          "7": 2279,
+          "8": 159,
+          "10": 1008
+        },
+        "Mica": {
+          "1": 91045,
+          "2": 866,
+          "3": 9305,
+          "4": 5151,
+          "8": 1013,
+          "12": 729,
+          "19": 6579
+        },
+        "Quartz": {
+          "1": 90134,
+          "2": 9559,
+          "3": 7997,
+          "7": 809,
+          "8": 342,
+          "12": 1454,
+          "19": 964,
+          "25": 115,
+          "28": 592,
+          "43": 2722
+        },
+        "Spodumene": {
+          "1": 106813,
+          "2": 526,
+          "12": 449,
+          "42": 6900
+        }
+      },
+      "fingerprints": {
+        "5": {
+          "compute_ms": 283,
+          "fingerprint": "35fda104e31a4a54",
+          "samples": 220242
+        },
+        "6": {
+          "compute_ms": 64,
+          "fingerprint": "d903d8586b3a448a",
+          "samples": 220242
+        }
+      },
+      "generator_version": 6,
+      "legacy_preserved": true,
+      "native_fixture": {
+        "cells": 25252,
+        "depth": 100,
+        "generator_version": 6
+      }
+    },
+    "openings": [
+      {
+        "mode": "guided",
+        "code": 0,
+        "seeds": 30,
+        "passed": 30,
+        "failures": []
+      },
+      {
+        "mode": "adverse",
+        "code": 0,
+        "seeds": 30,
+        "passed": 30,
+        "failures": []
+      },
+      {
+        "mode": "released",
+        "code": 0,
+        "seeds": 30,
+        "passed": 30,
+        "failures": []
+      }
+    ]
+  },
+  "rust_results": [
+    "test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 153 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 50.00s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+  ],
+  "final_native_unit_results": [
+    "test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+  ],
+  "reserve_yield_check": {
+    "seeds": [
+      42,
+      71
+    ],
+    "site_profiles": 3,
+    "minimum_estimated_primary_cells": 1500,
+    "sample_stride": 4,
+    "exact_whole_body_identity_and_uniqueness": true
+  },
+  "native": {
+    "passed": true,
+    "executable_sha256": "e7358cfdbc92cc5378f6aa60c6c7fad9492304444d3c61cac2e2f0453061f52c",
+    "fixture_sha256": "deff2c380e3a932a3726710b582c790240e22735c6785f02b2cc51d37e9662d1",
+    "replay": {
+      "effective": 14400,
+      "ticks": 300000,
+      "commandBlocked": true,
+      "workers": 16
+    },
+    "ipc": {
+      "purchase": 49088,
+      "replay": 5745483
+    },
+    "touch": {
+      "beforeGesture": {
+        "zoom": 2,
+        "x": -188,
+        "y": 7.803636363636372,
+        "follow": "false"
+      },
+      "zoomed": {
+        "zoom": 4.333333333333333,
+        "x": -626.6666666666666,
+        "y": -344.05881636186075,
+        "follow": "false"
+      },
+      "panned": {
+        "zoom": 4.333333333333333,
+        "x": -591.6666666666666,
+        "y": -384.0588468794389,
+        "follow": "false"
+      }
+    }
+  },
+  "native_attempts": [
+    {
+      "directory": "test-results/natural-veins-native",
+      "result": "Eight-hour replay timeout at 89% after 300 seconds; retained screenshot and logs."
+    },
+    {
+      "directory": "test-results/natural-veins-native-balanced",
+      "passed": true
+    }
+  ],
+  "limits": [
+    "Full generator 6 calendar cohort unverified.",
+    "Final openings cover nine cases; initial generator 6 covers all 90.",
+    "Sampler timings measure this host under concurrent validation, not renderer FPS.",
+    "Native generator 6 check does not repeat the prior 60-second 1000-worker stress test.",
+    "Initial reload test omitted rebuilding transient target geometry; corrected test passes without changing persistence behavior."
+  ]
+}

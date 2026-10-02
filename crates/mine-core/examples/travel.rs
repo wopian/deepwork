@@ -48,8 +48,12 @@ fn main() {
         let mut game: Game =
             serde_json::from_slice(&std::fs::read(&arguments[2]).unwrap()).unwrap();
         game.migrate().unwrap();
-        game.workings
-            .prepare_deposit_order(game.seed, game.profile, materials());
+        game.workings.prepare_deposit_order_versioned(
+            game.seed,
+            game.profile,
+            game.generator_version,
+            materials(),
+        );
         let floors: Vec<_> = game
             .workings
             .passages

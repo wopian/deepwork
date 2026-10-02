@@ -220,6 +220,18 @@ impl Terrain {
         radius: i64,
         cat: &[crate::Material],
     ) -> Vec<usize> {
+        self.reveal_versioned(seed, profile, 5, x, y, radius, cat)
+    }
+    pub fn reveal_versioned(
+        &mut self,
+        seed: u64,
+        profile: usize,
+        version: u32,
+        x: i64,
+        y: i64,
+        radius: i64,
+        cat: &[crate::Material],
+    ) -> Vec<usize> {
         let mut found = std::collections::BTreeSet::new();
         for py in y.saturating_sub(radius).max(0)..=y.saturating_add(radius).min(MAX_ROWS - 1) {
             for px in x.saturating_sub(radius)..=x.saturating_add(radius) {
@@ -233,7 +245,8 @@ impl Terrain {
                 let index = bit_index(px, py);
                 self.revealed.entry(id).or_insert_with(|| vec![0; 512])[index / 8] |=
                     1 << (index % 8);
-                let material = crate::geology::sample(seed, profile, px, py, cat);
+                let material =
+                    crate::geology::sample_versioned(seed, profile, version, px, py, cat);
                 self.visible.entry(id).or_insert_with(|| vec![255; 4096])[index] = material as u8;
                 self.index_frontier(cell_key(px, py));
                 found.insert(material);

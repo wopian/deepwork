@@ -20,6 +20,9 @@ fn content_fingerprint() -> u64 {
     for text in [
         // Never resume an older decision policy as if it were the same strategy.
         include_str!("campaign.rs"),
+        include_str!("../src/geometry.rs"),
+        include_str!("../src/geology.rs"),
+        include_str!("../src/geology/natural.rs"),
         include_str!("../../../content/pacing.json"),
         include_str!("../../../content/upgrades.json"),
         include_str!("../../../content/materials.json"),

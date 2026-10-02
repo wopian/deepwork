@@ -11,7 +11,7 @@ pub const UNITS: u64 = 64_000;
 pub const CELL_MASS: u64 = 1_000;
 pub const MAX_ROWS: i64 = 800_000;
 pub const MAX_X: i64 = 8_000_000;
-pub const GENERATOR_VERSION: u32 = 5;
+pub const GENERATOR_VERSION: u32 = 6;
 pub fn valid_cell(x: i64, y: i64) -> bool {
     (-MAX_X..MAX_X).contains(&x) && (0..MAX_ROWS).contains(&y)
 }

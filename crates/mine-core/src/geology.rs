@@ -1,5 +1,48 @@
 //! Stateless world-space deposits. A sample does not depend on generated chunks.
 use crate::{sites, Material};
+mod natural;
+
+/// Versioned entry points keep every existing mine's geology unchanged.
+pub fn sample_versioned(
+    seed: u64,
+    profile: usize,
+    version: u32,
+    x: i64,
+    y: i64,
+    catalogue: &[Material],
+) -> usize {
+    if version == 6 {
+        natural::sample(seed, profile, x, y, catalogue)
+    } else {
+        sample(seed, profile, x, y, catalogue)
+    }
+}
+pub fn deposit_id_versioned(
+    seed: u64,
+    profile: usize,
+    version: u32,
+    p: [i64; 2],
+    catalogue: &[Material],
+) -> Option<String> {
+    if version == 6 {
+        natural::deposit_id(seed, profile, p, catalogue)
+    } else {
+        deposit_id(seed, profile, p, catalogue)
+    }
+}
+pub fn deposit_cells_versioned(
+    seed: u64,
+    profile: usize,
+    version: u32,
+    p: [i64; 2],
+    catalogue: &[Material],
+) -> Vec<[i64; 2]> {
+    if version == 6 {
+        natural::deposit_cells(seed, profile, p, catalogue)
+    } else {
+        deposit_cells(seed, profile, p, catalogue)
+    }
+}
 fn hash(mut v: u64) -> u64 {
     v = (v ^ (v >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
     v = (v ^ (v >> 27)).wrapping_mul(0x94d049bb133111eb);

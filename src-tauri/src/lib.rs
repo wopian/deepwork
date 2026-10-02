@@ -89,10 +89,17 @@ struct Replay {
 struct ReplayPayload {
     bytes: Vec<u8>,
     path: Option<PathBuf>,
+    /// Number of original buckets. Balance adjacent merges so a growing oldest
+    /// snapshot is not decoded and encoded again for every arriving frame.
+    buckets: u64,
 }
 impl ReplayPayload {
     fn new(bytes: Vec<u8>) -> Self {
-        Self { bytes, path: None }
+        Self {
+            bytes,
+            path: None,
+            buckets: 1,
+        }
     }
     fn resident(&self) -> usize {
         self.bytes.capacity() + self.path.as_ref().map_or(0, PathBuf::capacity)
@@ -225,14 +232,24 @@ impl Replay {
         while self.bytes + self.frames.capacity() * std::mem::size_of::<ReplayPayload>() > limit
             && self.frames.len() > 1
         {
-            let left = self.frames.pop_front().unwrap();
-            let right = self.frames.pop_front().unwrap();
-            let combined = ReplayPayload::new(encode_visual(&coalesce_visual(
+            let index = self
+                .frames
+                .iter()
+                .zip(self.frames.iter().skip(1))
+                .enumerate()
+                .min_by_key(|(_, (left, right))| left.buckets.saturating_add(right.buckets))
+                .map(|(index, _)| index)
+                .unwrap();
+            let left = self.frames.remove(index).unwrap();
+            let right = self.frames.remove(index).unwrap();
+            let buckets = left.buckets.saturating_add(right.buckets);
+            let mut combined = ReplayPayload::new(encode_visual(&coalesce_visual(
                 left.decode()?,
                 right.decode()?,
             )));
+            combined.buckets = buckets;
             self.bytes = self.bytes - left.resident() - right.resident() + combined.resident();
-            self.frames.push_front(combined);
+            self.frames.insert(index, combined);
         }
         self.frames.shrink_to_fit();
         let metadata = self.frames.capacity() * std::mem::size_of::<ReplayPayload>();
@@ -440,6 +457,40 @@ fn public_front_id(id: &str) -> String {
 #[cfg(test)]
 mod visual_replay_tests {
     use super::*;
+    #[test]
+    fn replay_merges_small_adjacent_buckets_before_reencoding_old_history() {
+        let mut replay = Replay::default();
+        for index in 0..3 {
+            let mut payload = ReplayPayload::new(encode_visual(
+                &serde_json::json!({"kind":"frame","done":index,"update":{"reset":false,"state":{"workings_offset":index,"workings":{"passages":[index]},"terrain":{"chunks":{},"revealed":{},"visible":{index.to_string():[index]}}}}}),
+            ));
+            if index == 0 {
+                payload.buckets = 1024;
+            }
+            replay.bytes += payload.resident();
+            replay.frames.push_back(payload);
+        }
+        let baseline = replay.frames[0].decode().unwrap();
+        let limit =
+            replay.bytes - 1 + replay.frames.capacity() * std::mem::size_of::<ReplayPayload>();
+        replay.bound(limit).unwrap();
+        assert_eq!(replay.frames.len(), 2);
+        assert_eq!(replay.frames[0].buckets, 1024);
+        assert_eq!(replay.frames[0].decode().unwrap(), baseline);
+        let combined = replay.frames[1].decode().unwrap();
+        assert_eq!(replay.frames[1].buckets, 2);
+        assert_eq!(combined["done"], 2);
+        assert_eq!(
+            combined["update"]["state"]["workings"]["passages"],
+            serde_json::json!([1, 2])
+        );
+        assert!(combined["update"]["state"]["terrain"]["visible"]
+            .get("1")
+            .is_some());
+        assert!(combined["update"]["state"]["terrain"]["visible"]
+            .get("2")
+            .is_some());
+    }
     #[test]
     fn coalescing_keeps_order_and_only_latest_public_knowledge() {
         let frame = |offset, passages, visible| {

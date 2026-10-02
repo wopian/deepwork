@@ -16,6 +16,94 @@ use geometry::{CELL_MASS, UNITS};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 pub const VERSION: u32 = 12;
+#[cfg(test)]
+mod geology_version_tests {
+    use super::*;
+    #[test]
+    fn legacy_migrations_and_reload_preserve_public_and_hidden_geology() {
+        for save_version in [10, 11, 12] {
+            let mut game = Game::new(42, 1);
+            game.generator_version = 5;
+            game.version = save_version;
+            game.terrain
+                .reveal_versioned(42, 0, 5, 256, 480, 12, materials());
+            let terrain = serde_json::to_value(&game.terrain).unwrap();
+            let before: Vec<_> = (-64..600)
+                .step_by(17)
+                .map(|x| game.cell(x, 490, materials()))
+                .collect();
+            let mut loaded: Game =
+                serde_json::from_slice(&serde_json::to_vec(&game).unwrap()).unwrap();
+            loaded.migrate().unwrap();
+            assert_eq!(loaded.generator_version, 5);
+            assert_eq!(serde_json::to_value(&loaded.terrain).unwrap(), terrain);
+            assert_eq!(
+                (-64..600)
+                    .step_by(17)
+                    .map(|x| loaded.cell(x, 490, materials()))
+                    .collect::<Vec<_>>(),
+                before
+            );
+        }
+    }
+    #[test]
+    fn new_mine_surveys_orders_and_reload_use_generator_six() {
+        let mut game = Game::new(42, 1);
+        assert_eq!(game.generator_version, 6);
+        let anchor = (32..480)
+            .flat_map(|x| (472..=488).map(move |y| [x, y]))
+            .find(|p| game.cell(p[0], p[1], materials()) == 19)
+            .unwrap();
+        game.terrain.reveal_versioned(
+            game.seed,
+            game.profile,
+            game.generator_version,
+            anchor[0],
+            anchor[1],
+            8,
+            materials(),
+        );
+        assert_eq!(game.terrain.known_material(anchor[0], anchor[1]), Some(19));
+        game.workings.target = Some(anchor);
+        game.workings.prepare_deposit_order_versioned(
+            game.seed,
+            game.profile,
+            game.generator_version,
+            materials(),
+        );
+        assert!(game
+            .workings
+            .target_deposit
+            .as_ref()
+            .unwrap()
+            .starts_with("6:"));
+        assert!(game.workings.target_cells.len() > 1500);
+        let mut loaded: Game = serde_json::from_slice(&serde_json::to_vec(&game).unwrap()).unwrap();
+        loaded.migrate().unwrap();
+        assert_eq!(loaded.generator_version, 6);
+        // Target geometry is a transient cache; rebuild from persisted anchor.
+        loaded.workings.prepare_deposit_order_versioned(
+            loaded.seed,
+            loaded.profile,
+            loaded.generator_version,
+            materials(),
+        );
+        assert!(loaded.workings.target_cells == game.workings.target_cells);
+        for (&chunk, pixels) in &loaded.terrain.visible {
+            let (x, y) = geometry::chunk_origin(chunk);
+            for (index, id) in pixels.iter().enumerate().filter(|(_, id)| **id != 255) {
+                assert_eq!(
+                    loaded.cell(
+                        x + (index % 64) as i64,
+                        y + (index / 64) as i64,
+                        materials()
+                    ),
+                    *id as usize
+                );
+            }
+        }
+    }
+}
 /// Deterministic fractional throughput without storing idle production credit.
 /// `rate` is thousandths of one work unit per tick; no multiplication by full age.
 fn work_budget(rate: u64, tick: u64) -> u64 {
@@ -825,7 +913,7 @@ impl Game {
             + 5 * self.site_objectives.len() as u64
     }
     pub fn cell(&self, x: i64, y: i64, cat: &[Material]) -> usize {
-        geology::sample(self.seed, self.profile, x, y, cat)
+        geology::sample_versioned(self.seed, self.profile, self.generator_version, x, y, cat)
     }
     pub fn rock_work(&self) -> f64 {
         let depth = self.depth();
@@ -1288,10 +1376,11 @@ impl Game {
             if self.workings.survey_work >= 200 || self.workings.surveyed.is_empty() {
                 self.workings.survey_work %= 200;
                 let upgraded = self.level("survey") > 0;
-                let mut found = self.workings.survey(
+                let mut found = self.workings.survey_versioned(
                     &mut self.terrain,
                     self.seed,
                     self.profile,
+                    self.generator_version,
                     cat,
                     upgraded,
                     false,
@@ -1305,10 +1394,11 @@ impl Game {
                         .unwrap_or(0)
                         .max(u32::from(prospecting_rank >= 10) * 2) as i64;
                 for _ in 0..refinements {
-                    found.extend(self.workings.refine_survey(
+                    found.extend(self.workings.refine_survey_versioned(
                         &mut self.terrain,
                         self.seed,
                         self.profile,
+                        self.generator_version,
                         cat,
                         accuracy,
                     ));
@@ -1320,8 +1410,12 @@ impl Game {
                 }
             }
             let limit = self.equipment_depth_limit() as i64 * geometry::CELLS_PER_METRE;
-            self.workings
-                .prepare_deposit_order(self.seed, self.profile, cat);
+            self.workings.prepare_deposit_order_versioned(
+                self.seed,
+                self.profile,
+                self.generator_version,
+                cat,
+            );
             let engineers = if self.ranks.get("excavation").copied().unwrap_or(0) >= 10 {
                 (self.support_crew() as i64 * 3 + 1) / 2
             } else {
@@ -1342,7 +1436,15 @@ impl Game {
                 .last()
                 .map(|c| (c.x, c.y))
                 .unwrap_or((WIDTH / 2, 0));
-            for id in self.terrain.reveal(self.seed, self.profile, x, y, 16, cat) {
+            for id in self.terrain.reveal_versioned(
+                self.seed,
+                self.profile,
+                self.generator_version,
+                x,
+                y,
+                16,
+                cat,
+            ) {
                 if self.discoveries.insert(id) {
                     self.site_discoveries += 1;
                 }
@@ -1361,6 +1463,7 @@ impl Game {
                 &self.workings,
                 self.seed,
                 self.profile,
+                self.generator_version,
                 cat,
                 &required,
                 &self.priorities,
@@ -1462,7 +1565,15 @@ impl Game {
             }
             *self.ore.entry(id).or_default() += CELL_MASS;
             *mined_cargo.entry(id).or_default() += CELL_MASS;
-            self.terrain.reveal(self.seed, self.profile, x, y, 1, cat);
+            self.terrain.reveal_versioned(
+                self.seed,
+                self.profile,
+                self.generator_version,
+                x,
+                y,
+                1,
+                cat,
+            );
             self.excavated += 1;
             mined += 1;
             if self.discoveries.insert(id) {
@@ -1514,12 +1625,13 @@ impl Game {
                     .collect();
                 if solid.is_empty() {
                     claimed.remove(&face);
-                    let next = fronts::next_face(
+                    let next = fronts::next_face_versioned(
                         &self.mining_fronts[index],
                         &self.terrain,
                         &self.workings,
                         self.seed,
                         self.profile,
+                        self.generator_version,
                         cat,
                         &claimed,
                     );
@@ -1563,7 +1675,15 @@ impl Game {
                     let front = &mut self.mining_fronts[index];
                     front.stockpile += CELL_MASS;
                     *front.stockpiles.entry(material).or_default() += CELL_MASS;
-                    self.terrain.reveal(self.seed, self.profile, x, y, 1, cat);
+                    self.terrain.reveal_versioned(
+                        self.seed,
+                        self.profile,
+                        self.generator_version,
+                        x,
+                        y,
+                        1,
+                        cat,
+                    );
                     self.excavated += 1;
                     mined += 1;
                     if self.discoveries.insert(material) {
@@ -1571,12 +1691,13 @@ impl Game {
                     }
                 }
                 claimed.remove(&face);
-                let next = fronts::next_face(
+                let next = fronts::next_face_versioned(
                     &self.mining_fronts[index],
                     &self.terrain,
                     &self.workings,
                     self.seed,
                     self.profile,
+                    self.generator_version,
                     cat,
                     &claimed,
                 );
@@ -2595,7 +2716,13 @@ impl Game {
                 {
                     return Err("Select surveyed, unmined ore".into());
                 }
-                let cells = geology::deposit_cells(self.seed, self.profile, p, materials());
+                let cells = geology::deposit_cells_versioned(
+                    self.seed,
+                    self.profile,
+                    self.generator_version,
+                    p,
+                    materials(),
+                );
                 if !cells.iter().any(|cell| {
                     self.workings.mineable_cell(*cell)
                         && !self.terrain.contains(cell[0], cell[1])
@@ -2609,8 +2736,13 @@ impl Game {
                 // The face may be mined while its inspector is open. Keep the
                 // stable deposit anchor when other surveyed cells still remain.
                 self.workings.target = Some(p);
-                self.workings.target_deposit =
-                    geology::deposit_id(self.seed, self.profile, p, materials());
+                self.workings.target_deposit = geology::deposit_id_versioned(
+                    self.seed,
+                    self.profile,
+                    self.generator_version,
+                    p,
+                    materials(),
+                );
                 self.workings.target_cells = cells;
                 self.workings.search = None;
                 self.workings.blocked_at = None;
@@ -2961,7 +3093,7 @@ impl Game {
         {
             return Err("Invalid paused automatic recipe".into());
         }
-        if self.version != VERSION || self.generator_version != geometry::GENERATOR_VERSION {
+        if self.version != VERSION || !matches!(self.generator_version, 5 | 6) {
             return Err("Unsupported save version".into());
         }
         if ![
@@ -4363,6 +4495,7 @@ mod travel_replay_tests {
     #[test]
     fn version_eleven_migrates_identities_without_changing_mine() {
         let mut game = Game::new(42, 1);
+        game.generator_version = 5;
         for _ in 0..10 {
             game.second(materials(), false);
         }
@@ -4373,6 +4506,7 @@ mod travel_replay_tests {
         game.movement = crew::Movement::default();
         game.migrate().unwrap();
         assert_eq!(game.version, 12);
+        assert_eq!(game.generator_version, 5);
         assert_eq!(game.movement.workers.len(), game.workers as usize);
         assert_eq!(serde_json::to_value(&game.terrain).unwrap(), terrain);
         assert_eq!(game.excavated, excavated);
