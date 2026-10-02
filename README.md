@@ -40,7 +40,9 @@ The unpackaged Windows executable is `target/debug/deepwork.exe`. Browser-only V
 
 ## Current limits against the full design
 
-Save version **9** / generator version **5** requires a fresh campaign. Older campaigns remain exportable and are archived before reset. Simulation, renderer and save keys use the same signed coordinates; terrain chunks stay 64×64 cells at 0.25 metres per cell. The renderer retains at most 768 explored viewport textures.
+Save version **12** / generator version **5** migrates versions 10 and 11 without resetting campaigns or changing geology. Worker identities, shared travel routes and cargo identities persist with existing inventory and excavation. Earlier unsupported campaigns remain exportable and are archived before reset. Simulation, renderer and save keys use the same signed coordinates; terrain chunks stay 64×64 cells at 0.25 metres per cell. The renderer retains at most 768 explored viewport textures.
+
+Tunnels and supports now appear as excavation and construction advance. Underground crews travel through cleared space before producing work. Ore and workers move smoothly between snapshots. Idle returns show automatic timelapse with **Skip timelapse**; playback waits for computed frames and has no duration cap or speed controls. Reduced motion skips playback while retaining production travel delays. See [progressive mine notes](docs/progressive-mine.md).
 
 See `docs/shaft-redesign-progress.md` for measured evidence and outstanding hardware acceptance. Campaign completion and human/device playtesting are separate checks; earlier fixed-width campaign reports do not validate this release.
 

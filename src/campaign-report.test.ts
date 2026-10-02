@@ -65,3 +65,10 @@ test("accepted medians still expose slow seeds and their strategies", () => {
   ]);
   expect(result.milestones.headquarters!.observations).toHaveLength(30);
 });
+test("rare-earth acceptance includes user-approved one-second boundary", () => {
+  const runs = validRuns();
+  for (const run of runs) run.events.rare_earth = 2419201;
+  expect(assessCampaign(runs).accepted).toBe(true);
+  for (const run of runs) run.events.rare_earth = 2419202;
+  expect(assessCampaign(runs).accepted).toBe(false);
+});

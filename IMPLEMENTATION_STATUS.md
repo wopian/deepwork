@@ -1,6 +1,16 @@
 # Implementation status — shaft-first expanded mines
 
-Current saves use **version 10 / generator 5**. Older campaigns are archived before a fresh campaign is created; accessibility, audio and display preferences are kept separately. Old campaign benchmarks do not validate this version.
+Current saves use **version 12 / generator 5**. Versions 10 and 11 migrate without campaign reset or geology changes. Accessibility, audio and display preferences remain separate. Earlier campaign benchmarks remain historical evidence.
+
+## Version 12 progressive mine
+
+Persistent underground crews travel through cleared tunnels before digging, hauling, building supports or surveying. Committed terrain masks expose unfinished tunnels; construction progress assembles supports and shaft access. Fractional actor positions interpolate occupied and adjacent movement legs between 200 ms snapshots. Renderer limits remain independent of simulated population.
+
+Idle advancement records public visual frames during its existing simulation pass. A separate channel streams baseline, progress and saved/failure events. Playback has no duration cap or speed controls. Skip removes animation immediately while computation and checkpointing continue. Failed checkpoints restore committed view and leave the interval eligible for retry. Retained replay data coalesces adjacent frames and spills oversized snapshots into temporary files to meet its 16 MiB RAM budget.
+
+Version 12 balance and native acceptance are tracked in [progressive mine notes](docs/progressive-mine.md). Older counts and cohorts below do not validate new travel delays.
+
+Functional, opening, parity and isolated native qualifications pass. Calendar checkpoints remain incomplete; 30/30 headquarters is unverified. The user accepts 2,419,201 seconds as the 28-day rare-earth boundary. Historical one-second rejection records are superseded by this explicit tolerance, not deleted.
 
 ## Version 10 multi-front milestone
 
@@ -12,7 +22,7 @@ Current saves use **version 10 / generator 5**. Older campaigns are archived bef
 - Ore faces now commit complete **7×8-cell** cuts, matching the five-pixel worker body, pick swing and existing passage clearance. A worker stays at the last finished cut until the next chamber is open. Full-height cuts remove thin suspended dirt strips; every host-rock or secondary-ore cell keeps exact work, mass, buffer and transport ownership.
 - Headquarters ranks now grant shaft-first effects: excavation/front capacity/support speed, logistics branch rate/buffers, metallurgy recovery/power demand, prospecting refinements/accuracy and reclamation recovery. Retired open-pit grants were removed.
 
-Current measured checks:
+Recorded version-10 checks:
 
 - Guided opening after full-clearance extraction: **30/30** seeds pass. First sale 7 seconds, first refined iron 8–10 seconds, improved lift 144–180 seconds and first underground fork 11–60 seconds.
 - Housing-first adverse order: **30/30** seeds pass. First refined iron 17–37 seconds, conveyor 72–104 seconds and improved lift 215–280 seconds.
@@ -71,14 +81,14 @@ The fresh 30-seed cohort **passes all six existing overall median gates**, with 
 
 All values below are simulated calendar days. Individual outliers include observations earlier as well as later than the authored window; classification uses unrounded seconds.
 
-| Milestone | Median | Target | Individual range | Outside window |
-|---|---:|---:|---:|---:|
-| Retirement | 0.503 | 0.5–3 | 0.500–1.000 | 0 |
-| Power | 1.505 | 1.5–7 | 1.500–2.500 | 0 |
-| Chemical | 6.752 | 5–14 | 4.504–10.500 | 2 |
-| Precision | 16.252 | 14–21 | 12.000–25.502 | 20 |
-| Rare Earth | 27.750 | 21–28 | 22.000–40.000 | 12 |
-| Headquarters | 39.000 | 28–42 | 30.006–51.500 | 10 |
+| Milestone    | Median | Target | Individual range | Outside window |
+| ------------ | -----: | -----: | ---------------: | -------------: |
+| Retirement   |  0.503 |  0.5–3 |      0.500–1.000 |              0 |
+| Power        |  1.505 |  1.5–7 |      1.500–2.500 |              0 |
+| Chemical     |  6.752 |   5–14 |     4.504–10.500 |              2 |
+| Precision    | 16.252 |  14–21 |    12.000–25.502 |             20 |
+| Rare Earth   | 27.750 |  21–28 |    22.000–40.000 |             12 |
+| Headquarters | 39.000 |  28–42 |    30.006–51.500 |             10 |
 
 Headquarters medians by strategy: **bulk 43.753 days**, **precision 39.750 days**, **reclamation 31.006 days**. Overall acceptance is not a claim that every specialisation meets every median window independently: bulk headquarters exceeds six weeks, precision's first aluminium median is 23.003 days, and reclamation reaches aluminium earlier at 12.001 days. Ten individual headquarters observations exceed 42 days, including one by a single second; the slowest finishes at 51.500 days. These differences remain disclosed rather than rounded away.
 

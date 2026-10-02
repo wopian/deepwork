@@ -10,6 +10,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 pub type Point = [i64; 2];
 
@@ -81,6 +82,12 @@ struct Candidate {
     distance: u64,
 }
 
+#[derive(Clone, Default)]
+pub(crate) struct CandidateCache {
+    stamp: Option<u64>,
+    faces: Arc<Vec<Candidate>>,
+}
+
 fn candidates(
     terrain: &Terrain,
     workings: &Workings,
@@ -113,9 +120,12 @@ fn candidates(
     groups
         .into_iter()
         .filter_map(|((deposit, bx, by), (material, faces))| {
-            let face = faces
-                .into_iter()
-                .min_by_key(|face| (face[1], face[0].abs_diff(WIDTH / 2), face[0]))?;
+            let mut faces = faces;
+            faces.sort_by_key(|face| (face[1], face[0].abs_diff(WIDTH / 2), face[0]));
+            let face = faces.into_iter().find(|face| {
+                let position = crate::crew::stand_near(*face, terrain, workings);
+                terrain.worker_reachable(position)
+            })?;
             let route = workings.route_near(face);
             if route.is_empty() {
                 return None;
@@ -152,6 +162,77 @@ pub fn refresh(
     max_fronts: usize,
     buffer_level: u32,
 ) {
+    let candidates = sorted_candidates(
+        terrain, workings, seed, profile, catalogue, required, priorities,
+    );
+    refresh_faces(
+        fronts,
+        &candidates,
+        terrain,
+        workings,
+        seed,
+        profile,
+        catalogue,
+        max_fronts,
+        buffer_level,
+    );
+}
+
+pub(crate) fn refresh_cached(
+    cache: &mut CandidateCache,
+    fronts: &mut Vec<MiningFront>,
+    terrain: &Terrain,
+    workings: &Workings,
+    seed: u64,
+    profile: usize,
+    catalogue: &[Material],
+    required: &BTreeSet<usize>,
+    priorities: &[usize],
+    max_fronts: usize,
+    buffer_level: u32,
+) {
+    use std::hash::{Hash, Hasher};
+    let mut stamp = std::collections::hash_map::DefaultHasher::new();
+    (
+        terrain.revision,
+        workings.revision,
+        workings.passages.len(),
+        &workings.target_deposit,
+        seed,
+        profile,
+        required,
+        priorities,
+    )
+        .hash(&mut stamp);
+    let stamp = stamp.finish();
+    if cache.stamp != Some(stamp) {
+        cache.faces = Arc::new(sorted_candidates(
+            terrain, workings, seed, profile, catalogue, required, priorities,
+        ));
+        cache.stamp = Some(stamp);
+    }
+    refresh_faces(
+        fronts,
+        &cache.faces,
+        terrain,
+        workings,
+        seed,
+        profile,
+        catalogue,
+        max_fronts,
+        buffer_level,
+    );
+}
+
+fn sorted_candidates(
+    terrain: &Terrain,
+    workings: &Workings,
+    seed: u64,
+    profile: usize,
+    catalogue: &[Material],
+    required: &BTreeSet<usize>,
+    priorities: &[usize],
+) -> Vec<Candidate> {
     let mut candidates = candidates(
         terrain, workings, seed, profile, catalogue, required, priorities,
     );
@@ -165,11 +246,24 @@ pub fn refresh(
             c.id.clone(),
         )
     });
+    candidates
+}
 
+fn refresh_faces(
+    fronts: &mut Vec<MiningFront>,
+    candidates: &[Candidate],
+    terrain: &Terrain,
+    workings: &Workings,
+    seed: u64,
+    profile: usize,
+    catalogue: &[Material],
+    max_fronts: usize,
+    buffer_level: u32,
+) {
     let mut chosen = Vec::new();
     let mut materials = BTreeSet::new();
     // First pass gives distinct feeds independent work ownership.
-    for candidate in &candidates {
+    for candidate in candidates {
         if chosen.len() >= max_fronts {
             break;
         }
@@ -182,7 +276,7 @@ pub fn refresh(
             break;
         }
         if !chosen.iter().any(|c| c.id == candidate.id) {
-            chosen.push(candidate);
+            chosen.push(candidate.clone());
         }
     }
 
@@ -190,6 +284,7 @@ pub fn refresh(
         .drain(..)
         .map(|front| (front.id.clone(), front))
         .collect();
+    let mut identities: BTreeSet<_> = old.keys().cloned().collect();
     let capacity = 20 * UNITS * (4 + buffer_level as u64) / 4;
     for candidate in chosen {
         let nearest = old
@@ -205,40 +300,50 @@ pub fn refresh(
         let mut front = old
             .remove(&candidate.id)
             .or_else(|| nearest.and_then(|id| old.remove(&id)))
-            .unwrap_or_else(|| MiningFront {
-                id: candidate.id.clone(),
-                deposit: candidate.deposit.clone(),
-                material: candidate.material,
-                face: candidate.face,
-                position: candidate.route.last().copied().unwrap_or(candidate.face),
-                crew: 0,
-                haulers: 0,
-                progress: 0,
-                cut_work: 0,
-                work_remainder: 0,
-                transfer_remainder: 0,
-                stockpile: 0,
-                stockpiles: BTreeMap::new(),
-                capacity,
-                route: candidate.route.clone(),
-                route_id: 0,
-                selected: candidate.selected,
-                status: "Awaiting crew".into(),
-                blocker: String::new(),
+            .unwrap_or_else(|| {
+                let mut id = candidate.id.clone();
+                let mut suffix = 0;
+                while !identities.insert(id.clone()) {
+                    suffix += 1;
+                    id = format!("{}:{suffix}", candidate.id);
+                }
+                MiningFront {
+                    id,
+                    deposit: candidate.deposit.clone(),
+                    material: candidate.material,
+                    face: candidate.face,
+                    position: candidate.route.first().copied().unwrap_or(candidate.face),
+                    crew: 0,
+                    haulers: 0,
+                    progress: 0,
+                    cut_work: 0,
+                    work_remainder: 0,
+                    transfer_remainder: 0,
+                    stockpile: 0,
+                    stockpiles: BTreeMap::new(),
+                    capacity,
+                    route: candidate.route.clone(),
+                    route_id: 0,
+                    selected: candidate.selected,
+                    status: "Awaiting crew".into(),
+                    blocker: String::new(),
+                }
             });
         if front.stockpiles.is_empty() && front.stockpile > 0 {
             front.stockpiles.insert(front.material, front.stockpile);
         }
         if front.position == [0, 0] {
-            front.position = front.route.last().copied().unwrap_or(front.face);
+            front.position = front.route.first().copied().unwrap_or(front.face);
         }
         let existing_face = front.face;
         let keep_existing_face = !terrain.contains(existing_face[0], existing_face[1])
+            && terrain.worker_reachable(crate::crew::stand_near(existing_face, terrain, workings))
             && terrain.known_material(existing_face[0], existing_face[1])
                 == Some(candidate.material)
             && geology::deposit_id(seed, profile, existing_face, catalogue).as_deref()
                 == Some(candidate.deposit.as_str());
-        front.id = candidate.id;
+        // A bucket describes candidate selection, not work ownership. Keep the
+        // identity of a surviving front so advancing ore does not replace crew jobs.
         front.deposit = candidate.deposit;
         front.material = candidate.material;
         let next_face = if keep_existing_face {
@@ -248,12 +353,14 @@ pub fn refresh(
         };
         if next_face != front.face {
             front.cut_work = 0;
+            front.progress = 0;
+            front.work_remainder = 0;
         }
         front.face = next_face;
         // Keep cargo ownership stable while a face advances through one vein.
         // Route replacement happens after existing cargo drains or the route
         // ceases to exist, avoiding a new network itinerary per mined cell.
-        let route_stale = front.route.last().is_none_or(|end| {
+        let route_stale = front.route.first().is_none_or(|end| {
             end[0].abs_diff(candidate.face[0]) + end[1].abs_diff(candidate.face[1]) > 64
         });
         if front.route.is_empty() || route_stale {
@@ -293,7 +400,9 @@ pub fn assign(fronts: &mut [MiningFront], diggers: u32, haulers: u32, access_pen
     let available: Vec<_> = fronts
         .iter()
         .enumerate()
-        .filter(|(_, front)| front.stockpile < front.capacity)
+        .filter(|(_, front)| {
+            front.stockpile < front.capacity && front.status != "Deposit exhausted"
+        })
         .map(|(index, _)| index)
         .collect();
     let mut access_crew = 0;
@@ -304,7 +413,7 @@ pub fn assign(fronts: &mut [MiningFront], diggers: u32, haulers: u32, access_pen
             fronts[selected[n as usize % selected.len()]].crew += 1;
             remaining -= 1;
         }
-    } else if access_pending {
+    } else if access_pending && (diggers > 1 || available.is_empty()) {
         access_crew = 1;
         remaining -= 1;
     }
@@ -363,6 +472,7 @@ pub fn assign(fronts: &mut [MiningFront], diggers: u32, haulers: u32, access_pen
 pub fn next_face(
     front: &MiningFront,
     terrain: &Terrain,
+    workings: &Workings,
     seed: u64,
     profile: usize,
     catalogue: &[Material],
@@ -372,6 +482,10 @@ pub fn next_face(
         !claimed.contains(face)
             && geology::deposit_id(seed, profile, *face, catalogue).as_deref()
                 == Some(front.deposit.as_str())
+            && {
+                let position = crate::crew::stand_near(*face, terrain, workings);
+                terrain.worker_reachable(position)
+            }
     };
     if let Some(face) = Terrain::neighbors(front.face[0], front.face[1])
         .map(|(x, y)| [x, y])
@@ -433,6 +547,54 @@ pub fn valid(fronts: &[MiningFront], materials: usize, max_fronts: usize) -> boo
 mod tests {
     use super::*;
 
+    #[test]
+    fn candidate_cache_matches_uncached_fronts_during_travel_and_priority_changes() {
+        let mut game = crate::Game::new(67, 1);
+        let mut cache = CandidateCache::default();
+        for second in 0..120 {
+            game.second(crate::materials(), false);
+            let mut expected = game.mining_fronts.clone();
+            let mut actual = expected.clone();
+            let priorities = if second % 20 < 10 {
+                vec![3]
+            } else {
+                vec![5, 6]
+            };
+            let required = BTreeSet::from([3, 4]);
+            for _ in 0..2 {
+                refresh(
+                    &mut expected,
+                    &game.terrain,
+                    &game.workings,
+                    game.seed,
+                    game.profile,
+                    crate::materials(),
+                    &required,
+                    &priorities,
+                    8,
+                    1,
+                );
+                refresh_cached(
+                    &mut cache,
+                    &mut actual,
+                    &game.terrain,
+                    &game.workings,
+                    game.seed,
+                    game.profile,
+                    crate::materials(),
+                    &required,
+                    &priorities,
+                    8,
+                    1,
+                );
+                assert_eq!(
+                    serde_json::to_value(&expected).unwrap(),
+                    serde_json::to_value(&actual).unwrap()
+                );
+            }
+        }
+    }
+
     fn front(id: &str, material: usize, selected: bool) -> MiningFront {
         MiningFront {
             id: id.into(),
@@ -455,6 +617,66 @@ mod tests {
             status: String::new(),
             blocker: String::new(),
         }
+    }
+
+    #[test]
+    fn advancing_buckets_keep_front_ownership_without_duplicate_identities() {
+        let mut owned = front("bucket:0", 3, false);
+        owned.deposit = "vein".into();
+        owned.progress = 1234;
+        owned.stockpile = 64;
+        owned.stockpiles.insert(3, 64);
+        owned.route_id = 7;
+        let candidate = |id: &str, face| Candidate {
+            id: id.into(),
+            deposit: "vein".into(),
+            material: 3,
+            face,
+            route: vec![[256, 0]],
+            selected: false,
+            required: false,
+            priority: 0,
+            distance: 0,
+        };
+        let mut fronts = vec![owned];
+        refresh_faces(
+            &mut fronts,
+            &[
+                candidate("bucket:1", [272, 1]),
+                candidate("bucket:0", [256, 1]),
+            ],
+            &Terrain::default(),
+            &Workings::default(),
+            42,
+            0,
+            crate::materials(),
+            2,
+            0,
+        );
+        assert_eq!(fronts[0].id, "bucket:0");
+        assert_eq!(fronts[0].face, [272, 1]);
+        assert_eq!(fronts[0].progress, 0);
+        assert_eq!(fronts[0].stockpiles[&3], 64);
+        assert_eq!(fronts[0].route_id, 7);
+        assert_eq!(fronts.len(), 2);
+        assert_ne!(fronts[0].id, fronts[1].id);
+        fronts[0].progress = 1234;
+        refresh_faces(
+            &mut fronts,
+            &[
+                candidate("bucket:2", [272, 1]),
+                candidate("bucket:0", [256, 1]),
+            ],
+            &Terrain::default(),
+            &Workings::default(),
+            42,
+            0,
+            crate::materials(),
+            2,
+            0,
+        );
+        assert_eq!(fronts[0].id, "bucket:0");
+        assert_eq!(fronts[0].progress, 1234);
     }
 
     #[test]

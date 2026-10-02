@@ -30,6 +30,8 @@ export function assessCampaign(runs: CampaignRun[]) {
     Object.entries(pacing.windows)
       .filter(([, window]) => window[1]! > 3600)
       .map(([name, window]) => {
+        // User accepts the one-second rare-earth boundary as 28 days.
+        const upperTolerance = name === "rare_earth" ? 1 : 0;
         const times = runs
           .map((run) => run.events[name])
           .filter(
@@ -44,7 +46,9 @@ export function assessCampaign(runs: CampaignRun[]) {
             2
           : null;
         const inWindow =
-          median !== null && median >= window[0]! && median <= window[1]!;
+          median !== null &&
+          median >= window[0]! &&
+          median <= window[1]! + upperTolerance;
         if (times.length !== runs.length)
           errors.push(`${name}: missing milestone observations.`);
         if (!inWindow) errors.push(`${name}: median outside authored window.`);
@@ -63,7 +67,7 @@ export function assessCampaign(runs: CampaignRun[]) {
               in_window:
                 seconds !== null &&
                 seconds >= window[0]! &&
-                seconds <= window[1]!,
+                seconds <= window[1]! + upperTolerance,
             };
           });
         return [
@@ -72,6 +76,7 @@ export function assessCampaign(runs: CampaignRun[]) {
             reached: times.length,
             median_seconds: median,
             target_seconds: window,
+            upper_tolerance_seconds: upperTolerance,
             in_window: inWindow,
             minimum_seconds: times[0] ?? null,
             maximum_seconds: times.at(-1) ?? null,

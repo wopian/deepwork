@@ -1,6 +1,8 @@
 # Archived version 9 shaft-first campaign evidence
 
-This cohort predates save version 10, independent mining fronts, new starter shaft and transport retune. It remains reproducible historical evidence, but does not validate current campaign pacing. Current version-10 results belong in this document only after all 30 fresh seeds finish.
+This cohort predates save version 10, independent mining fronts, new starter shaft and transport retune. It remains reproducible historical evidence, but does not validate current campaign pacing.
+
+Version 12 travel checks and retained balance diagnostics live in [progressive mine notes](../progressive-mine.md) and [progressive-mine.json](progressive-mine.json).
 
 ## Full campaign acceptance
 
@@ -8,14 +10,14 @@ The fresh 30-seed cohort **passes all six existing overall median gates**, with 
 
 All values below are simulated calendar days. Individual outliers include observations earlier as well as later than the authored window; classification uses unrounded seconds.
 
-| Milestone | Median | Target | Individual range | Outside window |
-|---|---:|---:|---:|---:|
-| Retirement | 0.503 | 0.5–3 | 0.500–1.000 | 0 |
-| Power | 1.505 | 1.5–7 | 1.500–2.500 | 0 |
-| Chemical | 6.752 | 5–14 | 4.504–10.500 | 2 |
-| Precision | 16.252 | 14–21 | 12.000–25.502 | 20 |
-| Rare Earth | 27.750 | 21–28 | 22.000–40.000 | 12 |
-| Headquarters | 39.000 | 28–42 | 30.006–51.500 | 10 |
+| Milestone    | Median | Target | Individual range | Outside window |
+| ------------ | -----: | -----: | ---------------: | -------------: |
+| Retirement   |  0.503 |  0.5–3 |      0.500–1.000 |              0 |
+| Power        |  1.505 |  1.5–7 |      1.500–2.500 |              0 |
+| Chemical     |  6.752 |   5–14 |     4.504–10.500 |              2 |
+| Precision    | 16.252 |  14–21 |    12.000–25.502 |             20 |
+| Rare Earth   | 27.750 |  21–28 |    22.000–40.000 |             12 |
+| Headquarters | 39.000 |  28–42 |    30.006–51.500 |             10 |
 
 Headquarters medians by strategy: **bulk 43.753 days**, **precision 39.750 days**, **reclamation 31.006 days**. Overall acceptance is not a claim that every specialisation meets every median window independently: bulk headquarters exceeds six weeks, precision's first aluminium median is 23.003 days, and reclamation reaches aluminium earlier at 12.001 days. Ten individual headquarters observations exceed 42 days, including one by a single second; the slowest finishes at 51.500 days. These differences remain disclosed rather than rounded away.
 

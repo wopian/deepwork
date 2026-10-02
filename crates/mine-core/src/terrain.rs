@@ -5,6 +5,7 @@ use crate::geometry::{
 pub use crate::geometry::{MAX_ROWS, WIDTH};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::{collections::HashMap, sync::Arc};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Terrain {
     /// One bit per excavated cell, encoded as bytes to stay exact across JSON/JS.
@@ -21,6 +22,9 @@ pub struct Terrain {
     pub access_frontier: BTreeSet<i64>,
     #[serde(skip)]
     pub ore_frontiers: BTreeMap<usize, BTreeSet<i64>>,
+    /// Cleared worker-height connectivity, shared by snapshots and rebuilt on load.
+    #[serde(skip)]
+    worker_paths: Arc<HashMap<i64, i64>>,
 }
 impl Default for Terrain {
     fn default() -> Self {
@@ -35,10 +39,81 @@ impl Default for Terrain {
                 .filter(|&key| Self::access_cell(key))
                 .collect(),
             ore_frontiers: BTreeMap::new(),
+            worker_paths: Arc::new(HashMap::from([(
+                cell_key(WIDTH / 2, 0),
+                cell_key(WIDTH / 2, 0),
+            )])),
         }
     }
 }
 impl Terrain {
+    fn worker_neighbors(point: [i64; 2]) -> impl Iterator<Item = [i64; 2]> {
+        (-1..=1)
+            .flat_map(move |dx| {
+                (-1..=1).filter_map(move |dy| {
+                    (dx != 0 || dy != 0).then_some([point[0] + dx, point[1] + dy])
+                })
+            })
+            .filter(|p| valid_cell(p[0], p[1]))
+    }
+    fn extend_worker_paths(&mut self, seeds: Vec<[i64; 2]>) {
+        let mut queue = VecDeque::new();
+        for point in seeds {
+            let key = cell_key(point[0], point[1]);
+            if self.worker_paths.contains_key(&key)
+                || !self.column_clear(point[0], point[1].saturating_sub(7).max(0), point[1])
+            {
+                continue;
+            }
+            if let Some(parent) = Self::worker_neighbors(point)
+                .map(|p| cell_key(p[0], p[1]))
+                .find(|key| self.worker_paths.contains_key(key))
+            {
+                Arc::make_mut(&mut self.worker_paths).insert(key, parent);
+                queue.push_back(point);
+            }
+        }
+        while let Some(point) = queue.pop_front() {
+            for next in Self::worker_neighbors(point) {
+                let key = cell_key(next[0], next[1]);
+                if self.worker_paths.contains_key(&key)
+                    || !self.column_clear(next[0], next[1].saturating_sub(7).max(0), next[1])
+                {
+                    continue;
+                }
+                Arc::make_mut(&mut self.worker_paths).insert(key, cell_key(point[0], point[1]));
+                queue.push_back(next);
+            }
+        }
+    }
+    pub fn worker_reachable(&self, point: [i64; 2]) -> bool {
+        self.worker_paths
+            .contains_key(&cell_key(point[0], point[1]))
+    }
+    pub fn worker_path(&self, from: [i64; 2], to: [i64; 2]) -> Option<Vec<[i64; 2]>> {
+        let mut at = cell_key(from[0], from[1]);
+        let mut left = Vec::new();
+        let mut ancestors = HashMap::new();
+        loop {
+            ancestors.insert(at, left.len());
+            left.push(cell_point(at));
+            let parent = *self.worker_paths.get(&at)?;
+            if parent == at {
+                break;
+            }
+            at = parent;
+        }
+        let mut right = Vec::new();
+        at = cell_key(to[0], to[1]);
+        while !ancestors.contains_key(&at) {
+            right.push(cell_point(at));
+            at = *self.worker_paths.get(&at)?;
+        }
+        left.truncate(ancestors[&at] + 1);
+        right.reverse();
+        left.extend(right);
+        Some(left)
+    }
     fn access_cell(key: i64) -> bool {
         let (x, y) = {
             let [x, y] = cell_point(key);
@@ -202,6 +277,11 @@ impl Terrain {
             }
         }
         self.revision += 1;
+        self.extend_worker_paths(
+            (y..=(y + 7).min(MAX_ROWS - 1))
+                .map(|feet| [x, feet])
+                .collect(),
+        );
         true
     }
     pub fn rebuild(&mut self) -> Result<(), String> {
@@ -258,6 +338,9 @@ impl Terrain {
             }
         }
         self.rebuild_work_index();
+        let entrance = cell_key(WIDTH / 2, 0);
+        self.worker_paths = Arc::new(HashMap::from([(entrance, entrance)]));
+        self.extend_worker_paths(Self::worker_neighbors([WIDTH / 2, 0]).collect());
         Ok(())
     }
     pub fn from_columns(heights: &[i64]) -> Self {

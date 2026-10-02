@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { state, materials, act } from "./game";
+import { viewState as state, materials, act, commandsLocked } from "./game";
 import { RESOURCE_UNIT } from "./geometry";
 import { resourceQuantity as quantity } from "./numbers";
 const rate = (n: number) =>
@@ -44,7 +44,7 @@ const label = (s: string) => s.replaceAll("_", " ");
       </p>
       <button
         @click="act('buy', 'furnace')"
-        :disabled="!!state.purchase_blockers.furnace"
+        :disabled="commandsLocked || !!state.purchase_blockers.furnace"
       >
         Build furnace · {{ state.quotes.furnace }} credits
       </button>

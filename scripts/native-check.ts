@@ -53,7 +53,9 @@ try {
   }
   browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
   const context = browser.contexts()[0]!;
-  const page = context.pages()[0] ?? (await context.waitForEvent("page"));
+  const page =
+    context.pages()[0] ??
+    (await context.waitForEvent("page", { timeout: 30000 }));
   await installSaveDecoder(context, page);
   page.on("console", (msg) => console.log("WEBVIEW", msg.type(), msg.text()));
   page.on("pageerror", (e) => console.log("WEBVIEW ERROR", e.message));
@@ -82,7 +84,20 @@ try {
       },
       { command, args },
     );
+  const waitForSave = async (
+    predicate: (state: any) => boolean,
+    label: string,
+  ) => {
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline) {
+      const state = JSON.parse(await invoke("export_save"));
+      if (predicate(state)) return state;
+      await Bun.sleep(100);
+    }
+    throw new Error(`Timed out waiting for saved ${label}`);
+  };
   const initial = JSON.parse(await invoke("export_save"));
+  const snapshotBytes: Record<string, number> = {};
   await page.waitForTimeout(2000);
   const advanced = JSON.parse(await invoke("export_save"));
   if (
@@ -101,6 +116,9 @@ try {
   });
   if (purchased.workers !== advanced.workers + 1)
     throw new Error("Worker purchase failed");
+  snapshotBytes.purchase = new TextEncoder().encode(
+    JSON.stringify(purchased),
+  ).length;
   const disk = decodeSave(await readFile(join(saves, "mine.deepwork")));
   if (disk.workers !== purchased.workers)
     throw new Error("Purchase was not checkpointed");
@@ -148,10 +166,10 @@ try {
   }
   await page.getByRole("button", { name: "Logistics", exact: true }).click();
   await page.getByLabel("Cargo scheduling").selectOption("preferred");
-  await page.waitForFunction(async () => {
-    const data = await (window as any).__DEEPWORK_TEST_EXPORT__();
-    return JSON.parse(data).cargo_policy === "preferred";
-  });
+  await waitForSave(
+    (state) => state.cargo_policy === "preferred",
+    "cargo policy",
+  );
   await page.getByRole("button", { name: "Close panel", exact: true }).click();
   // Exercise the actual file input/download path, not only IPC commands.
   await page.getByRole("button", { name: "Records", exact: true }).click();
@@ -167,10 +185,10 @@ try {
   )
     throw new Error("UI export lost authoritative state");
   await page.locator('input[type="file"]').setInputFiles(exportedPath);
-  await page.waitForFunction(async (previousIdentity) => {
-    const raw = await (window as any).__DEEPWORK_TEST_EXPORT__();
-    return JSON.parse(raw).campaign_id !== previousIdentity;
-  }, exported.campaign_id);
+  await waitForSave(
+    (state) => state.campaign_id !== exported.campaign_id,
+    "imported campaign",
+  );
   const imported = JSON.parse(await invoke("export_save"));
   if (
     imported.workers !== exported.workers ||
@@ -190,6 +208,143 @@ try {
     resumed.ticks !== paused.ticks + resumed.offline.effective * 20
   )
     throw new Error("Resume did not apply half-rate offline interval");
+  await page.waitForFunction(() => !document.querySelector(".catchup-notice"));
+  if (process.argv[5]) {
+    const replayFixture = JSON.parse(
+      await readFile(resolve(process.argv[5]), "utf8"),
+    );
+    replayFixture.last_saved = Math.floor(Date.now() / 1000) - 28800;
+    await page.getByRole("button", { name: "Operations", exact: true }).click();
+    await page.evaluate((data) => {
+      (window as any).__REPLAY_ACCEPTANCE__ = { done: false, error: null };
+      void (window as any).__TAURI_INTERNALS__
+        .invoke("import_save", { data, encoding: "json" })
+        .then((state: any) => {
+          (window as any).__REPLAY_ACCEPTANCE__ = { done: true, state };
+        })
+        .catch((error: unknown) => {
+          (window as any).__REPLAY_ACCEPTANCE__ = {
+            done: true,
+            error: String(error),
+          };
+        });
+    }, JSON.stringify(replayFixture));
+    await page
+      .getByRole("button", { name: "Skip timelapse", exact: true })
+      .waitFor({ timeout: 30000 });
+    let commandBlocked = false;
+    try {
+      await invoke("command", {
+        campaignId: replayFixture.campaign_id,
+        action: {
+          sequence: replayFixture.last_sequence + 1,
+          kind: "buy",
+          target: "worker",
+          value: 0,
+        },
+      });
+    } catch (error) {
+      commandBlocked = /catch-up|resume the game/i.test(String(error));
+    }
+    if (!commandBlocked) throw new Error("Catch-up accepted gameplay command");
+    for (const [command, args] of [
+      ["import_save", { data: "{}", encoding: "json" }],
+      [
+        "reset_campaign",
+        { confirmation: "RESET", campaignId: resumed.campaign_id },
+      ],
+    ] as const) {
+      let blocked = false;
+      try {
+        await invoke(command, args);
+      } catch (error) {
+        blocked = /catch-up|resume the game/i.test(String(error));
+      }
+      if (!blocked) throw new Error(`Catch-up did not lock ${command}`);
+    }
+    for (const tab of ["Industry", "Headquarters"]) {
+      await page.getByRole("button", { name: tab, exact: true }).click();
+      const controls = page.locator(".management-view button");
+      if (!(await controls.count()))
+        throw new Error(`Catch-up ${tab} controls were not inspected`);
+      const enabled = await page
+        .locator(".management-view button:enabled")
+        .count();
+      if (enabled) throw new Error(`Catch-up left ${tab} commands enabled`);
+    }
+    await page.getByRole("button", { name: "Operations", exact: true }).click();
+    const replayCamera = await page
+      .locator(".world")
+      .getAttribute("data-camera-x");
+    const replayBox = (await page.locator("canvas").boundingBox())!;
+    await page.mouse.move(
+      replayBox.x + replayBox.width / 2,
+      replayBox.y + replayBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      replayBox.x + replayBox.width / 2 + 60,
+      replayBox.y + replayBox.height / 2 + 30,
+    );
+    await page.mouse.up();
+    await page.waitForTimeout(100);
+    if (
+      (await page.locator(".world").getAttribute("data-camera-x")) ===
+      replayCamera
+    )
+      throw new Error("Catch-up locked camera inspection");
+    await page.screenshot({
+      path: join(output, "native-catchup.png"),
+      fullPage: true,
+    });
+    await page
+      .getByRole("button", { name: "Skip timelapse", exact: true })
+      .click();
+    await page.waitForFunction(
+      () => (window as any).__REPLAY_ACCEPTANCE__.done,
+      undefined,
+      { timeout: 300000 },
+    );
+    await page.waitForFunction(
+      () => !document.querySelector(".catchup-notice"),
+    );
+    const replay = await page.evaluate(
+      () => (window as any).__REPLAY_ACCEPTANCE__,
+    );
+    if (replay.error || replay.state.offline.effective !== 14400)
+      throw new Error(
+        `Replay reconciliation failed: ${replay.error ?? replay.state.offline.effective}`,
+      );
+    const committed = decodeSave(await readFile(join(saves, "mine.deepwork")));
+    snapshotBytes.replay = new TextEncoder().encode(
+      JSON.stringify(replay.state),
+    ).length;
+    if (
+      replay.state.visual_workers.some(
+        (worker: any) => worker.legs.length > 2,
+      ) ||
+      replay.state.shipments.some((cargo: any) => cargo.legs.length > 2)
+    )
+      throw new Error("Replay repeated complete actor routes");
+    if (
+      committed.campaign_id !== replay.state.campaign_id ||
+      committed.ticks < replay.state.ticks
+    )
+      throw new Error("Replay rewards were not saved");
+    await writeFile(
+      join(output, "native-replay.json"),
+      JSON.stringify(
+        {
+          effective: replay.state.offline.effective,
+          ticks: replay.state.ticks,
+          commandBlocked,
+          workers: replay.state.workers,
+        },
+        null,
+        2,
+      ),
+    );
+  }
   if (stressSeconds) {
     const fixture = JSON.parse(await invoke("export_save"));
     const requirements = await Bun.file("content/upgrades.json").json();
@@ -202,11 +357,7 @@ try {
     await writeFile(fixturePath, JSON.stringify(fixture));
     await page.getByRole("button", { name: "Records", exact: true }).click();
     await page.locator('input[type="file"]').setInputFiles(fixturePath);
-    await page.waitForFunction(
-      async () =>
-        JSON.parse(await (window as any).__DEEPWORK_TEST_EXPORT__()).workers ===
-        1000,
-    );
+    await waitForSave((state) => state.workers === 1000, "stress population");
     await page.getByRole("button", { name: "Operations", exact: true }).click();
     await page
       .getByRole("button", { name: "Active crew", exact: true })
@@ -275,6 +426,7 @@ try {
       console.log(JSON.stringify(sample));
       if (
         Number(telemetry.workers) > 250 ||
+        Number(telemetry.residentChunks) > 768 ||
         Number(telemetry.moving ?? telemetry.particles) > 2000
       )
         throw new Error("Visual entity budget exceeded");
@@ -325,6 +477,21 @@ try {
   await page.locator(".settings").waitFor();
   await page.getByLabel("Reduced motion", { exact: true }).check();
   await tap("Operations");
+  const reducedBaseline = await invoke("set_background", { background: true });
+  await page.waitForTimeout(2200);
+  const reducedResult = await invoke("set_background", { background: false });
+  if (
+    reducedResult.offline.effective < 1 ||
+    reducedResult.ticks !==
+      reducedBaseline.ticks + reducedResult.offline.effective * 20
+  )
+    throw new Error("Reduced motion changed production travel timing");
+  if (
+    await page
+      .getByRole("button", { name: "Skip timelapse", exact: true })
+      .count()
+  )
+    throw new Error("Reduced motion did not skip replay automatically");
   await page.waitForFunction(
     () =>
       document.querySelector<HTMLElement>(".world")?.dataset.particles === "0",
@@ -385,8 +552,27 @@ try {
         (local[axis] - beforeGesture[axis]) / beforeGesture.zoom -
           (local[axis] - zoomed[axis]) / zoomed.zoom,
       ) > 2
-    )
+    ) {
+      await writeFile(
+        join(output, "native-rejection.json"),
+        JSON.stringify(
+          {
+            reason: `Pinch lost its ${axis} world anchor`,
+            beforeGesture,
+            zoomed,
+            worldBox,
+            local,
+            world: await page.locator(".world").evaluate((el) => ({
+              bounds: el.getBoundingClientRect().toJSON(),
+              dataset: { ...(el as HTMLElement).dataset },
+            })),
+          },
+          null,
+          2,
+        ),
+      );
       throw new Error(`Pinch lost its ${axis} world anchor`);
+    }
   await portrait.send("Input.dispatchTouchEvent", {
     type: "touchStart",
     touchPoints: [{ id: 1, ...centre }],
@@ -420,15 +606,11 @@ try {
   await tapTarget(
     loadingBay.getByText("Prefer selected minerals", { exact: true }),
   );
-  await page.waitForFunction(
-    (preferred) =>
-      (window as any)
-        .__DEEPWORK_TEST_EXPORT__()
-        .then(
-          (raw: string) =>
-            JSON.parse(raw).transport.stations[0].preferred === preferred,
-        ),
-    !transportBefore.transport.stations[0].preferred,
+  await waitForSave(
+    (state) =>
+      state.transport.stations[0].preferred !==
+      transportBefore.transport.stations[0].preferred,
+    "station preference",
   );
   await tapTarget(
     page
@@ -436,33 +618,21 @@ try {
       .nth(1)
       .getByRole("button", { name: "Select express route", exact: true }),
   );
-  await page.waitForFunction(() =>
-    (window as any)
-      .__DEEPWORK_TEST_EXPORT__()
-      .then((raw: string) => JSON.parse(raw).transport.express === 1),
-  );
+  await waitForSave((state) => state.transport.express === 1, "express route");
   const canUpgradeBuffer =
     BigInt(transportBefore.credits) >=
     BigInt(transportBefore.transport.stations[0].quote);
   if (canUpgradeBuffer) {
     await tapTarget(loadingBay.getByRole("button", { name: /^Buffer \+/ }));
   }
-  await page.waitForFunction(
-    ({ level, preferred }) => {
-      return (window as any).__DEEPWORK_TEST_EXPORT__().then((raw: string) => {
-        const transport = JSON.parse(raw).transport;
-        return (
-          transport.express === 1 &&
-          transport.stations[0].preferred === preferred &&
-          transport.stations[0].level === level
-        );
-      });
-    },
-    {
-      level:
+  await waitForSave(
+    (state) =>
+      state.transport.express === 1 &&
+      state.transport.stations[0].preferred !==
+        transportBefore.transport.stations[0].preferred &&
+      state.transport.stations[0].level ===
         transportBefore.transport.stations[0].level + Number(canUpgradeBuffer),
-      preferred: !transportBefore.transport.stations[0].preferred,
-    },
+    "touch-selected transport controls",
   );
   await page.screenshot({
     path: join(output, "native-transport-touch.png"),
@@ -559,6 +729,10 @@ try {
   }
   if (!staleRejected) throw new Error("Stale campaign command accepted");
   if (errors.length) throw new Error(errors.join("\n"));
+  await writeFile(
+    join(output, "native-ipc.json"),
+    JSON.stringify(snapshotBytes, null, 2),
+  );
   console.log(
     JSON.stringify(
       {
@@ -593,7 +767,8 @@ try {
   );
   throw error;
 } finally {
-  await browser?.close();
+  if (browser)
+    await Promise.race([browser.close().catch(() => {}), Bun.sleep(5000)]);
   app.kill();
   await app.exited;
   await writeFile(join(output, "native-stderr.log"), await stderrLog);

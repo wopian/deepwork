@@ -12,8 +12,11 @@ import pacing from "../content/pacing.json";
 import mining from "../content/mining.json";
 import { preferences } from "./preferences";
 import {
-  state,
+  viewState as state,
   reconciling,
+  catchup,
+  commandsLocked,
+  skipCatchup,
   error,
   materials,
   upgrades,
@@ -245,15 +248,32 @@ onMounted(start);
         Start fresh
       </button>
     </div>
-    <div class="notice" v-if="reconciling" role="status">
-      Catching up your mine… Progress is being saved before play resumes.
+    <div
+      class="notice catchup-notice"
+      v-if="catchup || reconciling"
+      role="status"
+    >
+      <span
+        >{{ catchup?.saving ? "Saving your mine…" : "Catching up your mine…" }}
+        <template v-if="catchup">
+          {{ Math.floor((catchup.done / Math.max(1, catchup.total)) * 100) }}% ·
+          {{ format(catchup.excavated) }} cells excavated</template
+        >
+      </span>
+      <button v-if="catchup && !catchup.skipped" @click="skipCatchup">
+        Skip timelapse
+      </button>
     </div>
     <div class="notice" v-if="error" role="status">
       {{ error }}<button @click="error = ''" aria-label="Dismiss">×</button>
     </div>
     <details
       class="offline"
-      v-if="state?.offline?.effective && state.offline.id !== dismissedOffline"
+      v-if="
+        !catchup &&
+        state?.offline?.effective &&
+        state.offline.id !== dismissedOffline
+      "
     >
       <summary>
         <span>While away · +{{ format(state.offline.credits) }} credits</span
@@ -353,7 +373,7 @@ onMounted(start);
             <strong>Next · refine iron</strong>
             <button
               @click="act('buy', 'furnace')"
-              :disabled="!!state.purchase_blockers.furnace"
+              :disabled="commandsLocked || !!state.purchase_blockers.furnace"
             >
               Build furnace · {{ state.quotes.furnace }} credits
             </button>
@@ -390,7 +410,11 @@ onMounted(start);
                 >
                   <button
                     class="upgrade"
-                    :disabled="!state || !!state.purchase_blockers[u[0]]"
+                    :disabled="
+                      commandsLocked ||
+                      !state ||
+                      !!state.purchase_blockers[u[0]]
+                    "
                     @click="act('buy', u[0])"
                   >
                     <div class="upgrade-icon">
@@ -443,7 +467,7 @@ onMounted(start);
                   <button
                     class="pin-upgrade"
                     :aria-pressed="state?.pinned === u[0]"
-                    :disabled="!state"
+                    :disabled="commandsLocked || !state"
                     @click="act('pin', u[0])"
                   >
                     {{
@@ -471,11 +495,28 @@ onMounted(start);
                   No revealed ore remains. Prospect further or choose another
                   vein.
                 </p>
-                <button @click="act('clear_vein')">Clear vein order</button>
+                <button :disabled="commandsLocked" @click="act('clear_vein')">
+                  Clear vein order
+                </button>
               </div>
+              <p class="crew-roster" v-if="state?.crew_state">
+                {{ state.crew_state.working }} working ·
+                {{ state.crew_state.travelling }} travelling ·
+                {{ state.crew_state.blocked }} blocked
+              </p>
               <p class="crew-roster" v-if="state">
                 <span v-for="(count, role) in state.crew" :key="role"
-                  >{{ count }} {{ role }}</span
+                  >{{ count }} {{ role
+                  }}<template v-if="state.crew_roles?.[role]">
+                    ·
+                    {{ state.crew_roles[role]?.travelling }} travelling<template
+                      v-if="state.crew_roles[role]?.blocked"
+                    >
+                      ·
+                      {{ state.crew_roles[role]?.blocked }}
+                      unreachable</template
+                    ></template
+                  ></span
                 >
               </p>
               <div class="mining-fronts" v-if="state?.mining_fronts.length">
@@ -506,6 +547,7 @@ onMounted(start);
               <label class="crew-roster" v-if="state"
                 >Crew priority
                 <select
+                  :disabled="commandsLocked"
                   :value="state.crew_priority || 'balanced'"
                   @change="
                     act(
@@ -566,7 +608,9 @@ onMounted(start);
                   ]"
                   :class="{ selected: state?.policy === id }"
                   :disabled="
-                    !state || (state.site === 1 && depth < pacing.tactics_depth)
+                    commandsLocked ||
+                    !state ||
+                    (state.site === 1 && depth < pacing.tactics_depth)
                   "
                   @click="act('policy', id)"
                 >
@@ -578,6 +622,7 @@ onMounted(start);
               <label class="crew-roster" v-if="state">
                 Cargo scheduling
                 <select
+                  :disabled="commandsLocked"
                   :value="state.cargo_policy || 'balanced'"
                   @change="
                     act(
@@ -637,6 +682,7 @@ onMounted(start);
                   >
                   <button
                     :disabled="
+                      commandsLocked ||
                       station.level >= 50 ||
                       BigInt(state.credits) < BigInt(station.quote)
                     "
@@ -646,6 +692,7 @@ onMounted(start);
                   </button>
                   <label
                     ><input
+                      :disabled="commandsLocked"
                       type="checkbox"
                       :checked="station.preferred"
                       @change="
@@ -706,6 +753,7 @@ onMounted(start);
                       {{ state.transport.segments[index]!.demand }} power
                     </span>
                     <button
+                      :disabled="commandsLocked"
                       :class="{ selected: state.transport.express === index }"
                       @click="act('express', '', index)"
                     >
@@ -785,6 +833,7 @@ onMounted(start);
                       ]"
                       :class="{ selected: state?.specialisation === id }"
                       :disabled="
+                        commandsLocked ||
                         !state ||
                         depth < pacing.specialisation_depth ||
                         !state.steel_made ||
@@ -815,8 +864,9 @@ onMounted(start);
                       ></span
                     ><button
                       :disabled="
-                        !c.complete &&
-                        (state?.products[c.product] ?? 0) < c.amount
+                        commandsLocked ||
+                        (!c.complete &&
+                          (state?.products[c.product] ?? 0) < c.amount)
                       "
                       @click="
                         act(c.complete ? 'new_contract' : 'contract', '', i)
@@ -851,6 +901,7 @@ onMounted(start);
           <div class="panel-heading">
             <h2>FIELD GUIDE · {{ materials.length }} FEEDS</h2>
             <input
+              :disabled="commandsLocked"
               v-model="query"
               placeholder="Find a mineral…"
               aria-label="Search minerals"
@@ -866,7 +917,7 @@ onMounted(start);
               v-for="m in filtered"
               :key="m.id"
               :class="{ selected: state?.priorities.includes(m.id) }"
-              :disabled="!state"
+              :disabled="commandsLocked || !state"
               @click="act('priority', '', m.id)"
             >
               <span class="mineral-swatch" :style="{ background: m.color }"
@@ -917,7 +968,7 @@ onMounted(start);
           <div class="mineral-grid">
             <button
               v-for="r in recipeCards"
-              :disabled="!state"
+              :disabled="commandsLocked || !state"
               :class="{
                 selected:
                   !state?.paused_recipes.includes(r.id) &&
@@ -968,6 +1019,7 @@ onMounted(start);
           </p>
           <div class="mineral-grid compact-grid">
             <button
+              :disabled="commandsLocked"
               v-for="upgrade in materialUpgrades"
               :class="{ selected: state?.pinned === upgrade.id }"
               @click="act('pin', upgrade.id)"
@@ -1007,10 +1059,16 @@ onMounted(start);
                 {{ format((state?.raw_stock[m.id] ?? 0) / RESOURCE_UNIT) }}
                 stored</strong
               >
-              <button @click="act('reserve', m.product, 4 * RESOURCE_UNIT)">
+              <button
+                :disabled="commandsLocked"
+                @click="act('reserve', m.product, 4 * RESOURCE_UNIT)"
+              >
                 Reserve feed + 4 product
               </button>
-              <button @click="act('reserve', m.product, 0)">
+              <button
+                :disabled="commandsLocked"
+                @click="act('reserve', m.product, 0)"
+              >
                 Release manual reserve
               </button>
             </div>
@@ -1026,10 +1084,14 @@ onMounted(start);
               <strong
                 >{{ product }} · {{ format(qty / RESOURCE_UNIT) }} units</strong
               ><button
+                :disabled="commandsLocked"
                 @click="act('reserve', String(product), 10 * RESOURCE_UNIT)"
               >
                 Keep 10</button
-              ><button @click="act('reserve', String(product), 0)">
+              ><button
+                :disabled="commandsLocked"
+                @click="act('reserve', String(product), 0)"
+              >
                 Sell surplus
               </button>
             </div>
@@ -1053,7 +1115,7 @@ onMounted(start);
                 'prospecting',
                 'reclamation',
               ]"
-              :disabled="!state"
+              :disabled="commandsLocked || !state"
               @click="act('research', branch)"
             >
               <strong>{{ branch }}</strong>
@@ -1082,11 +1144,21 @@ onMounted(start);
             offline.
           </p>
           <div class="action-row">
-            <button @click="act('blueprint', 'camp')">Camp blueprint</button>
-            <button @click="act('blueprint', 'industry')">
+            <button
+              :disabled="commandsLocked"
+              @click="act('blueprint', 'camp')"
+            >
+              Camp blueprint
+            </button>
+            <button
+              :disabled="commandsLocked"
+              @click="act('blueprint', 'industry')"
+            >
               Industry blueprint
             </button>
-            <button @click="act('blueprint', 'off')">Disable</button>
+            <button :disabled="commandsLocked" @click="act('blueprint', 'off')">
+              Disable
+            </button>
           </div>
           <p class="panel-status">
             Queue: {{ state?.build_queue.join(" → ") || "None" }}
@@ -1120,7 +1192,7 @@ onMounted(start);
           </p>
           <div class="action-row">
             <button
-              :disabled="!state || state.megaproject"
+              :disabled="commandsLocked || !state || state.megaproject"
               @click="act('megaproject')"
             >
               {{
@@ -1143,7 +1215,7 @@ onMounted(start);
           <div class="action-row">
             <button
               class="primary"
-              :disabled="!ready"
+              :disabled="commandsLocked || !ready"
               @click="retirementPreview"
             >
               {{
@@ -1313,7 +1385,7 @@ onMounted(start);
           </p>
           <div class="action-row vertical-actions">
             <button
-              :disabled="!state"
+              :disabled="commandsLocked || !state"
               @click="
                 showReset = true;
                 resetText = '';
@@ -1321,9 +1393,12 @@ onMounted(start);
             >
               Reset campaign
             </button>
-            <button :disabled="!state" @click="exportSave">Export save</button>
+            <button :disabled="commandsLocked || !state" @click="exportSave">
+              Export save
+            </button>
             <label class="import"
               >Import save<input
+                :disabled="commandsLocked"
                 type="file"
                 accept=".deepwork,.json"
                 @change="
@@ -1355,7 +1430,10 @@ onMounted(start);
           accessibility settings stay.
         </p>
         <label
-          >Type RESET to confirm<input v-model="resetText" autocomplete="off"
+          >Type RESET to confirm<input
+            :disabled="commandsLocked"
+            v-model="resetText"
+            autocomplete="off"
         /></label>
         <button
           @click="
@@ -1365,7 +1443,10 @@ onMounted(start);
         >
           Cancel
         </button>
-        <button :disabled="resetText !== 'RESET'" @click="confirmReset">
+        <button
+          :disabled="commandsLocked || resetText !== 'RESET'"
+          @click="confirmReset"
+        >
           Start fresh campaign
         </button>
       </section>
@@ -1383,7 +1464,7 @@ onMounted(start);
         </p>
         <label
           >Optional challenge
-          <select v-model="selectedChallenge">
+          <select :disabled="commandsLocked" v-model="selectedChallenge">
             <option value="">Standard operation</option>
             <option value="hard_rock">
               Hard rock · 50% more excavation work
@@ -1399,7 +1480,12 @@ onMounted(start);
         </p>
         <div class="site-options">
           <label v-for="(profile, i) in profiles"
-            ><input type="radio" v-model="selectedSite" :value="i" />
+            ><input
+              :disabled="commandsLocked"
+              type="radio"
+              v-model="selectedSite"
+              :value="i"
+            />
             <strong>{{ profile.name }}</strong>
             <p>{{ profile.description }}</p></label
           >

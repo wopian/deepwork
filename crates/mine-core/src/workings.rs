@@ -150,6 +150,10 @@ pub struct Workings {
     candidate_cache: Vec<(i64, Point)>,
     #[serde(skip)]
     candidate_stamp: Option<(u64, u64, i64, String, Vec<usize>, Option<Point>, usize)>,
+    #[serde(skip)]
+    branch_cache: Option<(usize, bool)>,
+    #[serde(skip)]
+    pub(crate) first_junction_requested: bool,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VeinSurvey {
@@ -163,12 +167,31 @@ pub struct VeinOrderView {
     pub masks: BTreeMap<i64, Vec<u8>>,
 }
 impl Workings {
+    /// A commissioned hoist needs its first junction even with only one digger.
+    pub fn has_underground_branch(&mut self) -> bool {
+        if let Some((length, found)) = self.branch_cache {
+            if length == self.passages.len() {
+                return found;
+            }
+        }
+        let mut children = vec![0; self.passages.len()];
+        for node in self.passages.iter().skip(1) {
+            children[node.parent] += 1;
+        }
+        let found = children
+            .iter()
+            .enumerate()
+            .any(|(index, count)| *count >= 2 && self.passages[index].feet[1] > 0);
+        self.branch_cache = Some((self.passages.len(), found));
+        found
+    }
     pub fn order_view(&self, terrain: &Terrain) -> Option<VeinOrderView> {
         let anchor = self.target?;
         let mut masks = BTreeMap::new();
         let mut known_cells = 0;
         for &p in &self.target_cells {
-            if terrain.contains(p[0], p[1])
+            if !self.mineable_cell(p)
+                || terrain.contains(p[0], p[1])
                 || !terrain.known_material(p[0], p[1]).is_some_and(|id| id > 1)
             {
                 continue;
@@ -187,12 +210,29 @@ impl Workings {
     }
 
     pub fn prepare_deposit_order(&mut self, seed: u64, profile: usize, cat: &[crate::Material]) {
+        self.index_passages();
         if self.target_cells.is_empty() {
             if let Some(anchor) = self.target {
                 self.target_deposit = crate::geology::deposit_id(seed, profile, anchor, cat);
                 self.target_cells = crate::geology::deposit_cells(seed, profile, anchor, cat);
             }
         }
+    }
+
+    /// Structural pillars and surface cells cannot become underground cuts.
+    pub(crate) fn mineable_cell(&self, p: Point) -> bool {
+        if p[1] < PIT_ROWS {
+            return false;
+        }
+        if self.indexed == self.passages.len() {
+            return !protected(&self.floor_index, p, &[]);
+        }
+        !self.passages.iter().any(|node| {
+            !node.lift
+                && node.feet[0] == p[0]
+                && node.feet[1] < p[1]
+                && node.feet[1] >= p[1].saturating_sub(settings().pillar_width)
+        })
     }
 
     /// Reveal the facing edge at accuracy one, the remaining deposit at accuracy two.
@@ -500,7 +540,7 @@ impl Workings {
             self.deferred_at = geometry_stamp;
         }
         let stamp = (terrain.revision, self.revision, depth_limit);
-        if self.blocked_at == Some(stamp) {
+        if self.blocked_at == Some(stamp) && !self.first_junction_requested {
             return;
         }
         self.blocked_at = None;
@@ -510,7 +550,7 @@ impl Workings {
                 return;
             }
             self.status = "Waiting for supports".into();
-            s.support_work += 80 * engineers.max(1) as u64 * (1 + supports) as u64;
+            s.support_work += 80 * engineers.max(0) as u64 * (1 + supports) as u64;
             if s.support_work < settings().support_work {
                 return;
             }
@@ -549,6 +589,49 @@ impl Workings {
             self.index_passages();
             self.revision += 1;
         }
+        // Commissioned shaft access includes its first crosscut. Finish the
+        // existing section first, then construct a junction from cleared access.
+        if self.first_junction_requested
+            && self.target_deposit.is_none()
+            && !self.has_underground_branch()
+        {
+            let anchor = self
+                .passages
+                .iter()
+                .enumerate()
+                .find(|(index, node)| {
+                    node.supported
+                        && node.feet[1] > 0
+                        && self
+                            .passages
+                            .iter()
+                            .skip(1)
+                            .any(|child| child.parent == *index)
+                })
+                .map(|(index, node)| (index, node.feet));
+            if let Some((from, feet)) = anchor {
+                for direction in [-1, 1] {
+                    let to = [feet[0] + direction * settings().section_length, feet[1]];
+                    if valid_cell(to[0], to[1])
+                        && to[1] < depth_limit
+                        && !self.passages.iter().any(|node| node.feet == to)
+                        && cut_cost(terrain, &self.floor_index, feet, to, false).is_some()
+                    {
+                        self.search = None;
+                        self.section = Some(Section {
+                            from,
+                            to,
+                            lift: false,
+                            cells: cut_cells(feet, to, false),
+                            support_work: 0,
+                        });
+                        self.status = "Opening first shaft junction".into();
+                        self.revision += 1;
+                        return;
+                    }
+                }
+            }
+        }
         // Tutorial access is deterministic geometry, not a geology query. Sink
         // one short supported shaft before anonymous signals can pull planning
         // sideways. Guaranteed starter ore intersects this cut and becomes
@@ -573,6 +656,52 @@ impl Workings {
             }
         }
         if self.search.is_none() {
+            // Finished orders must release automatic feed search during idle time.
+            // Keep partially surveyed bodies: unknown, mineable cells still belong
+            // to the order, but never become planner goals before revelation.
+            if self.target_deposit.is_some()
+                && !self.target_cells.is_empty()
+                && !self
+                    .target_cells
+                    .iter()
+                    .any(|p| self.mineable_cell(*p) && !terrain.contains(p[0], p[1]))
+            {
+                self.target = None;
+                self.target_deposit = None;
+                self.target_cells.clear();
+                self.deferred.clear();
+                self.revision += 1;
+            }
+            // Finish the last vertical cut before the equipment boundary. Shallow
+            // signals must not strand a developed lift a few metres short of access.
+            if self.target_deposit.is_none() && self.target.is_none() {
+                if let Some((from, node)) = self
+                    .passages
+                    .iter()
+                    .enumerate()
+                    .max_by_key(|(_, node)| node.feet[1])
+                {
+                    let bottom = depth_limit.min(MAX_ROWS - 8).saturating_sub(1);
+                    let gap = bottom - node.feet[1];
+                    let to = [node.feet[0], bottom];
+                    if node.supported
+                        && node.lift
+                        && (1..=16).contains(&gap)
+                        && cut_cost(terrain, &self.floor_index, node.feet, to, true).is_some()
+                    {
+                        self.section = Some(Section {
+                            from,
+                            to,
+                            lift: true,
+                            cells: cut_cells(node.feet, to, true),
+                            support_work: 0,
+                        });
+                        self.status = "Completing shaft access".into();
+                        self.revision += 1;
+                        return;
+                    }
+                }
+            }
             let deepest = self.passages.iter().map(|n| n.feet[1]).max().unwrap();
             let access_blocked = depth_limit <= deepest + 17;
             let development = policy == "depth" && !access_blocked;
@@ -652,6 +781,7 @@ impl Workings {
                 // enter the planner, even when they belong to the selected descriptor.
                 for &p in &self.target_cells {
                     if !terrain.contains(p[0], p[1])
+                        && p[1] >= PIT_ROWS
                         && p[1] < depth_limit
                         && terrain.known_material(p[0], p[1]).is_some_and(|id| id > 1)
                         && !protected(&self.floor_index, p, &[])
@@ -689,7 +819,8 @@ impl Workings {
                     }
                 }
                 for s in &self.signals {
-                    if s.centre[1] >= depth_limit
+                    if s.centre[1] < PIT_ROWS
+                        || s.centre[1] >= depth_limit
                         || self.exhausted.contains(&key(s.centre))
                         || !access_blocked && s.centre[1] + 256 < deepest
                     {
@@ -1187,6 +1318,107 @@ pub fn cut_cells(a: Point, b: Point, lift: bool) -> Vec<Point> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn surface_ore_and_surface_signals_do_not_block_underground_planning() {
+        let mut terrain = Terrain::default();
+        for x in 253..=259 {
+            for y in 0..=32 {
+                terrain.excavate(x, y);
+            }
+        }
+        let mut workings = Workings::default();
+        workings.initialise();
+        workings.passages.push(Passage {
+            feet: [256, 32],
+            parent: 0,
+            lift: true,
+            supported: true,
+            column: false,
+        });
+        workings.active = 1;
+        let surface = [240, 0];
+        terrain.reveal(42, 0, surface[0], surface[1], 0, crate::materials());
+        terrain
+            .visible
+            .get_mut(&crate::geometry::chunk_id(surface[0], surface[1]))
+            .unwrap()[crate::geometry::bit_index(surface[0], surface[1])] = 3;
+        workings.target_cells = vec![surface];
+        workings.signals.push(Signal {
+            centre: surface,
+            radius: 23,
+            confidence: 2,
+        });
+        for _ in 0..100 {
+            workings.advance(&terrain, &[3], "vein", 1200, 0, 0);
+            if workings.section.is_some() {
+                break;
+            }
+        }
+        assert!(workings.section.is_some());
+        assert_ne!(workings.status, "Depth equipment required");
+        assert!(workings.section.as_ref().unwrap().to[1] > 32);
+    }
+
+    #[test]
+    fn first_junction_ignores_surface_forks_and_updates_after_construction() {
+        let mut workings = Workings::default();
+        workings.initialise();
+        for feet in [[240, 16], [272, 16]] {
+            workings.passages.push(Passage {
+                feet,
+                parent: 0,
+                lift: true,
+                supported: true,
+                column: false,
+            });
+        }
+        assert!(!workings.has_underground_branch());
+        for feet in [[224, 16], [240, 32]] {
+            workings.passages.push(Passage {
+                feet,
+                parent: 1,
+                lift: feet[0] == 240,
+                supported: true,
+                column: false,
+            });
+        }
+        assert!(workings.has_underground_branch());
+        let mut restored: Workings =
+            serde_json::from_str(&serde_json::to_string(&workings).unwrap()).unwrap();
+        assert!(restored.has_underground_branch());
+    }
+
+    #[test]
+    fn commissioned_shaft_plans_junction_without_excavating_or_skipping_supports() {
+        let mut terrain = Terrain::default();
+        for x in 253..=259 {
+            for y in 0..=32 {
+                terrain.excavate(x, y);
+            }
+        }
+        let mut workings = Workings::default();
+        workings.initialise();
+        for feet in [[256, 16], [256, 32]] {
+            workings.passages.push(Passage {
+                feet,
+                parent: workings.passages.len() - 1,
+                lift: true,
+                supported: true,
+                column: false,
+            });
+        }
+        workings.first_junction_requested = true;
+        let count = terrain.count();
+        workings.advance(&terrain, &[], "vein", 1600, 0, 0);
+        let section = workings.section.as_ref().unwrap();
+        assert_eq!(section.from, 1);
+        assert_eq!(section.to, [240, 16]);
+        assert_eq!(section.support_work, 0);
+        assert_eq!(terrain.count(), count);
+        assert_eq!(workings.passages.len(), 3);
+        assert!(section.cells.iter().any(|p| !terrain.contains(p[0], p[1])));
+    }
     const PIT_ROWS: i64 = 192;
     #[test]
     fn exhausted_depth_gate_still_develops_lateral_survey_access() {
@@ -1331,6 +1563,46 @@ mod tests {
             .expect("older connected vein must remain selectable");
         assert!(section.from < 128);
         assert!(section.to[0] < 256);
+    }
+    #[test]
+    fn completed_orders_ignore_surface_and_pillars_but_retain_unknown_ore() {
+        for unknown_remaining in [false, true] {
+            let mut workings = Workings::default();
+            workings.initialise();
+            workings.passages.push(Passage {
+                feet: [264, 32],
+                parent: 0,
+                lift: false,
+                supported: true,
+                column: true,
+            });
+            let anchor = [256, 24];
+            workings.target = Some(anchor);
+            workings.target_deposit = Some("fixture".into());
+            workings.target_cells = vec![anchor, [337, 0], [264, 35]];
+            if unknown_remaining {
+                workings.target_cells.push([256, 64]);
+            }
+            let mut terrain = Terrain::default();
+            for y in 0..=anchor[1] {
+                assert!(terrain.excavate(anchor[0], y));
+            }
+            for p in [[337, 0], [264, 35]] {
+                terrain
+                    .visible
+                    .entry(crate::geometry::chunk_id(p[0], p[1]))
+                    .or_insert_with(|| vec![255; 4096])[crate::geometry::bit_index(p[0], p[1])] = 3;
+            }
+            workings.prepare_deposit_order(42, 0, crate::materials());
+            assert_eq!(workings.order_view(&terrain).unwrap().known_cells, 0);
+            assert!(terrain.contains(anchor[0], anchor[1]));
+            assert!(!workings.mineable_cell([337, 0]));
+            assert!(!workings.mineable_cell([264, 35]));
+            workings.advance(&terrain, &[], "vein", 1200, 0, 0);
+            assert_eq!(workings.target, unknown_remaining.then_some(anchor));
+            assert_eq!(workings.target_deposit.is_some(), unknown_remaining);
+            assert!(!terrain.is_revealed(256, 64));
+        }
     }
     #[test]
     fn deposit_order_survives_selected_cell_and_save_without_leaking_geometry() {
@@ -1494,32 +1766,39 @@ mod tests {
     #[test]
     fn lift_closes_short_gaps_at_equipment_limit_without_horizontal_detours() {
         for gap in [1, 7, 8, 15] {
-            let mut workings = Workings::default();
-            workings.initialise();
-            let bottom = [WIDTH / 2, 1199 - gap];
-            workings.passages.push(Passage {
-                feet: bottom,
-                parent: 0,
-                lift: true,
-                supported: true,
-                column: false,
-            });
-            workings.active = 1;
-            let mut terrain = Terrain::from_columns(&vec![PIT_ROWS; WIDTH as usize]);
-            for p in cut_cells(workings.passages[0].feet, bottom, true) {
-                terrain.excavate(p[0], p[1]);
-            }
-            for _ in 0..100 {
-                workings.advance(&terrain, &[], "depth", 1200, 1, 0);
-                if workings.section.is_some() {
-                    break;
+            for policy in ["bulk", "vein", "depth"] {
+                let mut workings = Workings::default();
+                workings.initialise();
+                let bottom = [WIDTH / 2, 1199 - gap];
+                workings.passages.push(Passage {
+                    feet: bottom,
+                    parent: 0,
+                    lift: true,
+                    supported: true,
+                    column: false,
+                });
+                workings.active = 1;
+                workings.signals.push(Signal {
+                    centre: [WIDTH / 2 + 16, bottom[1] - 20],
+                    radius: 20,
+                    confidence: 3,
+                });
+                let mut terrain = Terrain::from_columns(&vec![PIT_ROWS; WIDTH as usize]);
+                for p in cut_cells(workings.passages[0].feet, bottom, true) {
+                    terrain.excavate(p[0], p[1]);
                 }
+                for _ in 0..100 {
+                    workings.advance(&terrain, &[], policy, 1200, 1, 0);
+                    if workings.section.is_some() {
+                        break;
+                    }
+                }
+                let section = workings.section.as_ref().expect("reach equipment boundary");
+                assert!(section.lift, "gap {gap} should continue its existing lift");
+                assert_eq!(section.from, 1);
+                assert_eq!(section.to, [WIDTH / 2, 1199]);
+                assert!(section.cells.iter().all(|p| p[1] < 1200));
             }
-            let section = workings.section.as_ref().expect("reach equipment boundary");
-            assert!(section.lift, "gap {gap} should continue its existing lift");
-            assert_eq!(section.from, 1);
-            assert_eq!(section.to, [WIDTH / 2, 1199]);
-            assert!(section.cells.iter().all(|p| p[1] < 1200));
         }
     }
     #[test]

@@ -1,9 +1,11 @@
-import { shallowRef } from "vue";
+import { shallowRef, computed, watch } from "vue";
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import catalogue from "../content/materials.json";
 import { displayNumber } from "./numbers";
 import { preferences, purchaseSound } from "./preferences";
+import { mergeWorldUpdate, latestWorldSnapshot } from "./visual-timeline";
+import type { CargoLeg } from "./routes";
 export const materials = catalogue;
 export interface Game {
   campaign_id: string;
@@ -27,6 +29,34 @@ export interface Game {
   ticks: number;
   credits: string;
   workers: number;
+  visual_workers: {
+    id: number;
+    role: string;
+    job: string;
+    position: [number, number];
+    activity: string;
+    route: number;
+    elapsed_ms: number;
+    speed: number;
+    legs: CargoLeg[];
+  }[];
+  crew_state: {
+    assigned: number;
+    travelling: number;
+    working: number;
+    blocked: number;
+  };
+  crew_roles: Record<
+    string,
+    { assigned: number; travelling: number; working: number; blocked: number }
+  >;
+  construction: null | {
+    from: [number, number];
+    to: [number, number];
+    cleared_to: [number, number];
+    lift: boolean;
+    support_progress: number;
+  };
   housing: number;
   levels: Record<string, number>;
   milestones: string[];
@@ -44,6 +74,10 @@ export interface Game {
   raw_stock_capacity: number;
   research_invested: number;
   shipments: {
+    id: string;
+    route: number;
+    elapsed_ms: number;
+    speed: number;
     material: number;
     amount: number;
     remaining: number;
@@ -217,6 +251,181 @@ export interface Game {
   steel_made: boolean;
 }
 export const state = shallowRef<Game | null>(null);
+export const visualState = shallowRef<Game | null>(null);
+export const viewState = computed(() => visualState.value ?? state.value);
+export const snapshotReceivedAt = shallowRef(0);
+export const catchup = shallowRef<{
+  session: string;
+  done: number;
+  total: number;
+  skipped: boolean;
+  saving: boolean;
+  baselineExcavated: number;
+  excavated: number;
+} | null>(null);
+const importing = shallowRef(false);
+export const commandsLocked = computed(
+  () => importing.value || reconciling.value || catchup.value !== null,
+);
+type VisualEvent =
+  | { kind: "start"; session: string; state: Game; total: number }
+  | {
+      kind: "frame";
+      session: string;
+      update: { state: Game; reset: boolean };
+      done: number;
+      total: number;
+    }
+  | { kind: "saved"; session: string; state: Game }
+  | { kind: "failed"; session: string; message: string; state: Game };
+let frames: Extract<VisualEvent, { kind: "frame" }>[] = [];
+let frameBytes = 0;
+let savedResult: Game | null = null;
+let liveResult: Game | null = null;
+let playbackScheduled = false;
+function finishPlayback() {
+  const session = catchup.value?.session;
+  if (!session || !savedResult) return;
+  state.value = liveResult ?? savedResult;
+  liveResult = null;
+  visualState.value = null;
+  snapshotReceivedAt.value = performance.now();
+  catchup.value = null;
+  savedResult = null;
+  frames = [];
+  frameBytes = 0;
+  reconciling.value = true;
+  terrainEpoch.value++;
+  void invoke("acknowledge_replay", { session })
+    .then(() => {
+      reconciling.value = false;
+    })
+    .catch((e) => {
+      error.value = String(e);
+    });
+}
+function consumeFrame() {
+  playbackScheduled = false;
+  if (!catchup.value) return;
+  const frame = frames.shift();
+  if (frame && !catchup.value.skipped) {
+    frameBytes -= JSON.stringify(frame).length * 2;
+    visualState.value = mergeWorldUpdate(
+      visualState.value,
+      frame.update.state,
+      frame.update.reset,
+    );
+    snapshotReceivedAt.value = performance.now();
+    catchup.value = {
+      ...catchup.value,
+      done: frame.done,
+      saving: frame.done === frame.total,
+      excavated: Math.max(
+        0,
+        frame.update.state.excavated - catchup.value.baselineExcavated,
+      ),
+    };
+    if (frame.update.reset) terrainEpoch.value++;
+  }
+  if (!frames.length && savedResult) finishPlayback();
+  else if (frames.length) schedulePlayback();
+}
+function schedulePlayback() {
+  if (playbackScheduled) return;
+  playbackScheduled = true;
+  requestAnimationFrame(consumeFrame);
+}
+export function skipCatchup() {
+  if (!catchup.value) return;
+  catchup.value = { ...catchup.value, skipped: true };
+  frames = [];
+  frameBytes = 0;
+  visualState.value = null;
+  if (savedResult) finishPlayback();
+}
+watch(
+  () => preferences.reducedMotion,
+  (reduced) => {
+    if (reduced) skipCatchup();
+  },
+);
+function receiveVisual(event: VisualEvent) {
+  if (event.kind === "start") {
+    frames = [];
+    frameBytes = 0;
+    savedResult = null;
+    liveResult = event.state;
+    catchup.value = {
+      session: event.session,
+      done: 0,
+      total: event.total,
+      skipped: preferences.reducedMotion || document.hidden,
+      saving: false,
+      baselineExcavated: event.state.excavated,
+      excavated: 0,
+    };
+    if (!state.value) state.value = event.state;
+    visualState.value = catchup.value.skipped ? null : event.state;
+    terrainEpoch.value++;
+    snapshotReceivedAt.value = performance.now();
+  } else if (catchup.value?.session !== event.session) return;
+  else if (event.kind === "frame") {
+    if (catchup.value.skipped) {
+      catchup.value = {
+        ...catchup.value,
+        done: event.done,
+        saving: event.done === event.total,
+        excavated: Math.max(
+          0,
+          event.update.state.excavated - catchup.value.baselineExcavated,
+        ),
+      };
+      return;
+    }
+    frames.push(event);
+    frameBytes += JSON.stringify(event).length * 2;
+    while (frameBytes > 16 * 1024 * 1024 && frames.length > 1) {
+      const left = frames.shift()!,
+        right = frames[0]!;
+      const leftSize = JSON.stringify(left).length * 2;
+      const rightSize = JSON.stringify(right).length * 2;
+      if (!right.update.reset) {
+        for (const key of ["chunks", "visible", "revealed"] as const) {
+          right.update.state.terrain[key] = {
+            ...left.update.state.terrain[key],
+            ...right.update.state.terrain[key],
+          };
+        }
+        right.update.state.workings.passages = [
+          ...left.update.state.workings.passages,
+          ...right.update.state.workings.passages,
+        ];
+        right.update.state.workings_offset = left.update.state.workings_offset;
+        right.update.reset = left.update.reset;
+      }
+      frameBytes += JSON.stringify(right).length * 2 - leftSize - rightSize;
+    }
+    if (frameBytes > 16 * 1024 * 1024) consumeFrame();
+    else schedulePlayback();
+  } else if (event.kind === "saved") {
+    savedResult = event.state;
+    liveResult = latestWorldSnapshot(event.state, liveResult);
+    catchup.value = { ...catchup.value, saving: false };
+    if (!frames.length || catchup.value.skipped) finishPlayback();
+  } else {
+    frames = [];
+    frameBytes = 0;
+    savedResult = null;
+    liveResult = null;
+    visualState.value = null;
+    catchup.value = null;
+    state.value = event.state;
+    snapshotReceivedAt.value = performance.now();
+    error.value = event.message;
+    reconciling.value = false;
+    terrainEpoch.value++;
+  }
+}
 export const terrainEpoch = shallowRef(0);
 export const error = shallowRef("");
 export const native = isTauri();
@@ -259,12 +468,22 @@ export const upgrades = [
   ["reclaimer", "Tailings recovery", "Recover retained mineral content."],
 ] as const;
 export function cost(id: string) {
-  return state.value?.quotes[id] ?? "0";
+  return viewState.value?.quotes[id] ?? "0";
 }
 let lifecycleRegistered = false;
 async function backgroundState(background: boolean) {
   try {
-    state.value = await invoke<Game>("set_background", { background });
+    if (background) skipCatchup();
+    const next = await invoke<Game>("set_background", { background });
+    if (
+      !catchup.value &&
+      (!state.value ||
+        state.value.campaign_id !== next.campaign_id ||
+        state.value.ticks <= next.ticks)
+    ) {
+      state.value = next;
+      snapshotReceivedAt.value = performance.now();
+    }
   } catch (e) {
     error.value = String(e);
   }
@@ -287,22 +506,26 @@ export async function start() {
     const channel = new Channel<{ state: Game; reset: boolean }>();
     channel.onmessage = (update) => {
       const g = update.state;
+      if (catchup.value) {
+        if (liveResult?.campaign_id === g.campaign_id)
+          liveResult = mergeWorldUpdate(liveResult, g, update.reset);
+        return;
+      }
       if (state.value && state.value.campaign_id !== g.campaign_id) return;
       if (update.reset) terrainEpoch.value++;
-      if (!update.reset && state.value?.site === g.site) {
-        if (g.workings_offset > 0) {
-          g.workings.passages = [
-            ...state.value.workings.passages.slice(0, g.workings_offset),
-            ...g.workings.passages,
-          ];
-        }
-        for (const key of ["chunks", "revealed", "visible"] as const) {
-          g.terrain[key] = { ...state.value.terrain[key], ...g.terrain[key] };
-        }
-      }
-      state.value = g;
+      state.value = mergeWorldUpdate(state.value, g, update.reset);
+      snapshotReceivedAt.value = performance.now();
     };
-    state.value = await invoke<Game>("connect", { channel });
+    const visualChannel = new Channel<VisualEvent>();
+    visualChannel.onmessage = receiveVisual;
+    const connected = await invoke<Game>("connect", { channel, visualChannel });
+    if (
+      !catchup.value &&
+      (!state.value || state.value.ticks <= connected.ticks)
+    ) {
+      state.value = connected;
+      snapshotReceivedAt.value = performance.now();
+    }
     await backgroundState(document.hidden);
     reconciling.value = false;
     if (!lifecycleRegistered) {
@@ -323,13 +546,14 @@ export async function start() {
 }
 let pending = false;
 export async function act(kind: string, target = "", value = 0) {
-  if (!state.value || pending || reconciling.value) return false;
+  if (!state.value || pending || commandsLocked.value) return false;
   pending = true;
   try {
     state.value = await invoke<Game>("command", {
       campaignId: state.value.campaign_id,
       action: { sequence: state.value.last_sequence + 1, kind, target, value },
     });
+    snapshotReceivedAt.value = performance.now();
     error.value = "";
     purchaseSound();
     return true;
@@ -357,18 +581,31 @@ export async function exportSave() {
   }
 }
 export async function importSave(file: File) {
+  if (commandsLocked.value) return;
+  importing.value = true;
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const first = bytes.find((byte) => ![9, 10, 13, 32].includes(byte));
     const legacyJson =
       file.name.toLowerCase().endsWith(".json") || first === 0x7b;
-    state.value = await invoke<Game>("import_save", {
+    const imported = await invoke<Game>("import_save", {
       data: legacyJson ? new TextDecoder().decode(bytes) : bytesToBase64(bytes),
       encoding: legacyJson ? "json" : "base64",
     });
+    if (
+      !catchup.value &&
+      (!state.value ||
+        state.value.campaign_id !== imported.campaign_id ||
+        state.value.ticks <= imported.ticks)
+    ) {
+      state.value = imported;
+      snapshotReceivedAt.value = performance.now();
+    }
     terrainEpoch.value++;
   } catch (e) {
     error.value = String(e);
+  } finally {
+    importing.value = false;
   }
 }
 
@@ -381,13 +618,14 @@ function bytesToBase64(bytes: Uint8Array) {
 }
 
 export async function resetCampaign(confirmation: string) {
-  if (!state.value || pending) return false;
+  if (!state.value || pending || commandsLocked.value) return false;
   pending = true;
   try {
     state.value = await invoke<Game>("reset_campaign", {
       confirmation,
       campaignId: state.value.campaign_id,
     });
+    snapshotReceivedAt.value = performance.now();
     terrainEpoch.value++;
     error.value = "";
     return true;

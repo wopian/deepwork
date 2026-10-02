@@ -1,5 +1,5 @@
 import { Container, Sprite, Texture } from "pixi.js";
-import { CELL_PIXEL, CHUNK, chunkOrigin } from "./geometry";
+import { CELL_PIXEL, CHUNK, chunkOrigin, chunkId } from "./geometry";
 import type { Game } from "./game";
 import { terrainPixels } from "./terrain-pixels";
 /** Only visible chunks get GPU textures. Hidden minerals never enter this class. */
@@ -7,7 +7,13 @@ export class TerrainView {
   readonly layer = new Container();
   private cache = new Map<
     number,
-    { sprite: Sprite; mask?: number[]; visible?: number[]; selected?: number[] }
+    {
+      sprite: Sprite;
+      mask?: number[];
+      visible?: number[];
+      selected?: number[];
+      neighbors: (number[] | undefined)[];
+    }
   >();
   update(
     terrain: Game["terrain"] | undefined,
@@ -51,10 +57,17 @@ export class TerrainView {
         visible = terrain?.visible[id],
         selected = selection?.[id];
       const old = this.cache.get(id);
+      const neighbors = [
+        [x - CHUNK, y],
+        [x + CHUNK, y],
+        [x, y - CHUNK],
+        [x, y + CHUNK],
+      ].map(([nx, ny]) => terrain?.chunks[chunkId(nx!, ny!)]);
       if (
         old &&
         old.mask === mask &&
         old.visible === visible &&
+        old.neighbors.every((p, i) => p === neighbors[i]) &&
         String(old.selected) === String(selected)
       )
         continue;
@@ -63,7 +76,16 @@ export class TerrainView {
       canvas.height = CHUNK;
       const context = canvas.getContext("2d")!;
       const pixels = context.createImageData(CHUNK, CHUNK);
-      pixels.data.set(terrainPixels(mask, visible, cy, selected));
+      pixels.data.set(
+        terrainPixels(mask, visible, cy, selected, cx, (px, py) => {
+          if (py < 0) return true;
+          const bytes = terrain?.chunks[chunkId(px, py)];
+          const index =
+            (((py % CHUNK) + CHUNK) % CHUNK) * CHUNK +
+            (((px % CHUNK) + CHUNK) % CHUNK);
+          return !!(bytes?.[index >> 3]! & (1 << index % 8));
+        }),
+      );
       context.putImageData(pixels, 0, 0);
       if (old) {
         old.sprite.destroy({ texture: true, textureSource: true });
@@ -78,7 +100,7 @@ export class TerrainView {
       );
       sprite.scale.set(CELL_PIXEL);
       this.layer.addChild(sprite);
-      this.cache.set(id, { sprite, mask, visible, selected });
+      this.cache.set(id, { sprite, mask, visible, selected, neighbors });
     }
     for (const [id, entry] of this.cache)
       if (!keep.has(id)) {

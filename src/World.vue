@@ -3,7 +3,18 @@ import { onMounted, onBeforeUnmount, ref, watch, computed } from "vue";
 import { Application, Graphics, Text, Container } from "pixi.js";
 // Pixi shader/uniform polyfills preserve the native CSP without eval.
 import "pixi.js/unsafe-eval";
-import { state, materials, terrainEpoch, format, act, upgrades } from "./game";
+import {
+  viewState as state,
+  materials,
+  terrainEpoch,
+  format,
+  act,
+  upgrades,
+  snapshotReceivedAt,
+  catchup,
+  commandsLocked,
+} from "./game";
+import { motionPosition } from "./visual-timeline";
 import { inspectOre } from "./inspect";
 import { WasteParticles } from "./waste";
 import { TerrainView } from "./terrain-view";
@@ -84,7 +95,12 @@ function rect(
   h: number,
   c: number,
 ) {
-  g.rect(Math.round(x), Math.round(y), w, h).fill(c);
+  g.rect(
+    g === actors ? x : Math.round(x),
+    g === actors ? y : Math.round(y),
+    w,
+    h,
+  ).fill(c);
 }
 function draw() {
   if (!app) return;
@@ -122,6 +138,7 @@ function draw() {
     g?.profile,
     g?.terrain.revision,
     g?.workings?.revision,
+    JSON.stringify(g?.construction),
     preferences.surveyOverlay,
     g?.housing,
     first,
@@ -137,6 +154,40 @@ function draw() {
   structures.clear();
   const workings = g?.workings;
   if (workings) {
+    const construction = g?.construction;
+    if (
+      construction &&
+      construction.cleared_to.some((p, i) => p !== construction.from[i])
+    ) {
+      const from = construction.from,
+        end = construction.cleared_to;
+      const span = Math.max(
+        Math.abs(end[0] - from[0]),
+        Math.abs(end[1] - from[1]),
+        1,
+      );
+      for (let step = 0; step <= span; step += construction.lift ? 2 : 8) {
+        const x =
+          MINE_ORIGIN_X +
+          (from[0] + ((end[0] - from[0]) * step) / span) * CELL_PIXEL;
+        const y =
+          SURFACE_Y +
+          (from[1] + ((end[1] - from[1]) * step) / span + 1) * CELL_PIXEL;
+        if (construction.lift) {
+          rect(structures, x - 2, y - 2, 4, 1, 0xa67548);
+          rect(structures, x - 2, y - 3, 1, 3, 0x6a4937);
+          rect(structures, x + 2, y - 3, 1, 3, 0x6a4937);
+        } else {
+          const height = Math.max(
+            1,
+            Math.ceil(8 * construction.support_progress),
+          );
+          rect(structures, x, y - height, 1, height, 0xa67548);
+          if (construction.support_progress > 0.5)
+            rect(structures, x - 3, y - 8, 7, 1, 0xa67548);
+        }
+      }
+    }
     for (let i = 1; i < workings.passages.length; i++) {
       const node = workings.passages[i]!;
       const parent = workings.passages[node.parent]!;
@@ -201,6 +252,13 @@ function draw() {
           .moveTo(px, py - parentHeight)
           .lineTo(x, y - height)
           .stroke({ width: 1, color });
+        if (node.column) {
+          rect(structures, x - 2, y - height + 1, 4, 1, 0x513b32);
+          rect(structures, x - 1, y - height + 2, 1, 1, 0xe8dfc8);
+          structures
+            .circle(x, y - height + 3, 7)
+            .fill({ color: 0xffd98b, alpha: 0.06 });
+        }
       }
     }
     if (preferences.surveyOverlay) {
@@ -447,15 +505,30 @@ onMounted(async () => {
     lastFrameTime = frameNow;
     t += preferences.reducedMotion ? 0 : ticker.deltaTime;
     world.scale.set((app.screen.width / 1100) * zoom);
-    if (followCrew && state.value?.removed.length) {
-      const cell = state.value.removed[state.value.removed.length - 1]!;
-      offsetX =
+    if (followCrew && state.value?.visual_workers?.length) {
+      const worker =
+        state.value.visual_workers.find((p) => p.role === "diggers") ??
+        state.value.visual_workers[0]!;
+      const point = motionPosition(
+        worker.position,
+        worker.legs,
+        worker.elapsed_ms,
+        catchup.value ? 0 : frameNow - snapshotReceivedAt.value,
+        worker.speed,
+      ).point;
+      const smoothing = preferences.reducedMotion
+        ? 1
+        : 1 - Math.exp(-ticker.deltaMS / 180);
+      const targetX =
         app.screen.width / 2 -
-        (((MINE_ORIGIN_X + cell.x * CELL_PIXEL) * app.screen.width) / 1100) *
+        (((MINE_ORIGIN_X + point[0] * CELL_PIXEL) * app.screen.width) / 1100) *
           zoom;
-      offsetY =
+      const targetY =
         app.screen.height / 2 -
-        (((SURFACE_Y + cell.y * CELL_PIXEL) * app.screen.width) / 1100) * zoom;
+        (((SURFACE_Y + point[1] * CELL_PIXEL) * app.screen.width) / 1100) *
+          zoom;
+      offsetX += (targetX - offsetX) * smoothing;
+      offsetY += (targetY - offsetY) * smoothing;
     } else if (follow) {
       offsetY =
         80 -
@@ -532,8 +605,80 @@ onMounted(async () => {
     const crew = g?.crew ?? { diggers: 6, haulers: 3 };
     let shown = 0;
     const workerBudget = low ? 100 : 250;
+    const sinceSnapshot = catchup.value
+      ? 0
+      : frameNow - snapshotReceivedAt.value;
+    for (const worker of (g?.visual_workers ?? []).slice(0, workerBudget)) {
+      const motion = motionPosition(
+        worker.position,
+        worker.legs,
+        worker.elapsed_ms,
+        sinceSnapshot,
+        worker.speed,
+      );
+      let x = MINE_ORIGIN_X + motion.point[0] * CELL_PIXEL - 2;
+      let y = SURFACE_Y + (motion.point[1] + 1) * CELL_PIXEL;
+      if (
+        !worker.legs.length &&
+        worker.position[1] === 0 &&
+        (worker.role === "operators" || worker.role === "reclaimers")
+      ) {
+        x = (worker.role === "operators" ? 735 : 980) + (worker.id % 8) * 6;
+        y = 185;
+      }
+      const walking =
+        worker.activity === "walking" || worker.activity === "climbing";
+      const stride = walking ? Math.floor(t / 5 + worker.id) % 2 : 0;
+      const color =
+        worker.role === "diggers"
+          ? 0xe5a34d
+          : worker.role === "engineers"
+            ? 0xa67548
+            : 0x8c9ba5;
+      if (worker.activity === "lift") {
+        rect(actors, x - 2, y - 9, 1, 10, 0x647b8b);
+        rect(actors, x + 6, y - 9, 1, 10, 0x647b8b);
+        rect(actors, x - 2, y, 9, 1, 0x647b8b);
+      }
+      rect(actors, x, y - 8, 5, 2, 0xe5a34d);
+      rect(actors, x + 1, y - 6, 3, 2, 0xe8dfc8);
+      rect(actors, x, y - 4, 5, 3, color);
+      rect(actors, x + stride, y - 1, 2, 1, 0x263441);
+      rect(actors, x + 3 - stride, y - 1, 2, 1, 0x263441);
+      rect(actors, x + 4, y - 7, 1, 1, 0xffe6a2);
+      if (worker.activity === "climbing")
+        rect(actors, x + stride * 4, y - 5, 1, 2, 0xe8dfc8);
+      if (worker.activity === "blocked" || worker.activity === "waiting")
+        rect(actors, x + 6, y - 8, 1, 2, 0xe5a34d);
+      if (worker.activity === "digging" || worker.activity === "building") {
+        const swing = Math.floor(t / 8 + worker.id) % 3;
+        rect(actors, x + 5, y - 5 - swing, 3, 1, 0x8c9ba5);
+        if (!preferences.reducedMotion && swing === 2) {
+          for (let n = 0; n < (low ? 2 : 4); n++) {
+            const phase = (t / 12 + n * 0.23 + worker.id) % 1;
+            rect(
+              actors,
+              x + 6 + phase * (3 + n),
+              y - 4 + phase * phase * 7,
+              1,
+              1,
+              n % 2 ? 0xa67548 : 0xd8bc7d,
+            );
+          }
+        }
+      } else if (worker.activity === "surveying")
+        rect(actors, x + 5, y - 4, 2, 2, 0xe8dfc8);
+      else if (worker.activity === "hauling")
+        rect(actors, x + 5, y - 3, 3, 2, 0x806044);
+      actorTargets.push({ x: x + 2, y: y - 3, panel: "Crew" });
+      shown++;
+    }
     for (const [role, count] of Object.entries(crew)) {
-      for (let i = 0; i < count && shown < workerBudget; i++, shown++) {
+      for (
+        let i = 0;
+        i < count && !g?.visual_workers?.length && shown < workerBudget;
+        i++, shown++
+      ) {
         let x = 250 + i * 8,
           y = 185;
         if (role === "diggers") {
@@ -542,7 +687,9 @@ onMounted(async () => {
           const front = active[i % Math.max(1, active.length)];
           const cell = g?.removed[Math.max(0, g.removed.length - 1 - i)];
           const feet =
-            front?.position ?? front?.face ?? (cell ? [cell.x, cell.y] : undefined);
+            front?.position ??
+            front?.face ??
+            (cell ? [cell.x, cell.y] : undefined);
           if (feet) {
             x = MINE_ORIGIN_X + feet[0]! * CELL_PIXEL + (i % 2) * 3;
             y = SURFACE_Y + (feet[1]! + 1) * CELL_PIXEL;
@@ -641,13 +788,23 @@ onMounted(async () => {
         cargo.legs ?? [],
         cargo.duration - cargo.remaining,
       );
-      const [x, y] = leg
+      const smooth = cargo.id
+        ? motionPosition(
+            cargo.legs[0]?.from ?? [0, 0],
+            cargo.legs,
+            cargo.elapsed_ms,
+            sinceSnapshot,
+            cargo.speed,
+          )
+        : null;
+      const displayedLeg = smooth ?? leg;
+      const [x, y] = displayedLeg
         ? [
-            MINE_ORIGIN_X + leg.point[0] * CELL_PIXEL,
-            SURFACE_Y + leg.point[1] * CELL_PIXEL,
+            MINE_ORIGIN_X + displayedLeg.point[0] * CELL_PIXEL,
+            SURFACE_Y + displayedLeg.point[1] * CELL_PIXEL,
           ]
         : routePosition(points, progress);
-      const mode = leg?.mode ?? cargo.mode;
+      const mode = displayedLeg?.mode ?? cargo.mode;
       actorTargets.push({ x: x + 4, y: y + 2, panel: "Logistics" });
       const oreColor = parseInt(materials[cargo.material].color.slice(1), 16);
       if (mode === "train") {
@@ -933,14 +1090,22 @@ function fitWorkings() {
         View access equipment
       </button>
       <button
+        :disabled="commandsLocked"
         @click="inspectedCell && act('target_vein', inspectedCell.join(','))"
       >
         Prioritise whole vein
       </button>
-      <button v-if="state?.workings?.target" @click="act('clear_vein')">
+      <button
+        :disabled="commandsLocked"
+        v-if="state?.workings?.target"
+        @click="act('clear_vein')"
+      >
         Clear vein order
       </button>
-      <button @click="act('priority', '', inspected)">
+      <button
+        :disabled="commandsLocked"
+        @click="act('priority', '', inspected)"
+      >
         {{
           state?.priorities.includes(inspected)
             ? "Remove material priority"

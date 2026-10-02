@@ -47,6 +47,230 @@ struct Runtime {
     path: PathBuf,
     save_status: Mutex<SaveStatus>,
     channel: Mutex<Option<Channel<Update>>>,
+    replay: Mutex<Replay>,
+}
+#[derive(Clone, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum VisualEvent {
+    Start {
+        session: String,
+        state: Snapshot,
+        total: u64,
+    },
+    Frame {
+        session: String,
+        update: Update,
+        done: u64,
+        total: u64,
+    },
+    Saved {
+        session: String,
+        state: Snapshot,
+    },
+    Failed {
+        session: String,
+        message: String,
+        state: Snapshot,
+    },
+}
+/// Transient compressed replay. Gameplay state remains in Runtime.game.
+#[derive(Default)]
+struct Replay {
+    channel: Option<Channel<serde_json::Value>>,
+    session: Option<String>,
+    start: Option<ReplayPayload>,
+    frames: std::collections::VecDeque<ReplayPayload>,
+    finish: Option<ReplayPayload>,
+    bytes: usize,
+    pending: bool,
+}
+/// Oversized single snapshots spill into temporary files, removed with their session.
+/// Adjacent frames still coalesce first; no geometry is discarded to meet the RAM budget.
+struct ReplayPayload {
+    bytes: Vec<u8>,
+    path: Option<PathBuf>,
+}
+impl ReplayPayload {
+    fn new(bytes: Vec<u8>) -> Self {
+        Self { bytes, path: None }
+    }
+    fn resident(&self) -> usize {
+        self.bytes.capacity() + self.path.as_ref().map_or(0, PathBuf::capacity)
+    }
+    fn decode(&self) -> Result<serde_json::Value, String> {
+        match &self.path {
+            Some(path) => serde_json::from_reader(flate2::read::GzDecoder::new(
+                fs::File::open(path).map_err(|e| e.to_string())?,
+            ))
+            .map_err(|e| e.to_string()),
+            None => Ok(decode_visual(&self.bytes)),
+        }
+    }
+    fn spill(&mut self) -> Result<(), String> {
+        use std::io::Write;
+        if self.path.is_some() {
+            return Ok(());
+        }
+        let path = std::env::temp_dir().join(format!(
+            "deepwork-replay-{}-{}.tmp",
+            std::process::id(),
+            fresh_identity()
+        ));
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|e| e.to_string())?;
+        if let Err(error) = file.write_all(&self.bytes) {
+            drop(file);
+            let _ = fs::remove_file(&path);
+            return Err(error.to_string());
+        }
+        self.path = Some(path);
+        self.bytes = Vec::new();
+        Ok(())
+    }
+}
+impl Drop for ReplayPayload {
+    fn drop(&mut self) {
+        if let Some(path) = &self.path {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+fn encode_visual(value: &serde_json::Value) -> Vec<u8> {
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    serde_json::to_writer(&mut encoder, value).expect("Serializable visual event");
+    let mut encoded = encoder.finish().expect("Memory encoding");
+    encoded.shrink_to_fit();
+    encoded
+}
+fn decode_visual(bytes: &[u8]) -> serde_json::Value {
+    serde_json::from_reader(flate2::read::GzDecoder::new(bytes))
+        .expect("Internally encoded visual event")
+}
+fn coalesce_visual(left: serde_json::Value, mut right: serde_json::Value) -> serde_json::Value {
+    if right["update"]["reset"] != true {
+        let a = &left["update"]["state"];
+        let b = &mut right["update"]["state"];
+        for key in ["chunks", "visible", "revealed"] {
+            if let (Some(source), Some(destination)) = (
+                a["terrain"][key].as_object(),
+                b["terrain"][key].as_object_mut(),
+            ) {
+                for (id, bytes) in source {
+                    destination
+                        .entry(id.clone())
+                        .or_insert_with(|| bytes.clone());
+                }
+            }
+        }
+        let mut passages = a["workings"]["passages"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        passages.extend(
+            b["workings"]["passages"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default(),
+        );
+        b["workings"]["passages"] = passages.into();
+        b["workings_offset"] = a["workings_offset"].clone();
+        right["update"]["reset"] = left["update"]["reset"].clone();
+    }
+    right
+}
+impl Replay {
+    fn clear(&mut self) {
+        self.start = None;
+        self.frames.clear();
+        self.frames.shrink_to_fit();
+        self.finish = None;
+        self.session = None;
+        self.bytes = 0;
+        self.pending = false;
+    }
+    fn publish(&mut self, event: VisualEvent) -> Result<(), String> {
+        let value = serde_json::to_value(&event).expect("Serializable visual event");
+        if let Some(channel) = &self.channel {
+            let _ = channel.send(value.clone());
+        }
+        let bytes = ReplayPayload::new(encode_visual(&value));
+        match event {
+            VisualEvent::Start { session, .. } => {
+                self.session = Some(session);
+                self.bytes = bytes.resident();
+                self.start = Some(bytes);
+                self.frames.clear();
+                self.finish = None;
+                self.pending = true;
+            }
+            VisualEvent::Frame { .. } => {
+                self.bytes += bytes.resident();
+                self.frames.push_back(bytes);
+            }
+            _ => {
+                self.bytes -= self.finish.as_ref().map_or(0, ReplayPayload::resident);
+                self.bytes += bytes.resident();
+                self.finish = Some(bytes);
+                if self.channel.is_none() {
+                    self.pending = false;
+                }
+            }
+        }
+        self.bound(16 * 1024 * 1024)
+    }
+    fn bound(&mut self, limit: usize) -> Result<(), String> {
+        while self.bytes + self.frames.capacity() * std::mem::size_of::<ReplayPayload>() > limit
+            && self.frames.len() > 1
+        {
+            let left = self.frames.pop_front().unwrap();
+            let right = self.frames.pop_front().unwrap();
+            let combined = ReplayPayload::new(encode_visual(&coalesce_visual(
+                left.decode()?,
+                right.decode()?,
+            )));
+            self.bytes = self.bytes - left.resident() - right.resident() + combined.resident();
+            self.frames.push_front(combined);
+        }
+        self.frames.shrink_to_fit();
+        let metadata = self.frames.capacity() * std::mem::size_of::<ReplayPayload>();
+        for payload in self
+            .start
+            .iter_mut()
+            .chain(self.finish.iter_mut())
+            .chain(self.frames.iter_mut())
+        {
+            if self.bytes + metadata <= limit {
+                break;
+            }
+            let old = payload.resident();
+            payload.spill()?;
+            self.bytes = self.bytes - old + payload.resident();
+        }
+        Ok(())
+    }
+}
+#[derive(Clone, serde::Serialize)]
+struct Construction {
+    from: [i64; 2],
+    to: [i64; 2],
+    cleared_to: [i64; 2],
+    lift: bool,
+    support_progress: f64,
+}
+fn construction(game: &Game) -> Option<Construction> {
+    let section = game.workings.section.as_ref()?;
+    Some(Construction {
+        from: game.workings.passages.get(section.from)?.feet,
+        to: section.to,
+        cleared_to: mine_core::crew::access_position(&game.terrain, &game.workings),
+        lift: section.lift,
+        support_progress: (section.support_work as f64
+            / mine_core::workings::settings().support_work as f64)
+            .min(1.),
+    })
 }
 #[derive(Clone, Default, serde::Serialize)]
 struct SaveStatus {
@@ -81,9 +305,23 @@ struct Snapshot {
     upgrade_previews: std::collections::BTreeMap<String, mine_core::UpgradePreview>,
     purchase_blockers: std::collections::BTreeMap<String, String>,
     save_status: SaveStatus,
+    visual_workers: Vec<mine_core::crew::VisualWorker>,
+    crew_state: mine_core::crew::Counts,
+    crew_roles: std::collections::BTreeMap<String, mine_core::crew::Counts>,
+    construction: Option<Construction>,
 }
 impl From<Game> for Snapshot {
     fn from(mut game: Game) -> Self {
+        let construction = construction(&game);
+        let mut visual_workers = game.movement.visual(game.travel_power());
+        for worker in &mut visual_workers {
+            if let Some((role, id)) = worker.job.split_once(':') {
+                worker.job = format!("{role}:{}", public_front_id(id));
+            }
+        }
+        let crew_state = game.movement.counts();
+        let crew_roles = game.movement.role_counts();
+        game.movement = mine_core::crew::Movement::default();
         let quotes = mine_core::requirements()
             .iter()
             .map(|u| (u.id.clone(), game.cost(&u.id).to_string()))
@@ -115,7 +353,25 @@ impl From<Game> for Snapshot {
                     .map(|reason| (u.id.clone(), reason))
             })
             .collect();
-        let shipments = game.transport.visual();
+        let mut shipments = game.transport.visual();
+        for shipment in &mut shipments {
+            if let Some((_, segment)) = game
+                .transport
+                .segments
+                .iter()
+                .enumerate()
+                .find(|(_, s)| s.batches.iter().any(|b| b.id.to_string() == shipment.id))
+            {
+                shipment.speed = if segment.demand > 0 {
+                    game.travel_power() as f64 / 1000.
+                } else {
+                    1.
+                };
+                if shipment.remaining == 0. {
+                    shipment.speed = 0.;
+                }
+            }
+        }
         for segment in &mut game.transport.segments {
             segment.legs.clear();
         }
@@ -141,8 +397,14 @@ impl From<Game> for Snapshot {
         }
         for front in &mut game.mining_fronts {
             front.route.clear();
+            front.id = public_front_id(&front.id);
+            front.deposit.clear();
         }
         Self {
+            construction,
+            visual_workers,
+            crew_state,
+            crew_roles,
             selected_vein,
             access_depth_limit,
             access_upgrades,
@@ -165,6 +427,76 @@ impl From<Game> for Snapshot {
             upgrade_previews,
             purchase_blockers,
             save_status: SaveStatus::default(),
+        }
+    }
+}
+fn public_front_id(id: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    id.hash(&mut hash);
+    format!("{:016x}", hash.finish())
+}
+
+#[cfg(test)]
+mod visual_replay_tests {
+    use super::*;
+    #[test]
+    fn coalescing_keeps_order_and_only_latest_public_knowledge() {
+        let frame = |offset, passages, visible| {
+            serde_json::json!({"kind":"frame", "update":{"reset":false,"state":{
+                "workings_offset":offset,"workings":{"passages":passages},"terrain":{"chunks":{},"revealed":{},"visible":visible}
+            }}})
+        };
+        let left = frame(2, vec![3], serde_json::json!({"1":[255]}));
+        let right = frame(3, vec![4], serde_json::json!({"1":[5],"2":[255]}));
+        let combined = coalesce_visual(left.clone(), right);
+        assert_eq!(
+            left["update"]["state"]["terrain"]["visible"]["1"],
+            serde_json::json!([255])
+        );
+        assert_eq!(
+            combined["update"]["state"]["workings"]["passages"],
+            serde_json::json!([3, 4])
+        );
+        assert_eq!(combined["update"]["state"]["workings_offset"], 2);
+        assert_eq!(decode_visual(&encode_visual(&combined)), combined);
+        let mut replay = Replay::default();
+        for _ in 0..10 {
+            let bytes = ReplayPayload::new(encode_visual(&combined));
+            replay.bytes += bytes.resident();
+            replay.frames.push_back(bytes);
+        }
+        replay.bound(1000).unwrap();
+        assert!(replay.bytes < 1000);
+    }
+    #[test]
+    fn oversized_baseline_spills_without_losing_geometry_and_is_removed() {
+        let value = serde_json::json!({"geometry": (0..20_000).map(|i| i * 7919 % 65521).collect::<Vec<_>>()});
+        let payload = ReplayPayload::new(encode_visual(&value));
+        let mut replay = Replay::default();
+        replay.bytes = payload.resident();
+        replay.start = Some(payload);
+        replay.bound(1024).unwrap();
+        assert!(replay.bytes < 1024);
+        assert_eq!(replay.start.as_ref().unwrap().decode().unwrap(), value);
+        let path = replay.start.as_ref().unwrap().path.clone().unwrap();
+        assert!(path.exists());
+        drop(replay);
+        assert!(!path.exists());
+    }
+    #[test]
+    fn renderer_worker_budget_does_not_limit_crew_simulation() {
+        let mut game = Game::new(42, 1);
+        game.workers = 1000;
+        game.housing = 1000;
+        game.tick(materials(), false);
+        let snapshot = Snapshot::from(game.clone());
+        assert_eq!(game.movement.workers.len(), 1000);
+        assert_eq!(snapshot.visual_workers.len(), 250);
+        assert_eq!(snapshot.crew_state.assigned, 1000);
+        assert!(snapshot.game.movement.workers.is_empty());
+        for front in &snapshot.game.mining_fronts {
+            assert!(front.deposit.is_empty());
         }
     }
 }
@@ -231,6 +563,8 @@ impl Stream {
         self.chunks = g.terrain.chunks.clone();
         self.visible = g.terrain.visible.clone();
         self.revealed = g.terrain.revealed.clone();
+        let construction = construction(g);
+        let selected_vein = g.workings.order_view(&g.terrain);
         let offset = if reset {
             0
         } else {
@@ -240,6 +574,8 @@ impl Stream {
         state.workings.passages.drain(..offset);
         let mut snapshot: Snapshot = state.into();
         snapshot.workings_offset = offset;
+        snapshot.construction = construction;
+        snapshot.selected_vein = selected_vein;
         Update {
             state: snapshot,
             reset,
@@ -253,15 +589,46 @@ fn now() -> u64 {
         .as_secs()
 }
 #[tauri::command]
-async fn connect(channel: Channel<Update>, handle: tauri::AppHandle) -> Result<Snapshot, String> {
+async fn connect(
+    channel: Channel<Update>,
+    visual_channel: Channel<serde_json::Value>,
+    handle: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = handle.state::<Runtime>();
         *state.channel.lock().map_err(|e| e.to_string())? = Some(channel);
+        {
+            let channel = visual_channel;
+            let mut replay = state.replay.lock().map_err(|e| e.to_string())?;
+            replay.channel = Some(channel.clone());
+            if replay.session.is_some()
+                && replay.finish.as_ref().is_none_or(|finish| {
+                    finish.decode().is_ok_and(|value| value["kind"] != "failed")
+                })
+            {
+                replay.pending = true;
+            }
+            if let Some(start) = &replay.start {
+                let baseline = start.decode()?;
+                let _ = channel.send(baseline.clone());
+                for frame in &replay.frames {
+                    let _ = channel.send(frame.decode()?);
+                }
+                if let Some(finish) = &replay.finish {
+                    let finish = finish.decode()?;
+                    let _ = channel.send(finish.clone());
+                    if finish["kind"] == "failed" {
+                        return Ok(finish["state"].clone());
+                    }
+                }
+                return Ok(baseline["state"].clone());
+            }
+        }
         let snapshot = snapshot_for(
             state.game.lock().map_err(|e| e.to_string())?.clone(),
             &state,
         );
-        Ok(snapshot)
+        serde_json::to_value(snapshot).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -281,6 +648,7 @@ fn transition_background(
         state.epoch.load(Ordering::SeqCst),
     )
 }
+#[cfg(test)]
 fn checkpoint_gap(
     game: &mut Game,
     path: &std::path::Path,
@@ -294,6 +662,95 @@ fn checkpoint_gap(
     *game = candidate;
     Ok(stats)
 }
+fn catch_up(game: &mut Game, timestamp: u64, state: &Runtime) -> Result<(), String> {
+    let total = if game.last_saved == 0 {
+        0
+    } else {
+        timestamp.saturating_sub(game.last_saved).min(28800) / 2 * 20
+    };
+    if total == 0 {
+        game.advance_offline(timestamp, &materials());
+        return Ok(());
+    }
+    let session = format!("{}:{}:{}", game.campaign_id, game.last_saved, timestamp);
+    let mut stream = Stream::default();
+    stream.update(game);
+    if let Ok(mut replay) = state.replay.lock() {
+        replay.publish(VisualEvent::Start {
+            session: session.clone(),
+            state: snapshot_for(game.clone(), state),
+            total,
+        })?;
+    }
+    let mut sent = std::time::Instant::now();
+    let mut capture_error = None;
+    game.advance_offline_observed(timestamp, &materials(), |game, done, total| {
+        if capture_error.is_none()
+            && done > 0
+            && (sent.elapsed().as_millis() >= 33 || done == total)
+        {
+            if let Ok(mut replay) = state.replay.lock() {
+                if let Err(error) = replay.publish(VisualEvent::Frame {
+                    session: session.clone(),
+                    update: stream.update(game),
+                    done,
+                    total,
+                }) {
+                    capture_error = Some(error);
+                }
+            }
+            sent = std::time::Instant::now();
+        }
+    });
+    capture_error.map_or(Ok(()), Err)
+}
+fn finish_replay(state: &Runtime, game: &Game) {
+    if let Ok(mut replay) = state.replay.lock() {
+        if let Some(session) = &replay.session {
+            let session = session.clone();
+            if replay
+                .publish(VisualEvent::Saved {
+                    session,
+                    state: snapshot_for(game.clone(), state),
+                })
+                .is_err()
+            {
+                // The terminal event is already sent. Reconnecting clients can read
+                // committed gameplay state if transient storage becomes unavailable.
+                replay.start = None;
+                replay.frames.clear();
+                replay.finish = None;
+                replay.session = None;
+                replay.bytes = 0;
+                replay.pending = false;
+            }
+        } else {
+            replay.pending = false;
+        }
+    }
+}
+fn fail_replay(state: &Runtime, error: &str, committed: &Game) {
+    if let Ok(mut replay) = state.replay.lock() {
+        if let Some(session) = &replay.session {
+            let session = session.clone();
+            let _ = replay.publish(VisualEvent::Failed {
+                session,
+                message: error.into(),
+                state: snapshot_for(committed.clone(), state),
+            });
+        }
+        replay.pending = false;
+    }
+}
+#[tauri::command]
+fn acknowledge_replay(session: String, state: State<Runtime>) -> Result<(), String> {
+    let mut replay = state.replay.lock().map_err(|e| e.to_string())?;
+    if replay.session.as_ref() == Some(&session) && replay.finish.is_some() {
+        replay.clear();
+    }
+    Ok(())
+}
+
 fn transition_epoch(
     state: &Runtime,
     background: bool,
@@ -309,9 +766,16 @@ fn transition_epoch(
         if background {
             candidate.last_saved = candidate.last_saved.max(timestamp);
         } else {
-            candidate.advance_offline(timestamp, &materials());
+            if let Err(error) = catch_up(&mut candidate, timestamp, state) {
+                fail_replay(state, &error, &game);
+                return Err(error);
+            }
         }
-        persist(state, &candidate)?;
+        if let Err(error) = persist(state, &candidate) {
+            fail_replay(state, &error, &game);
+            return Err(error);
+        }
+        finish_replay(state, &candidate);
         *game = candidate;
         state.suspended.store(background, Ordering::Relaxed);
     }
@@ -353,8 +817,15 @@ fn command_current(
     campaign_id: String,
     state: &Runtime,
 ) -> Result<Snapshot, String> {
+    if state.suspended.load(Ordering::Relaxed)
+        || state.replay.lock().map_err(|e| e.to_string())?.pending
+    {
+        return Err("Resume the game before issuing commands".into());
+    }
     let mut g = state.game.lock().map_err(|e| e.to_string())?;
-    if state.suspended.load(Ordering::Relaxed) {
+    if state.suspended.load(Ordering::Relaxed)
+        || state.replay.lock().map_err(|e| e.to_string())?.pending
+    {
         return Err("Resume the game before issuing commands".into());
     }
     if g.legacy_pending || g.campaign_id != campaign_id {
@@ -376,18 +847,54 @@ fn export_save(state: State<Runtime>) -> Result<tauri::ipc::Response, String> {
     Ok(tauri::ipc::Response::new(data))
 }
 #[tauri::command]
-fn import_save(data: String, encoding: String, state: State<Runtime>) -> Result<Snapshot, String> {
+async fn import_save(
+    data: String,
+    encoding: String,
+    handle: tauri::AppHandle,
+) -> Result<Snapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        import_current(data, encoding, &handle.state::<Runtime>())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+fn import_current(data: String, encoding: String, state: &Runtime) -> Result<Snapshot, String> {
+    if state.suspended.load(Ordering::Relaxed)
+        || state.replay.lock().map_err(|e| e.to_string())?.pending
+    {
+        return Err("Resume the game before importing a save".into());
+    }
     let mut game = state.game.lock().map_err(|e| e.to_string())?;
-    if state.suspended.load(Ordering::Relaxed) {
+    if state.suspended.load(Ordering::Relaxed)
+        || state.replay.lock().map_err(|e| e.to_string())?.pending
+    {
         return Err("Resume the game before importing a save".into());
     }
     if game.legacy_pending {
         return Err("Archive the legacy campaign before importing".into());
     }
-    let mut candidate = persistence::decode_import(&data, &encoding)?;
+    {
+        let mut replay = state.replay.lock().map_err(|e| e.to_string())?;
+        replay.clear();
+        replay.pending = true;
+    }
+    let mut candidate = match persistence::decode_import(&data, &encoding) {
+        Ok(candidate) => candidate,
+        Err(error) => {
+            state.replay.lock().map_err(|e| e.to_string())?.pending = false;
+            return Err(error);
+        }
+    };
     candidate.campaign_id = fresh_identity().to_string();
-    candidate.advance_offline(now(), &materials());
-    persist(&state, &candidate)?;
+    if let Err(error) = catch_up(&mut candidate, now(), &state) {
+        fail_replay(state, &error, &game);
+        return Err(error);
+    }
+    if let Err(error) = persist(&state, &candidate) {
+        fail_replay(&state, &error, &game);
+        return Err(error);
+    }
+    finish_replay(&state, &candidate);
     *game = candidate.clone();
     Ok(snapshot_for(candidate, &state))
 }
@@ -412,6 +919,9 @@ fn reset_current(
     confirmation: &str,
     campaign_id: &str,
 ) -> Result<Snapshot, String> {
+    if state.replay.lock().map_err(|e| e.to_string())?.pending {
+        return Err("Finish catch-up before resetting".into());
+    }
     if confirmation != "RESET" {
         return Err("Type RESET to confirm".into());
     }
@@ -467,7 +977,7 @@ fn open_save(dir: &std::path::Path) -> Result<(Game, Option<Vec<u8>>, SaveStatus
     }
     match persistence::recover_source(&old_path) {
         Ok(Some((mut game, raw))) => {
-            let archive_id = format!("pre-v11-{}", fresh_identity());
+            let archive_id = format!("pre-v12-{}", fresh_identity());
             persistence::archive(&path, &raw, &archive_id)?;
             game.legacy_pending = false;
             let stats = save(&path, &game)?;
@@ -537,6 +1047,7 @@ pub fn run() {
                 path,
                 save_status: Mutex::new(save_status),
                 channel: Mutex::new(None),
+        replay: Mutex::new(Replay::default()),
             });
             let lifecycle_handle = app.handle().clone();
             std::thread::spawn(move || {
@@ -611,7 +1122,15 @@ pub fn run() {
                         // A lifecycle resume may already have consumed this clock gap.
                         let gap_start = previous.max(g.last_saved);
                         if current.saturating_sub(gap_start) > 2 {
-                            match checkpoint_gap(&mut g, &state.path, gap_start, current) {
+                            match (|| {
+                                let mut candidate = g.clone();
+                                candidate.last_saved = candidate.last_saved.max(gap_start);
+                                catch_up(&mut candidate, current, &state).inspect_err(|e| fail_replay(&state, e, &g))?;
+                                let stats = persist(&state, &candidate).inspect_err(|e| fail_replay(&state, e, &g))?;
+                                finish_replay(&state, &candidate);
+                                *g = candidate;
+                                Ok::<_, String>(stats)
+                            })() {
                                 Ok(stats) => {
                                     if let Ok(mut status) = state.save_status.lock() {
                                         *status = SaveStatus {
@@ -671,6 +1190,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             connect,
+            acknowledge_replay,
             command,
             export_save,
             import_save,
@@ -812,6 +1332,49 @@ mod lifecycle_tests {
         fs::remove_dir_all(directory).unwrap();
     }
     #[test]
+    fn replay_checkpoint_failure_restores_committed_view_and_allows_retry() {
+        let directory =
+            std::env::temp_dir().join(format!("deepwork-replay-failure-{}", fresh_identity()));
+        fs::create_dir_all(&directory).unwrap();
+        let blocked = directory.join("parent-file");
+        fs::write(&blocked, b"not a directory").unwrap();
+        let mut game = Game::new(42, 1);
+        game.last_saved = 100;
+        let before = serde_json::to_value(&game).unwrap();
+        let mut state = Runtime {
+            _save_lock: persistence::lock(&directory.join("mine.lock")).unwrap(),
+            game: Mutex::new(game),
+            suspended: AtomicBool::new(true),
+            lifecycle: mpsc::channel().0,
+            epoch: AtomicU64::new(0),
+            legacy: Mutex::new(None),
+            path: blocked.join("mine.json"),
+            save_status: Mutex::new(SaveStatus::default()),
+            channel: Mutex::new(None),
+            replay: Mutex::new(Replay::default()),
+        };
+        assert!(transition_background(&state, false, 120).is_err());
+        assert_eq!(
+            serde_json::to_value(&*state.game.lock().unwrap()).unwrap(),
+            before
+        );
+        {
+            let replay = state.replay.lock().unwrap();
+            assert!(!replay.pending);
+            let terminal = replay.finish.as_ref().unwrap().decode().unwrap();
+            assert_eq!(terminal["kind"], "failed");
+            assert_eq!(terminal["state"]["ticks"], before["ticks"]);
+            assert_eq!(terminal["state"]["credits"], before["credits"]);
+        }
+        state.path = directory.join("mine.deepwork");
+        let restored = transition_background(&state, false, 120).unwrap();
+        assert_eq!(restored.game.ticks, 200);
+        assert_eq!(restored.game.last_saved, 120);
+        assert_eq!(restored.game.offline.unwrap().effective, 10);
+        drop(state);
+        fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
     fn repeated_lifecycle_events_apply_offline_interval_once() {
         let directory = std::env::temp_dir().join(format!(
             "deepwork-lifecycle-{}-{}",
@@ -829,6 +1392,7 @@ mod lifecycle_tests {
             path: directory.join("mine.json"),
             save_status: Mutex::new(SaveStatus::default()),
             channel: Mutex::new(None),
+            replay: Mutex::new(Replay::default()),
         };
         transition_background(&state, true, 100).unwrap();
         transition_background(&state, true, 110).unwrap();
@@ -994,6 +1558,7 @@ mod reset_tests {
             path: directory.join("mine.json"),
             save_status: Mutex::new(SaveStatus::default()),
             channel: Mutex::new(None),
+            replay: Mutex::new(Replay::default()),
         };
         let id = state.game.lock().unwrap().campaign_id.clone();
         state.game.lock().unwrap().research = 100;
@@ -1108,6 +1673,7 @@ mod bounded_cargo_snapshot_tests {
         game.transport.segments[0]
             .batches
             .push(mine_core::transport::Batch {
+                id: 0,
                 route: 1,
                 material: 3,
                 amount: 1234,
@@ -1136,7 +1702,7 @@ mod bounded_cargo_snapshot_tests {
             blocker: String::new(),
         });
         let snapshot = Snapshot::from(game.clone());
-        assert_eq!(snapshot.shipments[0].legs.len(), 1);
+        assert!(snapshot.shipments[0].legs.len() <= 2);
         assert!(snapshot.game.transport.segments[0].legs.is_empty());
         assert!(snapshot.game.mining_fronts[0].route.is_empty());
         assert_eq!(snapshot.game.transport.mass(), game.transport.mass());

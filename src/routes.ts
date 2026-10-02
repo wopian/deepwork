@@ -29,6 +29,7 @@ export interface CargoLeg {
   to: [number, number];
   mode: string;
   milliseconds: number;
+  speed?: number;
 }
 export function cargoPosition(
   legs: CargoLeg[],

@@ -73,6 +73,8 @@ fn take(lots: &mut Vec<RoutedCargo>, material: usize, mut amount: u64) -> Vec<Ro
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Batch {
     #[serde(default)]
+    pub id: u64,
+    #[serde(default)]
     pub route: u64,
     pub material: usize,
     pub amount: u64,
@@ -115,9 +117,15 @@ pub struct Network {
     pub stations: Vec<Station>,
     pub segments: Vec<Segment>,
     pub express: usize,
+    #[serde(default)]
+    pub next_batch: u64,
 }
 #[derive(Clone, Serialize)]
 pub struct VisualCargo {
+    pub id: String,
+    pub route: u64,
+    pub elapsed_ms: i64,
+    pub speed: f64,
     pub material: usize,
     pub amount: u64,
     pub remaining: f64,
@@ -184,10 +192,28 @@ impl Default for Network {
             stations,
             segments,
             express: 0,
+            next_batch: 0,
         }
     }
 }
 impl Network {
+    pub fn initialise_batch_ids(&mut self) {
+        self.next_batch = self.next_batch.max(
+            self.segments
+                .iter()
+                .flat_map(|s| &s.batches)
+                .map(|b| b.id)
+                .max()
+                .unwrap_or(0),
+        );
+        for batch in self.segments.iter_mut().flat_map(|s| &mut s.batches) {
+            if batch.id == 0 {
+                self.next_batch += 1;
+                batch.id = self.next_batch;
+            }
+        }
+    }
+
     pub fn configure(&mut self, legs: &[Leg], rate: u64, global_capacity: u32) {
         for (i, station) in self.stations.iter_mut().enumerate() {
             let seconds = [20, 30, 30, 30, 60][i];
@@ -371,6 +397,11 @@ impl Network {
                 }
                 let elapsed = elapsed.min(leg.milliseconds);
                 VisualCargo {
+                    id: b.id.to_string(),
+                    route: b.route,
+                    elapsed_ms: elapsed as i64
+                        - LOADING_MS.saturating_sub(b.duration_ms - b.remaining_ms) as i64,
+                    speed: 1.,
                     material: b.material,
                     amount: b.amount,
                     remaining: (leg.milliseconds - elapsed) as f64 / 1000.,
@@ -379,7 +410,12 @@ impl Network {
                     mode: leg.mode.clone(),
                     depth: crate::geometry::depth(leg.from[1].max(0) as i64),
                     path: vec![],
-                    legs: vec![leg.clone()],
+                    legs: legs
+                        .iter()
+                        .skip_while(|l| *l != leg)
+                        .take(2)
+                        .cloned()
+                        .collect(),
                 }
             })
             .collect()
@@ -542,7 +578,9 @@ impl Network {
                     }) {
                         batch.amount += lot.amount;
                     } else if segment.batches.len() < 512 {
+                        self.next_batch += 1;
                         segment.batches.push(Batch {
+                            id: self.next_batch,
                             route: lot.route,
                             material: id,
                             amount: lot.amount,
@@ -953,6 +991,7 @@ mod tests {
             route: 29,
         });
         network.segments[2].batches.push(Batch {
+            id: 0,
             route: 29,
             material: 3,
             amount: 100,
@@ -1117,6 +1156,7 @@ mod tests {
         n.express = 2;
         for s in &mut n.segments {
             s.batches.push(Batch {
+                id: 0,
                 route: 0,
                 material: 0,
                 amount: UNITS,
@@ -1215,6 +1255,7 @@ mod visual_payload_tests {
             .insert(1, vec![legs.clone(), Vec::new(), Vec::new(), Vec::new()]);
         network.current_route = 1;
         network.segments[0].batches.push(Batch {
+            id: 0,
             route: 1,
             material: 3,
             amount: 1234,
@@ -1233,7 +1274,7 @@ mod visual_payload_tests {
             let before = serde_json::to_value(&network).unwrap();
             let visual = network.visual();
             assert_eq!(visual.len(), 1);
-            assert!(visual[0].legs == vec![legs[index].clone()]);
+            assert!(visual[0].legs == legs.iter().skip(index).take(2).cloned().collect::<Vec<_>>());
             assert!((visual[0].duration - visual[0].remaining - 1. - elapsed).abs() < 1e-9);
             assert_eq!(visual[0].amount, 1234);
             assert_eq!(serde_json::to_value(&network).unwrap(), before);

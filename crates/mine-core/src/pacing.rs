@@ -10,6 +10,7 @@ pub struct StartingEquipment {
 pub struct Pacing {
     pub starting_credits: u64,
     pub costs: BTreeMap<String, u64>,
+    pub rebuild_costs: BTreeMap<String, u64>,
     pub headquarters_starting: BTreeMap<String, Vec<StartingEquipment>>,
     pub worker_growth: f64,
     pub machine_growth: f64,
@@ -57,6 +58,9 @@ pub fn validate() -> Result<(), String> {
         .iter()
         .any(|u| !p.costs.contains_key(&u.id))
         || p.costs.values().any(|&v| v == 0 || v > 1_000_000_000)
+        || p.rebuild_costs
+            .iter()
+            .any(|(id, &cost)| cost == 0 || p.costs.get(id).is_none_or(|&original| cost > original))
         || [p.worker_growth, p.machine_growth, p.capacity_growth]
             .iter()
             .any(|v| !v.is_finite() || !(1. ..=2.).contains(v))

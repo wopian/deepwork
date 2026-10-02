@@ -172,7 +172,7 @@ pub fn decode(raw: &str) -> Result<Game, String> {
     }
     let mut header: serde_json::Value = serde_json::from_str(raw).map_err(|e| e.to_string())?;
     let version = header.get("version").and_then(|v| v.as_u64());
-    if version != Some(10) && version != Some(11) {
+    if version != Some(10) && version != Some(11) && version != Some(12) {
         return Err(format!(
             "Unsupported save version {version:?}; archive and start a fresh campaign"
         ));
@@ -499,7 +499,7 @@ pub fn incompatible_source(path: &Path) -> Result<Option<Vec<u8>>, String> {
         let Some(version) = header.get("version").and_then(|v| v.as_u64()) else {
             continue;
         };
-        if !matches!(version, 10 | 11) {
+        if !matches!(version, 10 | 11 | 12) {
             return Ok(Some(raw));
         }
         if decode_bytes(&raw).is_ok() {
