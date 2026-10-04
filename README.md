@@ -33,8 +33,9 @@ The unpackaged Windows executable is `target/debug/deepwork.exe`. Browser-only V
 - 56 mineral feeds, colour-coded field guide, refined products, optional manufacturing and separation recipes.
 - Explicit alumina/electrolysis path, abstract mass-conserving recipe units, steel and component production.
 - Contracts, resource reserves, pausable processing recipes, power throttling, recovery, authored headquarters equipment, retirement and megaproject delivery.
-- Capped half-rate offline simulation, per-return reports, compact atomic saves, archived campaign reset and stale-command protection. Cooldown powers have been removed.
-- Persistent Pixi mine viewport, desktop context panels, mobile bottom sheets, anchored pinch/wheel zoom, touch ore inspection and reduced motion.
+- Capped half-rate idle progression uses bulk ore accounting and excavation replay. Crew travel, construction, power and capacity still constrain production. Per-return reports, compact atomic saves, archived campaign reset and stale-command protection remain.
+- Warm industrial pixel art, persistent Pixi mine viewport, five-action HUD, desktop drawers, mobile bottom sheets, anchored pinch/wheel zoom, touch ore inspection and reduced motion.
+- Optional campaign guidance follows pinned equipment and authored prerequisites. Goal controls reveal matching upgrades; committed discoveries receive brief notices without replay spoilers.
 - Processing telemetry names ore and refined outputs, shows actual throughput and recovery, and uses the same reservation calculation as dispatch.
 - Bun-only toolchain, Rust accounting tests and Windows CI.
 
@@ -130,3 +131,5 @@ scripts\android-test.cmd C:\path\to\output
 ```
 
 This builds ARM64 assets with Windows Bun 1.4.0, signs with the local Android test key, and verifies the APK signature and ZIP alignment. Packaging checks do not establish touch performance or lifecycle behaviour on physical Android hardware.
+
+Visual design and focused native acceptance are documented in [visual design](docs/visual-design.md). A playable Poki build still needs a browser simulation/persistence bridge and SDK integration.

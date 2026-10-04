@@ -367,6 +367,230 @@ impl Network {
                 .map(|b| b.amount)
                 .sum::<u64>()
     }
+    /// Idle hauling uses finite flow budgets, without spawning or moving cargo actors.
+    /// Existing transit ownership drains first. Remaining batches keep their identities.
+    pub fn advance_bulk(
+        &mut self,
+        tick: u64,
+        ticks: u64,
+        ore: &mut BTreeMap<usize, u64>,
+        output: &mut BTreeMap<usize, u64>,
+        output_cap: u64,
+        preferred: &[usize],
+        global_priority: bool,
+        power_permille: u64,
+    ) -> u64 {
+        let terminal = self.stations.len() - 1;
+        for (&id, &q) in ore.iter().filter(|(_, q)| **q > 0) {
+            let tracked: u64 = self
+                .source
+                .iter()
+                .filter(|l| l.material == id)
+                .map(|l| l.amount)
+                .sum();
+            if q > tracked {
+                put(&mut self.source, id, q - tracked, self.current_route);
+            }
+        }
+        for station in self.stations.iter_mut().take(terminal) {
+            for (&id, &q) in &station.cargo {
+                let tracked: u64 = station
+                    .routing
+                    .iter()
+                    .filter(|l| l.material == id)
+                    .map(|l| l.amount)
+                    .sum();
+                if q > tracked {
+                    put(&mut station.routing, id, q - tracked, self.current_route);
+                }
+            }
+        }
+        for station in &mut self.stations {
+            station.incoming = 0;
+            station.outgoing = 0;
+        }
+        let mut budgets: Vec<_> = self
+            .segments
+            .iter()
+            .map(|s| {
+                // Transit capacity still bounds sustained throughput over one loading/travel cycle.
+                let rate = s
+                    .rate
+                    .min(s.capacity.saturating_mul(1000) / s.duration_ms.max(1) as u64);
+                rate.saturating_mul(ticks) / 20
+            })
+            .collect();
+        let mut powered_budgets: Vec<_> = budgets
+            .iter()
+            .map(|n| n.saturating_mul(power_permille) / 1000)
+            .collect();
+        self.drain_intake(output, output_cap);
+        // Release cargo already in transit using flow budgets, without advancing leg clocks.
+        for index in (0..self.segments.len()).rev() {
+            let station = &mut self.stations[index + 1];
+            let mut room = station.capacity.saturating_sub(station.stored());
+            let segment = &mut self.segments[index];
+            for batch in &mut segment.batches {
+                let powered = self
+                    .routes
+                    .get(&batch.route)
+                    .and_then(|r| r.get(index))
+                    .is_some_and(|legs| {
+                        legs.iter()
+                            .any(|l| matches!(l.mode.as_str(), "lift" | "train"))
+                    });
+                if powered && power_permille == 0 {
+                    continue;
+                }
+                let amount = batch.amount.min(room).min(budgets[index]).min(if powered {
+                    powered_budgets[index]
+                } else {
+                    u64::MAX
+                });
+                batch.amount -= amount;
+                room -= amount;
+                budgets[index] -= amount;
+                if powered {
+                    powered_budgets[index] -= amount;
+                }
+                *station.cargo.entry(batch.material).or_default() += amount;
+                station.incoming += amount;
+                if index + 1 < terminal {
+                    put(&mut station.routing, batch.material, amount, batch.route);
+                }
+            }
+            segment.batches.retain(|b| b.amount > 0);
+        }
+        self.drain_intake(output, output_cap);
+        let mut room = self.stations[0]
+            .capacity
+            .saturating_sub(self.stations[0].stored());
+        let initial = room;
+        let mut ids: Vec<_> = ore
+            .iter()
+            .filter(|(_, q)| **q > 0)
+            .map(|(&id, _)| id)
+            .collect();
+        order_cargo(
+            &mut ids,
+            tick / 20,
+            preferred,
+            global_priority || self.stations[0].preferred,
+        );
+        for id in ids {
+            let q = ore.get_mut(&id).unwrap();
+            let amount = (*q).min(room);
+            *q -= amount;
+            room -= amount;
+            *self.stations[0].cargo.entry(id).or_default() += amount;
+            self.stations[0].incoming += amount;
+            for lot in take(&mut self.source, id, amount) {
+                put(&mut self.stations[0].routing, id, lot.amount, lot.route);
+            }
+        }
+        // Fluid flow can cross several stations in one interval. Each stage spends its budget once.
+        for (index, budget) in budgets.iter_mut().enumerate() {
+            let (upstream, downstream) = self.stations.split_at_mut(index + 1);
+            let source = &mut upstream[index];
+            let destination = &mut downstream[0];
+            let mut space = destination.capacity.saturating_sub(destination.stored());
+            let mut ids: Vec<_> = source
+                .cargo
+                .iter()
+                .filter(|(_, q)| **q > 0)
+                .map(|(&id, _)| id)
+                .collect();
+            order_cargo(
+                &mut ids,
+                tick,
+                preferred,
+                global_priority || source.preferred,
+            );
+            let before = *budget;
+            let mut power_blocked = false;
+            for id in ids {
+                // Retain blocked route lots even when another route remains usable.
+                for lot in source.routing.iter_mut().filter(|l| l.material == id) {
+                    let powered = self
+                        .routes
+                        .get(&lot.route)
+                        .and_then(|r| r.get(index))
+                        .is_some_and(|legs| {
+                            legs.iter()
+                                .any(|l| matches!(l.mode.as_str(), "lift" | "train"))
+                        });
+                    if powered && power_permille == 0 {
+                        power_blocked = true;
+                        continue;
+                    }
+                    let amount = lot.amount.min(*budget).min(space).min(if powered {
+                        powered_budgets[index]
+                    } else {
+                        u64::MAX
+                    });
+                    if powered {
+                        powered_budgets[index] -= amount;
+                    }
+                    lot.amount -= amount;
+                    *source.cargo.get_mut(&id).unwrap() -= amount;
+                    *destination.cargo.entry(id).or_default() += amount;
+                    if index + 1 < terminal {
+                        put(&mut destination.routing, id, amount, lot.route);
+                    }
+                    *budget -= amount;
+                    space -= amount;
+                }
+            }
+            source.routing.retain(|l| l.amount > 0);
+            source.outgoing += before - *budget;
+            destination.incoming += before - *budget;
+            let segment = &mut self.segments[index];
+            segment.blocked = source.stored() > 0 && (space == 0 || power_blocked);
+            segment.blocker = if space == 0 {
+                "Destination buffer full"
+            } else if segment.blocked {
+                "Power supply limited"
+            } else {
+                ""
+            }
+            .into();
+            segment.utilisation = if before == 0 {
+                0.
+            } else {
+                (before - *budget) as f64 / before as f64
+            };
+        }
+        self.drain_intake(output, output_cap);
+        self.retain_used_routes();
+        initial - room
+    }
+    fn drain_intake(&mut self, output: &mut BTreeMap<usize, u64>, cap: u64) {
+        let destination = self.stations.last_mut().unwrap();
+        let mut room = cap.saturating_sub(output.values().sum());
+        for (&id, q) in &mut destination.cargo {
+            let amount = (*q).min(room);
+            *q -= amount;
+            *output.entry(id).or_default() += amount;
+            room -= amount;
+            destination.outgoing += amount;
+        }
+    }
+    fn retain_used_routes(&mut self) {
+        let mut used: BTreeSet<_> = self.source.iter().map(|l| l.route).collect();
+        used.insert(self.current_route);
+        used.extend(
+            self.stations
+                .iter()
+                .flat_map(|s| s.routing.iter().map(|l| l.route)),
+        );
+        used.extend(
+            self.segments
+                .iter()
+                .flat_map(|s| s.batches.iter().map(|b| b.route)),
+        );
+        used.extend(self.protected_routes.iter().copied());
+        self.routes.retain(|id, _| used.contains(id));
+    }
     pub fn visual(&self) -> Vec<VisualCargo> {
         self.segments
             .iter()
@@ -1279,5 +1503,131 @@ mod visual_payload_tests {
             assert_eq!(visual[0].amount, 1234);
             assert_eq!(serde_json::to_value(&network).unwrap(), before);
         }
+    }
+}
+
+#[cfg(test)]
+mod idle_flow_tests {
+    use super::*;
+    #[test]
+    fn old_powered_route_remains_limited_after_current_route_changes() {
+        let mut network = Network::default();
+        network.configure(
+            &[Leg {
+                from: [256, 40],
+                to: [256, 0],
+                mode: "lift".into(),
+                milliseconds: 2000,
+            }],
+            UNITS,
+            0,
+        );
+        let powered = network.current_route;
+        network.stations[2].cargo.insert(3, UNITS);
+        put(&mut network.stations[2].routing, 3, UNITS, powered);
+        network.configure(&[], UNITS, 0);
+        network.stations[2].cargo.insert(4, UNITS);
+        put(
+            &mut network.stations[2].routing,
+            4,
+            UNITS,
+            network.current_route,
+        );
+        let mut output = BTreeMap::new();
+        network.advance_bulk(
+            20,
+            20,
+            &mut BTreeMap::new(),
+            &mut output,
+            2 * UNITS,
+            &[],
+            false,
+            0,
+        );
+        assert_eq!(network.stations[2].cargo[&3], UNITS);
+        assert_eq!(output[&4], UNITS);
+        network.advance_bulk(
+            40,
+            20,
+            &mut BTreeMap::new(),
+            &mut output,
+            2 * UNITS,
+            &[],
+            false,
+            250,
+        );
+        assert_eq!(output[&3], UNITS / 4);
+        assert_eq!(network.mass() + output.values().sum::<u64>(), 2 * UNITS);
+    }
+    #[test]
+    fn bulk_flow_obeys_slowest_stage_without_creating_batches_or_mass() {
+        let mut network = Network::default();
+        network.configure(&[], 4 * UNITS, 0);
+        network.segments[2].rate = UNITS;
+        let mut ore = BTreeMap::from([(3, 100 * UNITS)]);
+        let mut output = BTreeMap::new();
+        network.advance_bulk(20, 20, &mut ore, &mut output, 100 * UNITS, &[], false, 1000);
+        assert_eq!(output[&3], UNITS);
+        assert_eq!(network.next_batch, 0);
+        assert!(network.segments.iter().all(|s| s.batches.is_empty()));
+        assert_eq!(
+            ore.values().sum::<u64>() + output.values().sum::<u64>() + network.mass(),
+            100 * UNITS
+        );
+        assert!(network.sources_match(&ore));
+    }
+    #[test]
+    fn power_loss_and_full_intake_keep_existing_cargo_identity_and_clocks() {
+        let mut network = Network::default();
+        network.configure(
+            &[Leg {
+                from: [256, 40],
+                to: [256, 0],
+                mode: "lift".into(),
+                milliseconds: 2000,
+            }],
+            UNITS,
+            0,
+        );
+        network.segments[2].batches.push(Batch {
+            id: 7,
+            route: network.current_route,
+            material: 3,
+            amount: UNITS,
+            remaining_ms: 1500,
+            duration_ms: 3000,
+        });
+        network.next_batch = 7;
+        let mut ore = BTreeMap::new();
+        let mut output = BTreeMap::new();
+        network.advance_bulk(20, 20, &mut ore, &mut output, 0, &[], false, 0);
+        let batch = &network.segments[2].batches[0];
+        assert_eq!(
+            (batch.id, batch.amount, batch.remaining_ms),
+            (7, UNITS, 1500)
+        );
+        assert_eq!(network.mass(), UNITS);
+        network.advance_bulk(40, 20, &mut ore, &mut output, UNITS, &[], false, 1000);
+        assert_eq!(output[&3], UNITS);
+        assert_eq!(network.mass(), 0);
+        assert_eq!(network.next_batch, 7);
+    }
+    #[test]
+    fn finite_buffers_stop_idle_intake_without_losing_route_ownership() {
+        let mut network = Network::default();
+        network.configure(&[], UNITS, 0);
+        for station in &mut network.stations {
+            station.capacity = UNITS;
+        }
+        let mut ore = BTreeMap::from([(3, 20 * UNITS)]);
+        let mut output = BTreeMap::new();
+        for second in 1..=10 {
+            network.advance_bulk(second * 20, 20, &mut ore, &mut output, 0, &[], false, 1000);
+        }
+        assert!(ore[&3] > 0);
+        assert!(network.stations.iter().all(|s| s.stored() <= s.capacity));
+        assert!(network.segments.iter().any(|s| s.blocked));
+        assert!(network.sources_match(&ore));
+        assert_eq!(ore[&3] + network.mass(), 20 * UNITS);
     }
 }

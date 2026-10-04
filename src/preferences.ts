@@ -1,4 +1,5 @@
 import { reactive, watch } from "vue";
+import { readPreferences, writePreferences } from "./preference-storage";
 const defaults = {
   surveyOverlay: false,
   reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches,
@@ -8,15 +9,28 @@ const defaults = {
   uiScale: 1,
   quality: "auto",
   numbers: "compact",
+  guidance: true,
+  tutorialDismissed: false,
 };
-let saved = {};
+let saved: Partial<typeof defaults> = {};
 try {
-  saved = JSON.parse(localStorage.getItem("deepwork-preferences") ?? "{}");
+  const data = readPreferences(localStorage);
+  for (const key of Object.keys(defaults) as (keyof typeof defaults)[]) {
+    if (typeof data[key] === typeof defaults[key])
+      Object.assign(saved, { [key]: data[key] });
+  }
 } catch {}
-export const preferences = reactive({ ...defaults, ...saved });
+const restored = { ...defaults, ...saved };
+if (![1, 1.15, 1.3].includes(restored.uiScale))
+  restored.uiScale = defaults.uiScale;
+export const preferences = reactive(restored);
 watch(
   preferences,
-  (p) => localStorage.setItem("deepwork-preferences", JSON.stringify(p)),
+  (p) => {
+    try {
+      writePreferences(localStorage, p);
+    } catch {}
+  },
   { deep: true },
 );
 let context: AudioContext | undefined;

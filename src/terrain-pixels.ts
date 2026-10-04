@@ -1,6 +1,12 @@
 import catalogue from "../content/materials.json";
 import { CHUNK } from "./geometry";
 const colours = catalogue.map((m) => Number.parseInt(m.color.slice(1), 16));
+export function hostRockColour(y: number) {
+  if (y < 32) return 0xc6a578;
+  if (y < 512) return 0x80634f;
+  if (y < 2048) return 0x736454;
+  return 0x586263;
+}
 /** Unknown geology remains host rock; excavation always takes precedence. */
 export function terrainPixels(
   mask: number[] | undefined,
@@ -28,33 +34,44 @@ export function terrainPixels(
       ? 0x101820
       : material !== 255 && material > 1
         ? colours[material]!
-        : y < 32
-          ? 0xd8bc7d
-          : 0x806044;
+        : hostRockColour(y);
     if (open) {
       colour = !neighbor(0, 1)
-        ? 0x394044
+        ? 0x56615b
         : !neighbor(0, -1)
-          ? 0x28313b
+          ? 0x344851
           : !neighbor(-1, 0) || !neighbor(1, 0)
-            ? 0x1b242e
-            : 0x101820;
+            ? 0x23333c
+            : 0x111c24;
     } else {
-      const noise =
-        ((Math.imul(x, 374761393) ^ Math.imul(y, 668265263)) >>> 0) % 13;
+      const hash = (Math.imul(x, 374761393) ^ Math.imul(y, 668265263)) >>> 0;
+      const noise = hash % 17;
       const mineral = material !== 255 && material > 1;
+      const family = mineral ? catalogue[material]?.family : "";
+      // Different mineral fabrics remain inside public ore cells. They never alter vein boundaries.
+      const fabric =
+        family === "sulfide" || family === "furnace"
+          ? (x + y * 2) % 7 === 0
+          : family === "industrial"
+            ? y % 5 === 0
+            : family === "physical"
+              ? (x - y) % 6 === 0
+              : (Math.floor(x / 2) + Math.floor(y / 3)) % 5 === 0;
+      const seam = (y + Math.floor(x / 24)) % 23 === 0;
       const delta = mineral
-        ? noise < 2
-          ? 22
-          : noise > 10
-            ? -16
-            : 0
-        : noise === 0
-          ? 8
-          : noise > 10
-            ? -8
-            : y % 17 === 0
-              ? -4
+        ? fabric
+          ? 24
+          : noise < 3
+            ? 10
+            : noise > 13
+              ? -22
+              : -5
+        : seam
+          ? -12
+          : noise === 0
+            ? 9
+            : noise > 13
+              ? -7
               : 0;
       const channel = (shift: number) =>
         Math.min(255, Math.max(0, ((colour >> shift) & 255) + delta));

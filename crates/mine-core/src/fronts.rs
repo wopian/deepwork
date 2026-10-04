@@ -559,19 +559,24 @@ pub fn next_face_versioned(
     {
         return Some(face);
     }
-    terrain
-        .ore_frontiers
-        .get(&front.material)?
-        .iter()
-        .map(|key| cell_point(*key))
-        .filter(matches)
-        .min_by_key(|face| {
-            (
-                face[0].abs_diff(front.face[0]) + face[1].abs_diff(front.face[1]),
-                face[1],
-                face[0],
-            )
-        })
+    let mut best = None;
+    for key in terrain.ore_frontiers.get(&front.material)? {
+        let face = cell_point(*key);
+        let rank = (
+            face[0].abs_diff(front.face[0]) + face[1].abs_diff(front.face[1]),
+            face[1],
+            face[0],
+        );
+        // A worse rank cannot replace the current face. Avoid geology and
+        // worker-clearance queries for those distant frontier cells.
+        if best.as_ref().is_some_and(|(saved, _)| *saved <= rank) {
+            continue;
+        }
+        if matches(&face) {
+            best = Some((rank, face));
+        }
+    }
+    best.map(|(_, face)| face)
 }
 
 pub fn valid(fronts: &[MiningFront], materials: usize, max_fronts: usize) -> bool {

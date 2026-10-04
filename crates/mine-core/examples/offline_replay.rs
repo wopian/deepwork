@@ -1,4 +1,4 @@
-//! Compare a real diagnostic save under offline advancement and exact fixed steps.
+//! Compare a real diagnostic save under offline advancement and sequential analytical seconds.
 use mine_core::{materials, Game};
 fn main() {
     let args: Vec<_> = std::env::args().collect();
@@ -17,8 +17,8 @@ fn main() {
     let offline_ms = started.elapsed().as_millis();
     let report = offline.offline.take().unwrap();
     let started = std::time::Instant::now();
-    for _ in 0..real_seconds.min(28_800) / 2 * 20 {
-        stepped.tick(materials(), true);
+    for _ in 0..real_seconds.min(28_800) / 2 {
+        stepped.second(materials(), true);
     }
     let stepped_ms = started.elapsed().as_millis();
     stepped.last_saved = offline.last_saved;
@@ -35,5 +35,8 @@ fn main() {
             "credits":report.credits, "excavated":report.excavated,
         })
     );
-    assert!(exact, "Offline advancement differs from exact fixed steps");
+    assert!(
+        exact,
+        "Offline advancement differs from sequential analytical seconds"
+    );
 }

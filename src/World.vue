@@ -18,6 +18,15 @@ import { motionPosition } from "./visual-timeline";
 import { inspectOre } from "./inspect";
 import { WasteParticles } from "./waste";
 import { TerrainView } from "./terrain-view";
+import GameIcon from "./GameIcon.vue";
+import { hostRockColour } from "./terrain-pixels";
+import {
+  campArt,
+  headframeArt,
+  plantArt,
+  workLight,
+  workerArt,
+} from "./mine-art";
 import {
   CELL_PIXEL,
   CELLS_PER_METRE,
@@ -84,7 +93,8 @@ let press: ScreenPoint | null = null;
 let moved = false;
 let offsetX = 0;
 let follow = false;
-let followCrew = false;
+const followCrew = ref(false);
+const cameraMenu = ref(false);
 let stopWatch: () => void = () => {};
 
 function rect(
@@ -110,7 +120,7 @@ function draw() {
     host.value.dataset.cameraZoom = String(zoom);
     host.value.dataset.cameraX = String(offsetX);
     host.value.dataset.cameraY = String(offsetY);
-    host.value.dataset.cameraFollow = String(follow || followCrew);
+    host.value.dataset.cameraFollow = String(follow || followCrew.value);
     host.value.dataset.cameraWidth = String(app.screen.width);
     host.value.dataset.cameraHeight = String(app.screen.height);
   }
@@ -182,7 +192,8 @@ function draw() {
             1,
             Math.ceil(8 * construction.support_progress),
           );
-          rect(structures, x, y - height, 1, height, 0xa67548);
+          rect(structures, x, y - height, 2, height, 0xa67548);
+          rect(structures, x, y - height, 1, height, 0xd8bc7d);
           if (construction.support_progress > 0.5)
             rect(structures, x - 3, y - 8, 7, 1, 0xa67548);
         }
@@ -247,7 +258,16 @@ function draw() {
             (workings.chambers?.[node.parent] ?? parent.feet[1] - 7) +
             1) *
           CELL_PIXEL;
-        if (node.column) rect(structures, x - 1, y - height, 1, height, color);
+        if (node.column) {
+          rect(structures, x - 1, y - height, 3, height, color);
+          rect(structures, x - 1, y - height, 1, height, 0xc0b38f);
+          rect(structures, x - 2, y - 1, 5, 1, 0x40525a);
+          if (height > 4)
+            structures
+              .moveTo(x + 1, y - height + 4)
+              .lineTo(x + 4, y - height + 1)
+              .stroke({ width: 1, color });
+        }
         structures
           .moveTo(px, py - parentHeight)
           .lineTo(x, y - height)
@@ -255,9 +275,7 @@ function draw() {
         if (node.column) {
           rect(structures, x - 2, y - height + 1, 4, 1, 0x513b32);
           rect(structures, x - 1, y - height + 2, 1, 1, 0xe8dfc8);
-          structures
-            .circle(x, y - height + 3, 7)
-            .fill({ color: 0xffd98b, alpha: 0.06 });
+          workLight(structures, x, y - height + 3);
         }
       }
     }
@@ -295,9 +313,32 @@ function draw() {
     }
   }
   terrain.clear();
-  rect(terrain, groundLeft, 190, W, (last + 5) * CELL_PIXEL, 0x806044);
-  rect(terrain, groundLeft, 188, W, 8, 0x6b8f47);
-  rect(terrain, groundLeft, 196, W, 12, 0xd8bc7d);
+  rect(
+    terrain,
+    groundLeft,
+    190,
+    W,
+    (last + 5) * CELL_PIXEL,
+    hostRockColour(first),
+  );
+  for (let band = Math.floor(first / 32) * 32; band <= last; band += 32) {
+    const y = SURFACE_Y + band * CELL_PIXEL;
+    rect(terrain, groundLeft, y, W, 32 * CELL_PIXEL, hostRockColour(band));
+    rect(terrain, groundLeft, y + 31, W, 1, 0x675a4b);
+    // Sparse host-rock cracks use global coordinates. No private ore information.
+    for (
+      let x = Math.floor(groundLeft / 72) * 72;
+      scale >= 0.5 && x < groundLeft + W;
+      x += 72
+    ) {
+      const shift = ((Math.imul(x, 17) ^ Math.imul(band, 31)) >>> 0) % 20;
+      rect(terrain, x + shift, y + 8, 8, 1, 0x766657);
+      rect(terrain, x + shift + 7, y + 9, 3, 1, 0x766657);
+    }
+  }
+  rect(terrain, groundLeft, 188, W, 4, 0x779569);
+  rect(terrain, groundLeft, 192, W, 4, 0x526b4e);
+  rect(terrain, groundLeft, 196, W, 12, 0xc6a578);
   fineTerrain.update(
     g?.terrain,
     first,
@@ -317,14 +358,7 @@ function draw() {
   for (let i = 0; i < 3; i++) {
     const x = 35 + i * 55;
     const floors = Math.min(4, 1 + Math.floor(Math.max(0, housing - 8) / 12));
-    for (let floor = 0; floor < floors; floor++) {
-      const y = 158 - floor * 15;
-      rect(terrain, x, y, 46, 30, 0xa67548);
-      rect(terrain, x - 3, y - 4, 52, 4, 0xe8dfc8);
-      for (let window = 0; window < 3; window++)
-        rect(terrain, x + 5 + window * 14, y + 5, 6, 6, 0x101820);
-    }
-    rect(terrain, x + 17, 172, 12, 16, 0x101820);
+    campArt(terrain, x, floors);
   }
   if (levels.conveyor) {
     rect(terrain, 213, 170, 478, 8, 0x8c9ba5);
@@ -337,16 +371,7 @@ function draw() {
       rect(terrain, 213, 167 - lane * 3, 478, 1, 0xe5a34d);
   }
   if (g || levels.shaft) {
-    const shaftX = SHAFT_WORLD_X;
-    rect(terrain, shaftX - 17, 130, 5, 70, 0x8c9ba5);
-    rect(terrain, shaftX + 12, 130, 5, 70, 0x8c9ba5);
-    rect(terrain, shaftX - 21, 126, 42, 6, 0x8c9ba5);
-    for (let y = 137; y < 164; y += 9)
-      rect(terrain, shaftX - 12, y, 24, 2, 0xa67548);
-    rect(terrain, shaftX - 5, 120, 10, 11, 0xe5a34d);
-    rect(terrain, shaftX - 1, 130, 2, 61, 0xe8dfc8);
-    for (let tier = 0; tier < Math.floor(levels.shaft / 10); tier++)
-      rect(terrain, shaftX + 22 + tier * 4, 149, 2, 40, 0x8c9ba5);
+    headframeArt(terrain, SHAFT_WORLD_X, Math.floor((levels.shaft ?? 0) / 10));
   }
   if (levels.minecart || levels.train) {
     rect(terrain, 685, 185, 33, 2, 0x8c9ba5);
@@ -386,27 +411,15 @@ function draw() {
     const height = 34 + modules.length * 6 + tier * 3;
     const x = hall.x,
       y = 188 - height;
-    rect(terrain, x, y, 51, height, 0x8c9ba5);
-    rect(terrain, x + 4, y + 4, 43, height - 8, 0x101820);
-    if (hall.kind === "heat") {
-      rect(terrain, x + 9, 168, 15, 15, levels.furnace ? 0xe5a34d : 0xa67548);
-      rect(terrain, x + 30, y - 20, 8, 24, 0x8c9ba5);
-      if (levels.steelworks) rect(terrain, x + 29, 159, 14, 23, 0xe5a34d);
-    } else if (hall.kind === "chemical") {
-      for (let tank = 0; tank < 3; tank++) {
-        rect(terrain, x + 8 + tank * 13, y + 14, 9, height - 21, 0xe8dfc8);
-        rect(terrain, x + 11 + tank * 13, y + 7, 3, 10, 0x8c9ba5);
-      }
-      rect(terrain, x + 11, y + 8, 29, 2, 0xe5a34d);
-    } else {
-      for (let column = 0; column < 3; column++)
-        for (let row = 0; row < 3; row++)
-          rect(terrain, x + 9 + column * 12, y + 12 + row * 10, 6, 6, 0xe5a34d);
-    }
-    for (let module = 0; module < modules.length; module++)
-      rect(terrain, x + 7 + module * 10, y + 3, 6, 3, 0xe8dfc8);
-    for (let badge = 0; badge < tier; badge++)
-      rect(terrain, x + 4 + badge * 9, 190, 5, 3, 0xe5a34d);
+    plantArt(
+      terrain,
+      x,
+      height,
+      hall.kind,
+      modules.length,
+      tier,
+      !!levels.furnace,
+    );
   }
   if (levels.reclaimer || levels.slagcrusher) {
     rect(terrain, 1009, 149, 42, 39, 0x8c9ba5);
@@ -505,17 +518,26 @@ onMounted(async () => {
     lastFrameTime = frameNow;
     t += preferences.reducedMotion ? 0 : ticker.deltaTime;
     world.scale.set((app.screen.width / 1100) * zoom);
-    if (followCrew && state.value?.visual_workers?.length) {
+    if (
+      followCrew.value &&
+      state.value &&
+      (state.value.visual_workers?.length || catchup.value)
+    ) {
       const worker =
         state.value.visual_workers.find((p) => p.role === "diggers") ??
-        state.value.visual_workers[0]!;
-      const point = motionPosition(
-        worker.position,
-        worker.legs,
-        worker.elapsed_ms,
-        catchup.value ? 0 : frameNow - snapshotReceivedAt.value,
-        worker.speed,
-      ).point;
+        state.value.visual_workers[0];
+      const cell = state.value.removed.at(-1);
+      const point = worker
+        ? motionPosition(
+            worker.position,
+            worker.legs,
+            worker.elapsed_ms,
+            catchup.value ? 0 : frameNow - snapshotReceivedAt.value,
+            worker.speed,
+          ).point
+        : cell
+          ? [cell.x, cell.y]
+          : [256, 0];
       const smoothing = preferences.reducedMotion
         ? 1
         : 1 - Math.exp(-ticker.deltaMS / 180);
@@ -570,7 +592,7 @@ onMounted(async () => {
         offsetX = app.screen.width / 2 - SHAFT_WORLD_X * startScale;
         offsetY = app.screen.height * 0.4 - SURFACE_Y * startScale;
         follow = false;
-        followCrew = true;
+        followCrew.value = true;
         wasteParticles.items.length = 0;
         lastWaste = g.lifetime_waste;
       }
@@ -602,6 +624,10 @@ onMounted(async () => {
     for (const particle of wasteParticles.items) {
       rect(actors, particle.x, particle.y, 3, 3, 0x8c9ba5);
     }
+    if (g?.levels.furnace && !catchup.value) {
+      const flicker = preferences.reducedMotion ? 0 : Math.floor(t / 7) % 2;
+      rect(actors, 737, 171, 6, 4 + flicker, 0xffd481);
+    }
     const crew = g?.crew ?? { diggers: 6, haulers: 3 };
     let shown = 0;
     const workerBudget = low ? 100 : 250;
@@ -626,57 +652,43 @@ onMounted(async () => {
         x = (worker.role === "operators" ? 735 : 980) + (worker.id % 8) * 6;
         y = 185;
       }
-      const walking =
-        worker.activity === "walking" || worker.activity === "climbing";
-      const stride = walking ? Math.floor(t / 5 + worker.id) % 2 : 0;
-      const color =
-        worker.role === "diggers"
-          ? 0xe5a34d
-          : worker.role === "engineers"
-            ? 0xa67548
-            : 0x8c9ba5;
       if (worker.activity === "lift") {
-        rect(actors, x - 2, y - 9, 1, 10, 0x647b8b);
-        rect(actors, x + 6, y - 9, 1, 10, 0x647b8b);
-        rect(actors, x - 2, y, 9, 1, 0x647b8b);
+        rect(actors, x - 2, y - 9, 1, 10, 0x829b9b);
+        rect(actors, x + 6, y - 9, 1, 10, 0x415967);
+        rect(actors, x - 2, y, 9, 1, 0xd99756);
       }
-      rect(actors, x, y - 8, 5, 2, 0xe5a34d);
-      rect(actors, x + 1, y - 6, 3, 2, 0xe8dfc8);
-      rect(actors, x, y - 4, 5, 3, color);
-      rect(actors, x + stride, y - 1, 2, 1, 0x263441);
-      rect(actors, x + 3 - stride, y - 1, 2, 1, 0x263441);
-      rect(actors, x + 4, y - 7, 1, 1, 0xffe6a2);
-      if (worker.activity === "climbing")
-        rect(actors, x + stride * 4, y - 5, 1, 2, 0xe8dfc8);
-      if (worker.activity === "blocked" || worker.activity === "waiting")
-        rect(actors, x + 6, y - 8, 1, 2, 0xe5a34d);
-      if (worker.activity === "digging" || worker.activity === "building") {
-        const swing = Math.floor(t / 8 + worker.id) % 3;
-        rect(actors, x + 5, y - 5 - swing, 3, 1, 0x8c9ba5);
-        if (!preferences.reducedMotion && swing === 2) {
-          for (let n = 0; n < (low ? 2 : 4); n++) {
-            const phase = (t / 12 + n * 0.23 + worker.id) % 1;
-            rect(
-              actors,
-              x + 6 + phase * (3 + n),
-              y - 4 + phase * phase * 7,
-              1,
-              1,
-              n % 2 ? 0xa67548 : 0xd8bc7d,
-            );
-          }
-        }
-      } else if (worker.activity === "surveying")
-        rect(actors, x + 5, y - 4, 2, 2, 0xe8dfc8);
-      else if (worker.activity === "hauling")
-        rect(actors, x + 5, y - 3, 3, 2, 0x806044);
+      const front =
+        !worker.legs.length && worker.role === "diggers"
+          ? g?.mining_fronts.find(
+              (site) =>
+                site.position?.[0] === worker.position[0] &&
+                site.position?.[1] === worker.position[1],
+            )
+          : undefined;
+      const facing =
+        (worker.legs[0]?.to[0] ?? front?.face?.[0] ?? worker.position[0] + 1) -
+        worker.position[0];
+      workerArt(
+        actors,
+        x,
+        y,
+        worker.role,
+        worker.activity,
+        t + worker.id * 5,
+        facing,
+        preferences.reducedMotion,
+        low,
+      );
       actorTargets.push({ x: x + 2, y: y - 3, panel: "Crew" });
       shown++;
     }
     for (const [role, count] of Object.entries(crew)) {
       for (
         let i = 0;
-        i < count && !g?.visual_workers?.length && shown < workerBudget;
+        i < count &&
+        !catchup.value &&
+        !g?.visual_workers?.length &&
+        shown < workerBudget;
         i++, shown++
       ) {
         let x = 250 + i * 8,
@@ -762,7 +774,10 @@ onMounted(async () => {
       0,
       (low ? 600 : 2000) - wasteParticles.items.length,
     );
-    const visibleCargo = (g?.shipments ?? []).slice(0, cargoBudget);
+    const visibleCargo = (catchup.value ? [] : (g?.shipments ?? [])).slice(
+      0,
+      cargoBudget,
+    );
     if (host.value) {
       host.value.dataset.cargo = String(visibleCargo.length);
       host.value.dataset.moving = String(
@@ -843,7 +858,7 @@ onBeforeUnmount(() => {
 function focusDistrict(x: number) {
   if (!app) return;
   follow = false;
-  followCrew = false;
+  followCrew.value = false;
   zoom = innerWidth < 800 ? 4 : 2;
   const scale = (app.screen.width / 1100) * zoom;
   offsetY = Math.max(150, app.screen.height * 0.45) - SURFACE_Y * scale;
@@ -857,12 +872,12 @@ function surfaceOverview() {
   offsetX = app.screen.width / 2 - 550 * scale;
   offsetY = 150 - SURFACE_Y * scale;
   follow = false;
-  followCrew = false;
+  followCrew.value = false;
   draw();
 }
 function focusCrew() {
   zoom = Math.max(zoom, innerWidth < 800 ? 6 : 3);
-  followCrew = true;
+  followCrew.value = true;
   follow = false;
   draw();
 }
@@ -890,7 +905,7 @@ function changeZoom(
   offsetX = next.x;
   offsetY = next.y;
   follow = false;
-  followCrew = false;
+  followCrew.value = false;
   draw();
 }
 function pointerDown(e: PointerEvent) {
@@ -900,7 +915,7 @@ function pointerDown(e: PointerEvent) {
     moved = false;
   } else moved = true;
   follow = false;
-  followCrew = false;
+  followCrew.value = false;
   (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 }
 function pointerMove(e: PointerEvent) {
@@ -1003,7 +1018,7 @@ function fitWorkings() {
   offsetX = next.x;
   offsetY = next.y;
   follow = false;
-  followCrew = false;
+  followCrew.value = false;
   draw();
 }
 </script>
@@ -1020,34 +1035,50 @@ function fitWorkings() {
       @lostpointercapture="pointerEnd"
     />
     <div class="world-tools">
-      <button @click="changeZoom(1.4)" aria-label="Zoom in">＋</button
-      ><button @click="changeZoom(1 / 1.4)" aria-label="Zoom out">−</button
-      ><button @click="surfaceOverview">Surface ↑</button>
-      <button @click="focusCrew">Active crew</button>
-      <button @click="fitWorkings">Fit workings</button>
-    </div>
-    <div class="world-districts">
+      <button @click="changeZoom(1.4)" aria-label="Zoom in">
+        <GameIcon name="plus" />
+      </button>
+      <button @click="changeZoom(1 / 1.4)" aria-label="Zoom out">
+        <GameIcon name="minus" />
+      </button>
       <button
-        v-for="[label, x] in [
-          ['Camp', 100],
-          ['Shaft', SHAFT_WORLD_X],
-          ['Plants', 800],
-          ['Waste', 1000],
-        ]"
-        @click="focusDistrict(Number(x))"
+        @click="cameraMenu = !cameraMenu"
+        aria-label="Camera controls"
+        :aria-expanded="cameraMenu"
       >
-        {{ label }}
+        <GameIcon name="camera" />
+      </button>
+    </div>
+    <section
+      v-if="cameraMenu"
+      class="camera-menu"
+      aria-label="Camera controls"
+      @keydown.esc.stop="cameraMenu = false"
+    >
+      <h2>Explore the worksite</h2>
+      <button
+        @click="
+          surfaceOverview();
+          cameraMenu = false;
+        "
+      >
+        <GameIcon name="surface" />Surface
       </button>
       <button
         @click="
-          preferences.surveyOverlay = !preferences.surveyOverlay;
-          drawnKey = '';
-          draw();
+          focusCrew();
+          cameraMenu = false;
         "
-        :aria-pressed="preferences.surveyOverlay"
-        title="Approximate signals: one notch = possible; two = promising. Sampled ore appears in terrain."
       >
-        Survey / work plan
+        <GameIcon name="Crew" />Active crew
+      </button>
+      <button
+        @click="
+          fitWorkings();
+          cameraMenu = false;
+        "
+      >
+        <GameIcon name="camera" />Fit workings
       </button>
       <button
         @click="
@@ -1056,14 +1087,38 @@ function fitWorkings() {
         "
         :aria-pressed="followCrew"
       >
-        Follow crew
+        <GameIcon name="follow" />Follow crew
       </button>
-    </div>
+      <button
+        @click="
+          preferences.surveyOverlay = !preferences.surveyOverlay;
+          drawnKey = '';
+          draw();
+        "
+        :aria-pressed="preferences.surveyOverlay"
+        title="One notch: possible. Two notches: promising. Only sampled ore appears in rock."
+      >
+        <GameIcon name="survey" />Survey / work plan
+      </button>
+      <div class="camera-districts">
+        <button
+          v-for="[label, x] in [
+            ['Camp', 100],
+            ['Shaft', SHAFT_WORLD_X],
+            ['Plants', 800],
+            ['Waste', 1000],
+          ]"
+          @click="
+            focusDistrict(Number(x));
+            cameraMenu = false;
+          "
+        >
+          {{ label }}
+        </button>
+      </div>
+    </section>
     <div class="world-caption">
-      {{ state ? "LIVE OPERATION" : "ILLUSTRATIVE PREVIEW" }}
-      <span>{{
-        state?.workings?.status || "SCROLL TO ZOOM · DRAG TO EXPLORE"
-      }}</span>
+      {{ state ? "Crew at work" : "Mine preview" }}
     </div>
     <div v-if="unknownSignal" class="ore-inspector" role="status">
       <strong>Unknown mineral signal</strong

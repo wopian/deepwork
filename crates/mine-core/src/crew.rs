@@ -172,31 +172,35 @@ fn local(from: Point, to: Point, t: &Terrain, _w: &Workings) -> Option<Vec<Point
     }
     None
 }
-pub fn stand_near(point: Point, t: &Terrain, w: &Workings) -> Point {
+pub fn stand_near(point: Point, t: &Terrain, _w: &Workings) -> Point {
     if clear(point, t) {
         return point;
     }
-    let mut candidates = Vec::new();
-    for dx in -8..=8 {
-        for dy in -8..=8 {
-            let p = [point[0] + dx, point[1] + dy];
-            if clear(p, t) {
-                candidates.push(p);
+    let mut fallback = None;
+    // Original order: reachable first, then distance, y, x. Visit distance
+    // shells directly instead of sorting hundreds of points for every face.
+    for distance in 1i64..=16 {
+        for dy in -distance.min(8)..=distance.min(8) {
+            let dx = distance - dy.abs();
+            if dx > 8 {
+                continue;
+            }
+            for offset in [-dx, dx] {
+                let p = [point[0] + offset, point[1] + dy];
+                if !clear(p, t) {
+                    continue;
+                }
+                if t.worker_reachable(p) {
+                    return p;
+                }
+                fallback.get_or_insert(p);
+                if dx == 0 {
+                    break;
+                }
             }
         }
     }
-    candidates.sort_by_key(|p| {
-        (
-            !t.worker_reachable(*p),
-            p[0].abs_diff(point[0]) + p[1].abs_diff(point[1]),
-            p[1],
-            p[0],
-        )
-    });
-    candidates
-        .into_iter()
-        .find(|p| !clear(point, t) || local(point, *p, t, w).is_some())
-        .unwrap_or(point)
+    fallback.unwrap_or(point)
 }
 pub fn access_position(t: &Terrain, w: &Workings) -> Point {
     let Some(s) = &w.section else {
@@ -419,6 +423,18 @@ impl Movement {
         self.workers.truncate(count as usize);
     }
     pub fn tick(&mut self, jobs: &[Job], t: &Terrain, w: &Workings, shaft_level: u32, power: u32) {
+        self.advance(jobs, t, w, shaft_level, power, 50);
+    }
+    /// Advance persistent crew travel without stepping through each 50 ms interval.
+    pub fn advance(
+        &mut self,
+        jobs: &[Job],
+        t: &Terrain,
+        w: &Workings,
+        shaft_level: u32,
+        power: u32,
+        milliseconds: u64,
+    ) {
         if self.lift_level != shaft_level {
             for (&id, legs) in &mut self.routes {
                 for (index, leg) in legs
@@ -476,7 +492,7 @@ impl Movement {
             worker.target = job.target;
             if worker.route != 0 {
                 let legs = &self.routes[&worker.route];
-                let mut remaining = 50_000u64;
+                let mut remaining = milliseconds * 1000;
                 let mut stopped = false;
                 loop {
                     let leg = &legs[worker.leg];
@@ -695,6 +711,67 @@ pub fn surface_jobs(crew: &Crew) -> Vec<Job> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn distance_shells_keep_original_reachable_and_coordinate_order() {
+        let (mut terrain, workings) = corridor();
+        for offset in [0, 32, 256] {
+            for x in -8..=8 {
+                for y in 32..=45 {
+                    if (x * 31 + y * 17 + offset) % 5 != 0 {
+                        terrain.excavate(x + offset, y);
+                    }
+                }
+            }
+        }
+        for x in (-16..=300).step_by(7) {
+            for y in (0..=56).step_by(3) {
+                let point = [x, y];
+                let expected = if clear(point, &terrain) {
+                    point
+                } else {
+                    (-8..=8)
+                        .flat_map(|dx| (-8..=8).map(move |dy| [x + dx, y + dy]))
+                        .filter(|p| clear(*p, &terrain))
+                        .min_by_key(|p| {
+                            (
+                                !terrain.worker_reachable(*p),
+                                p[0].abs_diff(x) + p[1].abs_diff(y),
+                                p[1],
+                                p[0],
+                            )
+                        })
+                        .unwrap_or(point)
+                };
+                assert_eq!(stand_near(point, &terrain, &workings), expected);
+            }
+        }
+    }
+    #[test]
+    fn elapsed_travel_matches_fixed_steps_across_partial_arrival() {
+        let (terrain, workings) = corridor();
+        let job = Job {
+            id: "dig".into(),
+            role: "diggers",
+            target: [272, 7],
+            count: 1,
+            activity: "digging",
+        };
+        let mut bulk = Movement::default();
+        bulk.initialise(1);
+        bulk.advance(&[job.clone()], &terrain, &workings, 0, 1000, 0);
+        let mut stepped = bulk.clone();
+        for milliseconds in [1000, 1000, 1000, 1000] {
+            bulk.advance(&[job.clone()], &terrain, &workings, 0, 1000, milliseconds);
+            for _ in 0..milliseconds / 50 {
+                stepped.tick(&[job.clone()], &terrain, &workings, 0, 1000);
+            }
+            assert_eq!(
+                serde_json::to_value(&bulk).unwrap(),
+                serde_json::to_value(&stepped).unwrap()
+            );
+        }
+        assert_eq!(bulk.working("dig"), 1);
+    }
     #[test]
     fn cleared_corridor_avoids_distant_portal_detours() {
         let mut terrain = Terrain::default();

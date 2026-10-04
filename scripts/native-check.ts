@@ -1,4 +1,5 @@
 import { chromium, type Browser, type Locator } from "playwright-core";
+import { clickControl } from "./game-controls";
 import { CELLS_PER_METRE } from "../src/geometry";
 import {
   mkdtemp,
@@ -162,9 +163,9 @@ try {
     "Settings",
     "Operations",
   ]) {
-    await page.getByRole("button", { name, exact: true }).click();
+    await clickControl(page, name);
   }
-  await page.getByRole("button", { name: "Logistics", exact: true }).click();
+  await clickControl(page, "Logistics");
   await page.getByLabel("Cargo scheduling").selectOption("preferred");
   await waitForSave(
     (state) => state.cargo_policy === "preferred",
@@ -172,7 +173,7 @@ try {
   );
   await page.getByRole("button", { name: "Close panel", exact: true }).click();
   // Exercise the actual file input/download path, not only IPC commands.
-  await page.getByRole("button", { name: "Records", exact: true }).click();
+  await clickControl(page, "Records");
   const downloadEvent = page.waitForEvent("download", { timeout: 15000 });
   await page.getByRole("button", { name: "Export save", exact: true }).click();
   const download = await downloadEvent;
@@ -195,7 +196,7 @@ try {
     imported.cargo_policy !== "preferred"
   )
     throw new Error("UI import did not restore exported state");
-  await page.getByRole("button", { name: "Operations", exact: true }).click();
+  await clickControl(page, "Operations");
   const paused = await invoke("set_background", { background: true });
   await page.waitForTimeout(2200);
   const sleeping = JSON.parse(await invoke("export_save"));
@@ -214,7 +215,7 @@ try {
       await readFile(resolve(process.argv[5]), "utf8"),
     );
     replayFixture.last_saved = Math.floor(Date.now() / 1000) - 28800;
-    await page.getByRole("button", { name: "Operations", exact: true }).click();
+    await clickControl(page, "Operations");
     await page.evaluate((data) => {
       (window as any).__REPLAY_ACCEPTANCE__ = { done: false, error: null };
       void (window as any).__TAURI_INTERNALS__
@@ -263,7 +264,7 @@ try {
       if (!blocked) throw new Error(`Catch-up did not lock ${command}`);
     }
     for (const tab of ["Industry", "Headquarters"]) {
-      await page.getByRole("button", { name: tab, exact: true }).click();
+      await clickControl(page, tab);
       const controls = page.locator(".management-view button");
       if (!(await controls.count()))
         throw new Error(`Catch-up ${tab} controls were not inspected`);
@@ -272,7 +273,7 @@ try {
         .count();
       if (enabled) throw new Error(`Catch-up left ${tab} commands enabled`);
     }
-    await page.getByRole("button", { name: "Operations", exact: true }).click();
+    await clickControl(page, "Operations");
     const replayCamera = await page
       .locator(".world")
       .getAttribute("data-camera-x");
@@ -355,13 +356,11 @@ try {
     fixture.policy = "depth";
     const fixturePath = join(data, "stress-save.json");
     await writeFile(fixturePath, JSON.stringify(fixture));
-    await page.getByRole("button", { name: "Records", exact: true }).click();
+    await clickControl(page, "Records");
     await page.locator('input[type="file"]').setInputFiles(fixturePath);
     await waitForSave((state) => state.workers === 1000, "stress population");
-    await page.getByRole("button", { name: "Operations", exact: true }).click();
-    await page
-      .getByRole("button", { name: "Active crew", exact: true })
-      .click();
+    await clickControl(page, "Operations");
+    await clickControl(page, "Active crew");
     const cdp = await context.newCDPSession(page);
     await cdp.send("Performance.enable");
     await cdp.send("Emulation.setDeviceMetricsOverride", {
@@ -376,9 +375,7 @@ try {
       await page.waitForTimeout(10000);
       if (!(await page.locator(".world").count())) {
         console.log("Restoring Operations for renderer stress coverage");
-        await page
-          .getByRole("button", { name: "Operations", exact: true })
-          .click();
+        await clickControl(page, "Operations");
         await page.locator(".world").waitFor();
         await page.waitForTimeout(1200);
       }
@@ -431,7 +428,7 @@ try {
       )
         throw new Error("Visual entity budget exceeded");
     }
-    await page.getByRole("button", { name: "Operations", exact: true }).click();
+    await clickControl(page, "Operations");
     await page.screenshot({
       path: join(output, "native-stress.png"),
       fullPage: true,
@@ -444,7 +441,7 @@ try {
   await page
     .locator(".world")
     .screenshot({ path: join(output, "native-mine-detail.png") });
-  await page.getByRole("button", { name: "Waste", exact: true }).click();
+  await clickControl(page, "Waste");
   await page.waitForTimeout(250);
   await page
     .locator(".world")
@@ -471,8 +468,7 @@ try {
       touchPoints: [],
     });
   };
-  const tap = (name: string) =>
-    tapTarget(page.getByRole("button", { name, exact: true }));
+  const tap = (name: string) => clickControl(page, name, tapTarget);
   await tap("Settings");
   await page.locator(".settings").waitFor();
   await page.getByLabel("Reduced motion", { exact: true }).check();
@@ -685,7 +681,7 @@ try {
     localStorage.getItem("deepwork-preferences"),
   );
   const beforeReset = JSON.parse(await invoke("export_save"));
-  await page.getByRole("button", { name: "Records", exact: true }).click();
+  await clickControl(page, "Records");
   await page
     .getByRole("button", { name: "Reset campaign", exact: true })
     .click();

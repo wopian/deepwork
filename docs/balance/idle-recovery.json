@@ -1,0 +1,79 @@
+{
+  "fixture": "test-results/natural-veins-final/native-fixture.json",
+  "generator_version": 6,
+  "workers": 16,
+  "previous_adaptive_model": {
+    "credited_seconds": 14400,
+    "real_seconds": 28800,
+    "idle_compute_ms": 39468.3342,
+    "excavated": 300880,
+    "credits": "15329",
+    "mass_conserved": true,
+    "bulk_compute_ms": 497.3897,
+    "physical_compute_ms": 497.1622
+  },
+  "optimized": {
+    "bulk_compute_ms": 227.4513,
+    "cargo_batches_after": 0,
+    "cargo_batches_before": 23,
+    "comparison_credited_seconds": 120,
+    "credited_seconds": 14400,
+    "credits": "15329",
+    "excavated": 300880,
+    "idle_compute_ms": 18733.2278,
+    "mass_conserved": true,
+    "physical_compute_ms": 260.4622,
+    "production_intervals": 14400,
+    "real_seconds": 28800,
+    "speedup": 1.1451339253721566
+  },
+  "full_compute_speedup": 2.106862448979561,
+  "preserved_extracted_totals": true,
+  "superseded_coarse_model": {
+    "idle_compute_ms": 27890.3356,
+    "excavated": 224609,
+    "credits": "11510",
+    "reason": "Replaced by event boundaries to prevent lost production at short work sites."
+  },
+  "profile": {
+    "credited_seconds": 120,
+    "compute_ms": 513,
+    "excavated": 4236,
+    "nanoseconds": {
+      "planning": 3395900,
+      "assignment": 206947900,
+      "excavation": 242306700,
+      "routing": 4741400,
+      "movement": 52992600,
+      "processing": 902800
+    }
+  },
+  "validation": {
+    "rust_core": 161,
+    "rust_native": 29,
+    "bun": 37,
+    "typescript_build": true
+  },
+  "native_acceptance": {
+    "recovery_ms": 29200.6594,
+    "effective": 14400,
+    "actorCounts": {
+      "cargo": "0",
+      "workers": "0"
+    },
+    "blocked": true,
+    "skipped": true,
+    "saved": true,
+    "reload": true,
+    "renderer": {
+      "resident_chunks": 5,
+      "workers": 16,
+      "cargo": 15,
+      "frame_p95_ms": 46.2
+    },
+    "final_snapshot_bytes": 5908458,
+    "page_errors": []
+  },
+  "campaign_cohort_rerun": false,
+  "travel_progress_rerun": false
+}

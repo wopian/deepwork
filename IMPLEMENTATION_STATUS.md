@@ -12,7 +12,7 @@ Idle advancement records public visual frames during its existing simulation pas
 
 Version 12 balance and native acceptance are tracked in [progressive mine notes](docs/progressive-mine.md). Older counts and cohorts below do not validate new travel delays.
 
-Functional, opening, parity and isolated native qualifications pass. Calendar checkpoints remain incomplete; 30/30 headquarters is unverified. The user accepts 2,419,201 seconds as the 28-day rare-earth boundary. Historical one-second rejection records are superseded by this explicit tolerance, not deleted.
+Earlier functional, opening and isolated native qualifications pass. Analytical idle recovery supersedes fixed-step parity; see docs/idle-recovery.md. Calendar checkpoints remain incomplete; 30/30 headquarters is unverified. The user accepts 2,419,201 seconds as the 28-day rare-earth boundary. Historical one-second rejection records are superseded by this explicit tolerance, not deleted.
 
 ## Version 10 multi-front milestone
 
@@ -126,7 +126,7 @@ A separate 3.6 km campaign-derived stress fixture exposed oversized cargo IPC: f
 
 Physical Android background/screen-lock/process-death/WebView recreation, touch comfort and FPS still require device testing. Desktop touch emulation and successful APK packaging do not establish those results. iOS/macOS/Linux and clean-machine Windows installation are separately unverified.
 
-The planner is a bounded heuristic, not a proof of globally optimal lifetime layout. Support rules abstract real engineering. Distant GPU chunks are evicted; persistent sparse terrain and passage history grow with exploration. Offline active production still uses exact fixed steps, with safe skips for stationary intervals.
+The planner is a bounded heuristic, not a proof of globally optimal lifetime layout. Support rules abstract real engineering. Distant GPU chunks are evicted; persistent sparse terrain and passage history grow with exploration. Idle recovery uses analytical ore budgets while advancing excavation, construction and crew access. Online cargo retains fixed steps. Historical fixed-step parity evidence above describes earlier builds.
 
 ## Reproduce (Windows shell)
 
@@ -153,3 +153,12 @@ scripts\android-test.cmd C:\absolute\output\directory
 Campaign arguments: seed count, observation days, scheduled/attentive/continuous mode, CPU workers, first seed. Copy the harness executable to an isolated directory with a `target` subdirectory before running concurrent builds; Windows locks executing binaries. The campaign writes per-seed progress and full stalled/failed saves for reproduction. Stress setup verifies the imported fixture before measuring. Its 1,000 workers and maximum equipment are test fixtures, not balance evidence.
 
 An optional sixth campaign argument supplies a checkpoint directory. Checkpoints include complete state, events, elapsed time, idle counters and a content fingerprint; each completed visit is written by atomic rename. Continuous-play checkpoints are not resumable through this path.
+
+## Analytical idle recovery
+
+Idle ore uses elapsed-time flow and processing budgets instead of cargo movement. Excavation, crew access and support completion still advance at their event boundaries. Capped headless computation falls from 39.5 to 18.7 seconds on the generator 6, 16-worker fixture, preserving 300,880 excavated cells and 15,329 earned credits. Isolated WebView2 recovery, playback and checkpointing take 29.2 seconds; replay has no cargo actors. Skip, command locks, saved rewards, reload and portrait checks pass. Rust workspace tests pass (161 core, 29 native), alongside 37 Bun tests, typecheck and build. See [idle recovery](docs/idle-recovery.md) and [retained evidence](docs/balance/idle-recovery.json). Historical exact online/offline parity is superseded by this explicitly requested analytical model. Calendar cohorts and travel-progress were not rerun.
+
+
+## Warm industrial presentation
+
+Persistent mine viewport, five-action HUD, desktop drawers, portrait sheets, SVG controls, campaign guidance and committed-state discovery notices are implemented. Procedural artwork improves minerals, miners, supports and surface machinery while retaining public geology, travel timing, saved state and renderer budgets. All 43 Bun tests pass; typecheck and production build pass. Browser acceptance covers all 11 panels and six viewport sizes. Isolated WebView2 validates direct goal navigation, mature terrain, portrait, reduced motion, timelapse Skip/command locks and a 1,000-worker fixture capped at 250 rendered workers. Same-fixture p95 samples remain 21.2 ms; retained heap rises by 2,033,916 bytes after forced GC. See [visual design](docs/visual-design.md) and `test-results/presentation/` for evidence and limitations. Poki browser simulation, persistence and SDK integration remain separate work. No campaign or travel-progress rerun is part of this frontend change.

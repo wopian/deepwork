@@ -582,6 +582,27 @@ impl Workings {
         engineers: i64,
         supports: i64,
     ) {
+        self.advance_elapsed(
+            terrain,
+            priorities,
+            policy,
+            depth_limit,
+            engineers,
+            supports,
+            1,
+        );
+    }
+    /// Construction work scales with elapsed ticks; completion still commits one section.
+    pub fn advance_elapsed(
+        &mut self,
+        terrain: &Terrain,
+        priorities: &[usize],
+        policy: &str,
+        depth_limit: i64,
+        engineers: i64,
+        supports: i64,
+        ticks: u64,
+    ) {
         self.initialise();
         self.index_passages();
         let geometry_stamp = (terrain.revision, self.passages.len());
@@ -600,7 +621,7 @@ impl Workings {
                 return;
             }
             self.status = "Waiting for supports".into();
-            s.support_work += 80 * engineers.max(0) as u64 * (1 + supports) as u64;
+            s.support_work += 80 * engineers.max(0) as u64 * (1 + supports) as u64 * ticks;
             if s.support_work < settings().support_work {
                 return;
             }
@@ -2229,8 +2250,8 @@ mod development_tests {
         let mut b = a.clone();
         a.last_saved = 100;
         a.advance_offline(220, &cat);
-        for _ in 0..1200 {
-            b.tick(&cat, true);
+        for _ in 0..60 {
+            b.second(&cat, true);
         }
         assert_eq!(
             serde_json::to_value(a.workings).unwrap(),
@@ -2244,7 +2265,7 @@ mod development_tests {
         assert_eq!(a.dig_progress, b.dig_progress);
     }
     #[test]
-    fn offline_surveys_plans_supports_and_cargo_match_fixed_steps_after_reload() {
+    fn offline_surveys_plans_supports_and_cargo_match_idle_seconds_after_reload() {
         let cat = crate::materials();
         let mut offline = fixture(49);
         for _ in 0..130 {
@@ -2255,8 +2276,8 @@ mod development_tests {
         stepped.migrate().unwrap();
         offline.last_saved = 100;
         offline.advance_offline(220, &cat);
-        for _ in 0..1200 {
-            stepped.tick(&cat, true);
+        for _ in 0..60 {
+            stepped.second(&cat, true);
         }
         assert_eq!(offline.terrain.chunks, stepped.terrain.chunks);
         assert_eq!(offline.terrain.visible, stepped.terrain.visible);

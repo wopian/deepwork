@@ -962,7 +962,7 @@ impl Game {
             })
             .count() as u32
     }
-    fn move_crew(&mut self, access: u32) {
+    fn move_crew(&mut self, access: u32, milliseconds: u64) {
         self.movement.initialise(self.workers);
         use std::hash::{Hash, Hasher};
         let mut stamp = std::collections::hash_map::DefaultHasher::new();
@@ -991,12 +991,13 @@ impl Game {
         }
         let stamp = stamp.finish();
         if self.crew_job_stamp == Some(stamp) {
-            self.movement.tick(
+            self.movement.advance(
                 &self.crew_job_cache,
                 &self.terrain,
                 &self.workings,
                 self.level("shaft"),
                 self.travel_power(),
+                milliseconds,
             );
             return;
         }
@@ -1073,12 +1074,13 @@ impl Game {
         });
         jobs.extend(crew::surface_jobs(&self.crew));
         self.crew_job_cache = jobs;
-        self.movement.tick(
+        self.movement.advance(
             &self.crew_job_cache,
             &self.terrain,
             &self.workings,
             self.level("shaft"),
             self.travel_power(),
+            milliseconds,
         );
     }
     fn dig_rate_for(&self, diggers: u32) -> u64 {
@@ -1198,6 +1200,7 @@ impl Game {
     fn next_frontier(&self, _cat: &[Material]) -> Option<i64> {
         self.workings.next_cell(&self.terrain)
     }
+    #[cfg(test)]
     /// No input, pending arrival, eligible recipe or reachable excavation event can fire.
     fn quiescent(&self, cat: &[Material]) -> bool {
         self.quiet_pipeline(cat)
@@ -1208,6 +1211,7 @@ impl Game {
                 .iter()
                 .all(|front| front.crew == 0 && front.stockpile == 0)
     }
+    #[cfg(test)]
     fn quiet_pipeline(&self, cat: &[Material]) -> bool {
         if self.mining_fronts.iter().any(|front| front.stockpile > 0) {
             return false;
@@ -1237,6 +1241,7 @@ impl Game {
         }
         self.recipes_idle()
     }
+    #[cfg(test)]
     fn survey_pending(&self) -> bool {
         if !self.workings.passages.is_empty() {
             return self
@@ -1260,38 +1265,7 @@ impl Game {
             )
         })
     }
-    fn stationary_pipeline(&self, cat: &[Material]) -> bool {
-        if self
-            .mining_fronts
-            .iter()
-            .any(|front| front.crew > 0 || front.stockpile > 0)
-        {
-            return false;
-        }
-        if self.workings.blocked_at.is_none() {
-            return false;
-        }
-        self.ticks % 20 == 0
-            && self.flow_window.iter().all(|&q| q == 0)
-            && self
-                .transport
-                .stations
-                .iter()
-                .all(|s| s.incoming == 0 && s.outgoing == 0)
-            && self
-                .transport
-                .segments
-                .iter()
-                .all(|s| s.batches.iter().all(|b| b.remaining_ms == 0))
-            && (self.ore.values().sum::<u64>() + CELL_MASS
-                > 20 * UNITS + 5 * UNITS * self.level("capacity") as u64
-                || self.next_frontier(cat).is_none())
-            && !self.survey_pending()
-            && self.depleted == 0
-            && !(self.level("slagcrusher") > 0 && self.slag > 0)
-            && !(self.level("reclaimer") > 0 && self.tailings.values().any(|&q| q > 0))
-            && self.recipes_idle()
-    }
+    #[cfg(test)]
     fn recipes_idle(&self) -> bool {
         !recipes().iter().any(|r| {
             if self.level(&r.building) == 0
@@ -1337,13 +1311,36 @@ impl Game {
         })
     }
     pub fn second(&mut self, cat: &[Material], offline: bool) {
+        if offline {
+            self.flow_window = [0; 5];
+            self.processing_window.clear();
+            let mut left = 20;
+            while left > 0 {
+                let span = self.idle_interval(left);
+                self.tick_span(cat, true, span, true, if left == span { 20 } else { 0 });
+                left -= span;
+            }
+            return;
+        }
         for _ in 0..20 {
             self.tick(cat, offline);
         }
     }
     pub fn tick(&mut self, cat: &[Material], offline: bool) {
-        self.ticks += 1;
-        if self.ticks % 20 == 1 {
+        self.tick_span(cat, offline, 1, false, 1);
+    }
+    /// Analytical idle interval. Online simulation retains its 50 ms cargo physics.
+    fn tick_span(
+        &mut self,
+        cat: &[Material],
+        offline: bool,
+        span: u64,
+        bulk: bool,
+        processing_ticks: u64,
+    ) {
+        let previous = self.ticks;
+        self.ticks += span;
+        if !bulk && (previous % 20 == 0 || previous / 20 != (self.ticks - 1) / 20) {
             self.flow_window = [0; 5];
             self.processing_window.clear();
         }
@@ -1370,11 +1367,16 @@ impl Game {
             self.workings.first_junction_requested = self.level("shaft") > 0
                 && self.workings.target_deposit.is_none()
                 && !self.workings.has_underground_branch();
-            self.workings.survey_work += (1 + self.surveying_crew() as u64 * 3)
+            self.workings.survey_work += span
+                * (1 + self.surveying_crew() as u64 * 3)
                 * (100 + 5 * self.ranks.get("prospecting").copied().unwrap_or(0) as u64)
                 / 100;
-            if self.workings.survey_work >= 200 || self.workings.surveyed.is_empty() {
-                self.workings.survey_work %= 200;
+            while self.workings.survey_work >= 200 || self.workings.surveyed.is_empty() {
+                self.workings.survey_work = if span == 1 {
+                    self.workings.survey_work % 200
+                } else {
+                    self.workings.survey_work.saturating_sub(200)
+                };
                 let upgraded = self.level("survey") > 0;
                 let mut found = self.workings.survey_versioned(
                     &mut self.terrain,
@@ -1403,10 +1405,14 @@ impl Game {
                         accuracy,
                     ));
                 }
+                let no_survey = self.workings.surveyed.is_empty();
                 for id in found {
                     if self.discoveries.insert(id) {
                         self.site_discoveries += 1;
                     }
+                }
+                if no_survey || span == 1 {
+                    break;
                 }
             }
             let limit = self.equipment_depth_limit() as i64 * geometry::CELLS_PER_METRE;
@@ -1421,16 +1427,20 @@ impl Game {
             } else {
                 self.support_crew() as i64
             };
-            self.workings.advance(
+            self.workings.advance_elapsed(
                 &self.terrain,
                 &planning_priorities,
                 if seek_feed { "depth" } else { &self.policy },
                 limit,
                 engineers,
                 self.level("supports") as i64,
+                span,
             );
         }
-        if self.workings.passages.is_empty() && self.ticks % 1200 == 0 && self.level("survey") > 0 {
+        if self.workings.passages.is_empty()
+            && previous / 1200 != self.ticks / 1200
+            && self.level("survey") > 0
+        {
             let (x, y) = self
                 .removed
                 .last()
@@ -1455,7 +1465,10 @@ impl Game {
         let required = required_fronts;
         let max_fronts = self.max_mining_fronts();
         let buffer_level = self.level("capacity");
-        if self.ticks % 100 == 1 || self.mining_fronts.is_empty() {
+        if previous % 100 == 0
+            || previous / 100 != (self.ticks - 1) / 100
+            || self.mining_fronts.is_empty()
+        {
             fronts::refresh_cached(
                 &mut self.front_candidate_cache,
                 &mut self.mining_fronts,
@@ -1503,7 +1516,9 @@ impl Game {
                 access_crew = 1;
             }
         }
-        self.move_crew(access_crew);
+        // Assign against committed geometry before crediting work. Travelling workers
+        // receive no production for this interval, even if they arrive during it.
+        self.move_crew(access_crew, if bulk { 0 } else { 50 });
         let access_crew = self.movement.working("access");
         let working = self.movement.working_counts();
         for front in &mut self.mining_fronts {
@@ -1538,7 +1553,7 @@ impl Game {
         let mut mined = 0u64;
         let mut mined_cargo = BTreeMap::<usize, u64>::new();
         let dig_rate = self.dig_rate_for(access_crew);
-        let work = dig_rate + self.dig_remainder;
+        let work = dig_rate * span + self.dig_remainder;
         self.dig_progress += if access_crew > 0 { work / 20 } else { 0 };
         self.dig_remainder = work % 20;
         let digs = (self.dig_progress / 1000) as u32;
@@ -1592,7 +1607,7 @@ impl Game {
             let work = self.dig_rate_for(crew);
             {
                 let front = &mut self.mining_fronts[index];
-                let work = work + front.work_remainder;
+                let work = work * span + front.work_remainder;
                 front.progress += work / 20;
                 front.work_remainder = work % 20;
             }
@@ -1801,7 +1816,7 @@ impl Game {
             } else {
                 (front.haulers as f64 * pacing::get().haul_rate * UNITS as f64) as u64
             };
-            front.transfer_remainder += rate;
+            front.transfer_remainder += rate * span;
             let mut budget = front.transfer_remainder / 20;
             front.transfer_remainder %= 20;
             let mut room = cap.saturating_sub(self.ore.values().sum());
@@ -1853,6 +1868,21 @@ impl Game {
             self.transport
                 .configure(&self.haul_legs, haul_rate, capacity_level);
         }
+        if bulk {
+            self.movement.advance(
+                &self.crew_job_cache,
+                &self.terrain,
+                &self.workings,
+                self.level("shaft"),
+                self.travel_power(),
+                span * 50,
+            );
+        }
+        if bulk && processing_ticks == 0 {
+            self.flow_window[0] += mined * CELL_MASS;
+            return;
+        }
+        let processing_previous = self.ticks - processing_ticks;
         let power = (self.power_factor(offline) * 1000.) as u64;
         let mut inaccessible = BTreeMap::new();
         let source = if self.haul_path.is_empty() {
@@ -1866,19 +1896,33 @@ impl Game {
                 .map(|front| front.route_id)
                 .filter(|route| *route != 0),
         );
-        let haul_budget = self.transport.tick(
-            self.ticks,
-            source,
-            &mut self.hauled,
-            cap,
-            &planning_priorities,
-            self.cargo_policy == "preferred" || !required.is_empty(),
-            false,
-            power,
-        );
+        let haul_budget = if bulk {
+            self.transport.advance_bulk(
+                self.ticks,
+                processing_ticks,
+                source,
+                &mut self.hauled,
+                cap,
+                &planning_priorities,
+                self.cargo_policy == "preferred" || !required.is_empty(),
+                power,
+            )
+        } else {
+            self.transport.tick(
+                self.ticks,
+                source,
+                &mut self.hauled,
+                cap,
+                &planning_priorities,
+                self.cargo_policy == "preferred" || !required.is_empty(),
+                false,
+                power,
+            )
+        };
         let remaining = 0;
         let sort_rate =
-            (pacing::get().sorting_rate * UNITS as f64 * self.throughput("sorter")) as u64 / 20;
+            (pacing::get().sorting_rate * UNITS as f64 * self.throughput("sorter")) as u64 / 20
+                * processing_ticks;
         let mut sort_left = sort_rate.min(cap.saturating_sub(self.concentrate.values().sum()));
         let sort_budget = sort_left;
         let mut sort_ids: Vec<_> = self
@@ -1889,7 +1933,7 @@ impl Game {
             .collect();
         logistics::order_cargo(
             &mut sort_ids,
-            self.ticks,
+            if bulk { self.ticks / 20 } else { self.ticks },
             &planning_priorities,
             self.cargo_policy == "preferred" || !required.is_empty(),
         );
@@ -1930,7 +1974,7 @@ impl Game {
             * (1. + 0.15 * self.crew.operators.saturating_sub(1) as f64)
             * (1. + 0.04 * self.ranks.get("metallurgy").copied().unwrap_or(0) as f64))
             as u64;
-        let process_rate = process_rate / 20;
+        let process_rate = process_rate / 20 * processing_ticks;
         let mut left = process_rate;
         let mut feed_ids: Vec<_> = self
             .concentrate
@@ -2061,7 +2105,15 @@ impl Game {
                 * self.throughput(&recipe.building)
                 * (1. + 0.04 * self.ranks.get("metallurgy").copied().unwrap_or(0) as f64))
                 as u64;
-            let recipe_budget = work_budget(rate, self.ticks);
+            let recipe_budget = if processing_ticks == 1 {
+                work_budget(rate, self.ticks)
+            } else {
+                rate / 1000 * processing_ticks
+                    + ((processing_previous % 1000) * (rate % 1000)
+                        + processing_ticks * (rate % 1000))
+                        / 1000
+                    - (processing_previous % 1000) * (rate % 1000) / 1000
+            };
             if recipe.id.starts_with("separate_") {
                 let source = format!("{}_residue", recipe.output);
                 let available = self.trace_feed.entry(source).or_default();
@@ -2126,8 +2178,8 @@ impl Game {
             };
             for (&id, q) in &mut self.tailings {
                 let n = (*q).min(
-                    self.crew.reclaimers.max(1) as u64
-                        + u64::from(self.ticks % 20 == 0)
+                    self.crew.reclaimers.max(1) as u64 * processing_ticks
+                        + (self.ticks / 20 - processing_previous / 20)
                             * self.ranks.get("reclamation").copied().unwrap_or(0) as u64,
                 );
                 let n = (n * multiplier * 64).min(*q).min(recovery_space);
@@ -2163,21 +2215,21 @@ impl Game {
                 .saturating_add(self.credit_fraction / (2 * UNITS));
             self.credit_fraction %= 2 * UNITS;
         }
-        let disposed = self.depleted.min(320);
+        let disposed = self.depleted.min(320 * processing_ticks);
         self.depleted -= disposed;
         self.disposed_mass += disposed;
         if self.level("slagcrusher") > 0 {
             let reclaimed =
                 self.slag
                     .min(if self.specialisation.as_deref() == Some("reclamation") {
-                        4800
+                        4800 * processing_ticks
                     } else {
-                        1600
+                        1600 * processing_ticks
                     });
             self.slag -= reclaimed;
             *self.products.entry("aggregate".into()).or_default() += reclaimed;
         }
-        if self.ticks % 20 == 0 {
+        if processing_previous / 20 != self.ticks / 20 {
             self.waste_profile
                 .reconcile(self.slag + self.depleted + self.tailings.values().sum::<u64>());
         }
@@ -2196,7 +2248,7 @@ impl Game {
         if !self.challenge.is_empty() && self.depth() >= 300 && self.steel_made {
             self.site_objectives.insert("challenge".into());
         }
-        let seconds = ((self.ticks - 1) % 20 + 1) as f64 / 20.;
+        let seconds = ((self.ticks - 1) % 20 + 1).max(processing_ticks) as f64 / 20.;
         for (name, reached) in [
             ("First mineral", !self.discoveries.is_empty()),
             ("Mechanised hauling", self.level("conveyor") > 0),
@@ -2344,84 +2396,86 @@ impl Game {
             },
         ];
     }
-    pub fn advance_offline(&mut self, now: u64, cat: &[Material]) {
-        self.advance_offline_observed(now, cat, |_, _, _| {});
-    }
-    /// Skip only empty-production travel between exact feedback and arrival boundaries.
-    fn idle_travel_skip(&self, left: u64) -> u64 {
-        if self.ticks % 20 == 0
-            || self.movement.lift_level != self.level("shaft")
-            || self.workings.section.is_none()
-            || self.workings.search.is_some()
-            || !self.movement.workers.iter().any(|p| p.route != 0)
-            || self.movement.workers.iter().any(|p| {
-                p.job.is_empty() && p.route != 0
-                    || p.route == 0
-                        && p.position == p.target
-                        && (p.activity == "digging" || p.activity == "building")
-            })
-            || self.transport.mass() > 0
-            || self.mining_fronts.iter().any(|f| f.stockpile > 0)
-            || self
-                .ore
-                .values()
-                .chain(self.hauled.values())
-                .chain(self.concentrate.values())
-                .chain(self.trace_feed.values())
-                .any(|q| *q > 0)
-            || self.raw_stock.values().any(|q| *q > 0)
-            || self.depleted > 0
-            || self.level("slagcrusher") > 0 && self.slag > 0
-            || self.level("reclaimer") > 0 && self.tailings.values().any(|q| *q > 0)
-            || self.products.iter().any(|(p, q)| *q > self.product_hold(p))
-            || !self.recipes_idle()
-        {
-            return 0;
+    /// Stop at crew legs, cuts and support completion. Fast equipment never loses
+    /// production merely because an idle interval spans several short work sites.
+    fn idle_interval(&self, left: u64) -> u64 {
+        let mut span = left.min(20);
+        // Planning changes assignment eligibility. Preserve its existing cadence.
+        if self.workings.section.is_none() && self.workings.blocked_at.is_none() {
+            return 1;
         }
-        let mut skip = left.min(19 - self.ticks % 20);
-        let survey_rate = (1 + self.surveying_crew() as u64 * 3)
-            * (100 + 5 * self.ranks.get("prospecting").copied().unwrap_or(0) as u64)
-            / 100;
-        skip = skip.min(
-            (200 - self.workings.survey_work)
-                .div_ceil(survey_rate)
-                .saturating_sub(1),
-        );
         let power = self.travel_power() as u64;
         for worker in self.movement.workers.iter().filter(|p| p.route != 0) {
             let leg = &self.movement.routes[&worker.route][worker.leg];
             let speed = if leg.mode == "lift" { power } else { 1000 };
-            if speed == 0 {
+            if speed > 0 {
+                let remaining = (leg.milliseconds - worker.elapsed_ms) as u64 * 1000
+                    - worker.time_fraction as u64;
+                span = span.min((remaining * 1000).div_ceil(50_000 * speed).max(1));
+            }
+        }
+        for front in &self.mining_fronts {
+            let rate = self.dig_rate_for(front.crew);
+            if rate == 0 || front.stockpile >= front.capacity {
                 continue;
             }
-            let remaining =
-                (leg.milliseconds - worker.elapsed_ms) as u64 * 1000 - worker.time_fraction as u64;
-            skip = skip.min(
-                (remaining * 1000)
-                    .div_ceil(50_000 * speed)
-                    .saturating_sub(1),
-            );
+            let required = if front.cut_work > 0 {
+                front.cut_work
+            } else {
+                fronts::clearance_cells(front.face)
+                    .into_iter()
+                    .filter(|p| !self.terrain.contains(p[0], p[1]))
+                    .count() as u64
+                    * 1000
+            };
+            if front.progress < required {
+                span = span.min(
+                    (required.saturating_sub(front.progress) * 20)
+                        .saturating_sub(front.work_remainder)
+                        .div_ceil(rate)
+                        .max(1),
+                );
+            }
         }
-        skip
+        if let Some(section) = &self.workings.section {
+            let solid = section
+                .cells
+                .iter()
+                .filter(|p| !self.terrain.contains(p[0], p[1]))
+                .count() as u64;
+            if solid > 0 {
+                let rate = self.dig_rate_for(self.movement.working("access"));
+                if rate > 0 {
+                    span = span.min(
+                        (solid * 1000)
+                            .saturating_sub(self.dig_progress)
+                            .saturating_mul(20)
+                            .saturating_sub(self.dig_remainder)
+                            .div_ceil(rate)
+                            .max(1),
+                    );
+                }
+            } else {
+                let mut engineers = self.support_crew() as u64;
+                if self.ranks.get("excavation").copied().unwrap_or(0) >= 10 {
+                    engineers = (engineers * 3 + 1) / 2;
+                }
+                let rate = 80 * engineers * (1 + self.level("supports") as u64);
+                if rate > 0 {
+                    span = span.min(
+                        workings::settings()
+                            .support_work
+                            .saturating_sub(section.support_work)
+                            .div_ceil(rate)
+                            .max(1),
+                    );
+                }
+            }
+        }
+        span
     }
-    fn skip_idle_travel(&mut self, skip: u64) {
-        let power = self.travel_power() as u64;
-        let survey_rate = (1 + self.surveying_crew() as u64 * 3)
-            * (100 + 5 * self.ranks.get("prospecting").copied().unwrap_or(0) as u64)
-            / 100;
-        self.workings.survey_work += survey_rate * skip;
-        for worker in self.movement.workers.iter_mut().filter(|p| p.route != 0) {
-            let leg = &self.movement.routes[&worker.route][worker.leg];
-            let speed = if leg.mode == "lift" { power } else { 1000 };
-            let elapsed = worker.time_fraction as u64 + 50 * speed * skip;
-            worker.elapsed_ms += (elapsed / 1000) as u32;
-            worker.time_fraction = (elapsed % 1000) as u32;
-        }
-        for segment in &mut self.transport.segments {
-            let speed = if segment.demand > 0 { power } else { 1000 };
-            segment.time_fraction = (segment.time_fraction + 50 * speed * skip) % 1000;
-        }
-        self.ticks += skip;
+    pub fn advance_offline(&mut self, now: u64, cat: &[Material]) {
+        self.advance_offline_observed(now, cat, |_, _, _| {});
     }
     pub fn advance_offline_observed(
         &mut self,
@@ -2443,94 +2497,10 @@ impl Game {
         let mut observed = 0;
         observe(self, 0, total);
         while left > 0 {
-            self.tick(cat, true);
-            left -= 1;
-            if self.ticks % 20 == 0 || left == 0 {
-                observe(self, total - left, total);
-                observed = total - left;
-            }
-            let travel_skip = self.idle_travel_skip(left);
-            if travel_skip > 0 {
-                self.skip_idle_travel(travel_skip);
-                left -= travel_skip;
-                continue;
-            }
-            let skip = if self.movement.workers.iter().any(|p| p.route != 0) {
-                0
-            } else if self.quiescent(cat) || self.stationary_pipeline(cat) {
-                left.saturating_sub(1)
-            } else if self.quiet_pipeline(cat) {
-                // Stop immediately before the next dig, arrival, or final feedback tick.
-                // Filled processing/reclamation pipelines still use exact fixed steps.
-                let access_rate = self.dig_rate_for(self.movement.working("access"));
-                let dig = if self.next_frontier(cat).is_some() && access_rate > 0 {
-                    ((1000 - self.dig_progress) * 20 - self.dig_remainder).div_ceil(access_rate)
-                } else {
-                    u64::MAX
-                };
-                let front_dig = self
-                    .mining_fronts
-                    .iter()
-                    .filter(|front| front.crew > 0 && front.stockpile < front.capacity)
-                    .filter_map(|front| {
-                        let rate = self.dig_rate_for(front.crew);
-                        let required = front.cut_work.max(1000);
-                        (rate > 0).then(|| {
-                            (required.saturating_sub(front.progress) * 20)
-                                .saturating_sub(front.work_remainder)
-                                .div_ceil(rate)
-                        })
-                    })
-                    .min()
-                    .unwrap_or(u64::MAX);
-                left.min(dig.min(front_dig)).saturating_sub(1)
-            } else {
-                0
-            };
-            if skip > 0 {
-                let work =
-                    self.dig_rate_for(self.movement.working("access")) * skip + self.dig_remainder;
-                self.dig_progress = (self.dig_progress + work / 20) % 1000;
-                self.dig_remainder = work % 20;
-                let front_rates: Vec<_> = self
-                    .mining_fronts
-                    .iter()
-                    .map(|front| self.dig_rate_for(front.crew))
-                    .collect();
-                for (front, rate) in self.mining_fronts.iter_mut().zip(front_rates) {
-                    if front.crew == 0 || front.stockpile >= front.capacity {
-                        continue;
-                    }
-                    let work = rate * skip + front.work_remainder;
-                    front.progress += work / 20;
-                    front.work_remainder = work % 20;
-                }
-                if (self.ticks - 1) / 20 != (self.ticks + skip - 1) / 20 {
-                    self.flow_window = [0; 5];
-                    self.processing_window.clear();
-                }
-                let transport_seconds = ((self.ticks + skip) / 20 - self.ticks / 20) as u32;
-                if transport_seconds > 0 {
-                    self.waste_profile
-                        .reconcile(self.slag + self.depleted + self.tailings.values().sum::<u64>());
-                }
-                let power = (self.power_factor(true) * 1000.) as u64;
-                for segment in &mut self.transport.segments {
-                    let speed = if segment.demand > 0 { power } else { 1000 };
-                    segment.time_fraction = (segment.time_fraction + 50 * speed * skip) % 1000;
-                }
-                if !self.workings.passages.is_empty() {
-                    self.workings.survey_work = (self.workings.survey_work
-                        + (1 + self.surveying_crew() as u64 * 3)
-                            * (100
-                                + 5 * self.ranks.get("prospecting").copied().unwrap_or(0) as u64)
-                            / 100
-                            * skip)
-                        % 200;
-                }
-                self.ticks += skip;
-                left -= skip;
-            }
+            self.second(cat, true);
+            left -= 20;
+            observe(self, total - left, total);
+            observed = total - left;
         }
         self.offline = Some(Offline {
             id: format!("{}:{}:{}", self.campaign_id, self.last_saved, now),
@@ -3367,13 +3337,13 @@ mod tests {
         assert_eq!(g.offline.as_ref().unwrap().effective, 10);
     }
     #[test]
-    fn offline_equivalent() {
+    fn offline_matches_sequential_analytical_seconds() {
         let mut a = Game::default();
         let mut b = a.clone();
         a.last_saved = 100;
         a.advance_offline(1100, &materials());
         for _ in 0..500 {
-            b.second(&materials(), false)
+            b.second(&materials(), true)
         }
         assert_eq!(a.credits, b.credits);
         assert_eq!(a.excavated, b.excavated);
@@ -3705,7 +3675,7 @@ mod specialisation_tests {
         assert!(g.action(choose(4)).is_err());
         g.levels.insert("reclaimer".into(), 1);
         g.tailings.insert(0, 2);
-        g.second(&materials(), true);
+        g.second(&materials(), false);
         assert_eq!(g.tailings.get(&0).copied().unwrap_or(0), 0);
         assert!(g.hauled.get(&0).copied().unwrap_or(0) <= 2);
         let restored: Game = serde_json::from_str(&serde_json::to_string(&g).unwrap()).unwrap();
@@ -4015,7 +3985,7 @@ mod pinned_recipe_tests {
         g.products.insert("lime".into(), 8000 * 64);
         g.pinned = Some("shaft".into());
         g.credits = 1000;
-        g.second(&materials(), true);
+        g.second(&materials(), false);
         assert_eq!(g.products["iron"], 2000 * 64);
         assert!(!g.steel_made);
         g.action(Action {
@@ -4034,7 +4004,7 @@ mod pinned_recipe_tests {
 mod offline_event_tests {
     use super::*;
     #[test]
-    fn event_skips_match_every_tick_across_sites_policies_and_cargo() {
+    fn idle_batches_match_sequential_seconds_across_sites_policies_and_cargo() {
         let cat = materials();
         for profile in 0..sites().len() {
             for (index, policy) in ["bulk", "vein", "depth"].iter().enumerate() {
@@ -4062,8 +4032,8 @@ mod offline_event_tests {
                 });
                 let mut b = a.clone();
                 a.advance_offline(700, &cat);
-                for _ in 0..6000 {
-                    b.tick(&cat, true);
+                for _ in 0..300 {
+                    b.second(&cat, true);
                 }
                 b.last_saved = a.last_saved;
                 b.offline = a.offline.clone();
@@ -4174,7 +4144,7 @@ mod reserved_feed_tests {
 mod stationary_network_tests {
     use super::*;
     #[test]
-    fn stationary_loaded_stockpile_matches_fixed_steps() {
+    fn stationary_loaded_stockpile_matches_idle_seconds() {
         let mut a = Game::default();
         a.terrain.frontier.clear();
         a.ore.insert(1, 20 * UNITS);
@@ -4182,8 +4152,8 @@ mod stationary_network_tests {
         let mut b = a.clone();
         let cat = materials();
         a.advance_offline(500, &cat);
-        for _ in 0..4000 {
-            b.tick(&cat, true);
+        for _ in 0..200 {
+            b.second(&cat, true);
         }
         a.offline = None;
         b.last_saved = a.last_saved;
@@ -4215,8 +4185,8 @@ mod survey_offline_tests {
             Some((offline.terrain.revision, offline.workings.revision, 1200));
         let mut stepped = offline.clone();
         offline.advance_offline(241, cat);
-        for _ in 0..2400 {
-            stepped.tick(cat, true);
+        for _ in 0..120 {
+            stepped.second(cat, true);
         }
         assert!(stepped.workings.veins.values().any(|v| v.stage == 2));
         assert_eq!(offline.terrain.revealed, stepped.terrain.revealed);
@@ -4238,8 +4208,8 @@ mod survey_offline_tests {
         assert!(offline.survey_pending());
         let mut stepped = offline.clone();
         offline.advance_offline(241, &cat);
-        for _ in 0..2400 {
-            stepped.tick(&cat, true);
+        for _ in 0..120 {
+            stepped.second(&cat, true);
         }
         assert!(!offline.survey_pending());
         assert_eq!(offline.terrain.revealed, stepped.terrain.revealed);
@@ -4451,6 +4421,63 @@ mod retired_start_tests {
 mod travel_replay_tests {
     use super::*;
     #[test]
+    fn idle_processing_uses_elapsed_rate_and_conserves_feed() {
+        let mut game = Game::new(42, 1);
+        game.terrain = terrain::Terrain::from_heights(&(240..=420).map(|x| (x, 120)).collect());
+        game.workings.initialise();
+        game.workings.section = Some(workings::Section {
+            from: 0,
+            to: [400, 120],
+            lift: false,
+            cells: vec![[400, 120]],
+            support_work: 0,
+        });
+        game.levels.insert("furnace".into(), 1);
+        let input = game.raw_stock_capacity();
+        game.concentrate.insert(1, input);
+        game.reserve.insert(materials()[1].product.clone(), input);
+        let expected = ((game.power_factor(true)
+            * pacing::get().refining_rate
+            * UNITS as f64
+            * game.throughput("furnace")) as u64
+            / 20
+            * 20)
+            .min(input);
+        game.second(materials(), true);
+        assert_eq!(game.excavated, 0);
+        assert_eq!(game.flow_window[3], expected);
+        assert_eq!(game.products[&materials()[1].product], expected * 65 / 100);
+        let retained = game
+            .concentrate
+            .values()
+            .chain(game.products.values())
+            .chain(game.tailings.values())
+            .sum::<u64>()
+            + game.depleted
+            + game.slag
+            + game.disposed_mass
+            + game.sold_mass;
+        assert_eq!(retained, input);
+    }
+    #[test]
+    fn idle_diggers_receive_no_work_during_travel() {
+        let mut game = Game::new(42, 1);
+        game.terrain = terrain::Terrain::from_heights(&(240..=420).map(|x| (x, 120)).collect());
+        game.workings.initialise();
+        game.workings.section = Some(workings::Section {
+            from: 0,
+            to: [400, 120],
+            lift: false,
+            cells: vec![[400, 120]],
+            support_work: 0,
+        });
+        game.second(materials(), true);
+        assert!(game.movement.workers.iter().any(|p| p.route != 0));
+        assert_eq!(game.excavated, 0);
+        assert_eq!(game.dig_progress, 0);
+        assert_eq!(game.workings.section.as_ref().unwrap().support_work, 0);
+    }
+    #[test]
     fn survey_reassignment_has_no_remote_work_credit() {
         let mut game = Game::new(42, 1);
         game.workings.initialise();
@@ -4469,7 +4496,7 @@ mod travel_replay_tests {
         assert_eq!(game.surveying_crew(), 0);
     }
     #[test]
-    fn captured_offline_travel_matches_fixed_steps() {
+    fn captured_offline_travel_matches_idle_seconds() {
         let mut captured = Game::new(42, 1);
         captured.last_saved = 100;
         let mut stepped = captured.clone();
@@ -4481,8 +4508,8 @@ mod travel_replay_tests {
             frames += 1;
             assert_eq!(game.movement.workers.len(), game.workers as usize);
         });
-        for _ in 0..2000 {
-            stepped.tick(materials(), true);
+        for _ in 0..100 {
+            stepped.second(materials(), true);
         }
         stepped.last_saved = captured.last_saved;
         stepped.offline = captured.offline.clone();
@@ -4513,7 +4540,7 @@ mod travel_replay_tests {
         assert_eq!(game.ore, inventory);
     }
     #[test]
-    fn empty_travel_skip_preserves_every_serialized_field() {
+    fn idle_travel_preserves_state_across_split_returns() {
         let mut game = Game::new(42, 1);
         game.terrain = terrain::Terrain::from_heights(&(240..=420).map(|x| (x, 120)).collect());
         game.workings.initialise();
@@ -4526,11 +4553,11 @@ mod travel_replay_tests {
         });
         game.last_saved = 100;
         game.tick(materials(), true);
-        assert!(game.idle_travel_skip(400) > 0);
+        assert!(game.movement.workers.iter().any(|p| p.route != 0));
         let mut stepped = game.clone();
         game.advance_offline(140, materials());
-        for _ in 0..400 {
-            stepped.tick(materials(), true);
+        for _ in 0..20 {
+            stepped.second(materials(), true);
         }
         stepped.last_saved = game.last_saved;
         stepped.offline = game.offline.clone();

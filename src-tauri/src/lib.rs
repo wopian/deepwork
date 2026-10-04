@@ -328,9 +328,18 @@ struct Snapshot {
     construction: Option<Construction>,
 }
 impl From<Game> for Snapshot {
-    fn from(mut game: Game) -> Self {
+    fn from(game: Game) -> Self {
+        Self::new(game, true)
+    }
+}
+impl Snapshot {
+    fn new(mut game: Game, actors: bool) -> Self {
         let construction = construction(&game);
-        let mut visual_workers = game.movement.visual(game.travel_power());
+        let mut visual_workers = if actors {
+            game.movement.visual(game.travel_power())
+        } else {
+            Vec::new()
+        };
         for worker in &mut visual_workers {
             if let Some((role, id)) = worker.job.split_once(':') {
                 worker.job = format!("{role}:{}", public_front_id(id));
@@ -370,7 +379,11 @@ impl From<Game> for Snapshot {
                     .map(|reason| (u.id.clone(), reason))
             })
             .collect();
-        let mut shipments = game.transport.visual();
+        let mut shipments = if actors {
+            game.transport.visual()
+        } else {
+            Vec::new()
+        };
         for shipment in &mut shipments {
             if let Some((_, segment)) = game
                 .transport
@@ -457,6 +470,22 @@ fn public_front_id(id: &str) -> String {
 #[cfg(test)]
 mod visual_replay_tests {
     use super::*;
+    #[test]
+    fn idle_frames_preserve_public_geometry_without_actor_movement() {
+        let mut game = Game::new(42, 1);
+        game.second(materials(), false);
+        let live = Snapshot::new(game.clone(), true);
+        let replay = Snapshot::new(game.clone(), false);
+        assert!(!live.visual_workers.is_empty());
+        assert!(replay.visual_workers.is_empty());
+        assert!(replay.shipments.is_empty());
+        assert_eq!(replay.game.terrain.chunks, live.game.terrain.chunks);
+        assert_eq!(replay.game.terrain.visible, live.game.terrain.visible);
+        assert_eq!(replay.game.terrain.revealed, live.game.terrain.revealed);
+        assert_eq!(replay.crew_state.assigned, game.workers);
+        assert!(replay.game.workings.search.is_none());
+        assert!(replay.game.workings.veins.is_empty());
+    }
     #[test]
     fn replay_merges_small_adjacent_buckets_before_reencoding_old_history() {
         let mut replay = Replay::default();
@@ -553,7 +582,10 @@ mod visual_replay_tests {
 }
 
 fn snapshot_for(game: Game, state: &Runtime) -> Snapshot {
-    let mut snapshot: Snapshot = game.into();
+    snapshot_with_actors(game, state, true)
+}
+fn snapshot_with_actors(game: Game, state: &Runtime, actors: bool) -> Snapshot {
+    let mut snapshot = Snapshot::new(game, actors);
     snapshot.save_status = state
         .save_status
         .lock()
@@ -590,6 +622,9 @@ struct Stream {
 }
 impl Stream {
     fn update(&mut self, g: &Game) -> Update {
+        self.update_with_actors(g, true)
+    }
+    fn update_with_actors(&mut self, g: &Game, actors: bool) -> Update {
         let reset = self.identity != Some((g.campaign_id.clone(), g.site, g.seed))
             || self
                 .chunks
@@ -623,7 +658,7 @@ impl Stream {
         };
         self.passages = g.workings.passages.len();
         state.workings.passages.drain(..offset);
-        let mut snapshot: Snapshot = state.into();
+        let mut snapshot = Snapshot::new(state, actors);
         snapshot.workings_offset = offset;
         snapshot.construction = construction;
         snapshot.selected_vein = selected_vein;
@@ -725,11 +760,11 @@ fn catch_up(game: &mut Game, timestamp: u64, state: &Runtime) -> Result<(), Stri
     }
     let session = format!("{}:{}:{}", game.campaign_id, game.last_saved, timestamp);
     let mut stream = Stream::default();
-    stream.update(game);
+    stream.update_with_actors(game, false);
     if let Ok(mut replay) = state.replay.lock() {
         replay.publish(VisualEvent::Start {
             session: session.clone(),
-            state: snapshot_for(game.clone(), state),
+            state: snapshot_with_actors(game.clone(), state, false),
             total,
         })?;
     }
@@ -743,7 +778,7 @@ fn catch_up(game: &mut Game, timestamp: u64, state: &Runtime) -> Result<(), Stri
             if let Ok(mut replay) = state.replay.lock() {
                 if let Err(error) = replay.publish(VisualEvent::Frame {
                     session: session.clone(),
-                    update: stream.update(game),
+                    update: stream.update_with_actors(game, false),
                     done,
                     total,
                 }) {

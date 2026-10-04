@@ -442,7 +442,7 @@ export const upgrades = [
   ["supports", "Support workshop", "Support deep branching tunnels."],
   ["pump", "Drainage pumps", "Clear groundwater below 700 m."],
   ["ventilation", "Ventilation plant", "Manage heat below 1,500 m."],
-  ["worker", "Recruit minion", "More hands, more progress."],
+  ["worker", "Recruit crew", "More hands, more progress."],
   ["housing", "Bunkhouse", "Room for four more workers."],
   ["drill", "Powered picks", "Increase excavation work."],
   ["conveyor", "Branch conveyors", "Automate ore flow from active work faces."],

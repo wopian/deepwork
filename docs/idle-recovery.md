@@ -1,0 +1,21 @@
+# Analytical idle recovery
+
+Idle recovery advances excavation, public ore revelation, crew access and construction. Ore hauling, sorting, refining, recipes, reclamation and sales use elapsed-time budgets. Recovery does not create cargo batches or simulate cargo movement. Online 50 ms shipment physics remain unchanged.
+
+Production intervals span at most one credited second. Shorter intervals stop at crew movement legs, dig cuts and support completion. Planning retains its existing cadence. Travelling workers earn no work credit. This prevents high-level equipment from losing production through coarse face or arrival updates.
+
+Excavation events do not run the ore pipeline. Processing spends one elapsed-time budget per credited second. Profiling also identified repeated worker-position sorting around solid faces. Distance shells now visit the same reachable/distance/y/x order directly. Frontier selection skips expensive geology and clearance checks once a candidate cannot improve the selected distance. These optimizations preserve destination choice, connected access and geology.
+
+Hauling budgets respect every transport stage, cycle capacity, finite station storage and route-specific power limits. Existing cargo drains through those budgets first. Blocked cargo keeps its ownership, identity and leg timing. Accounting conserves every extracted quantum, including residues, tailings, sales and disposal. Preferred service alternates with fair service across idle seconds.
+
+Replay publishes excavation and construction without cargo or worker actors. Camera follow tracks committed excavation while manual camera movement cancels follow. Gameplay remains locked until saving and playback reconciliation finish. Skip, reduced motion, failed-save recovery, the 50% offline rate and the eight-real-hour cap retain their existing behavior.
+
+Analytical idle accounting deliberately bypasses individual shipment latency. It no longer promises byte-identical results against online cargo physics. The `offline_replay` example compares observed catch-up with sequential analytical seconds instead. Campaign fingerprints include production, crew, transport and construction code, so older campaign checkpoints cannot resume under the new model.
+
+Validation covers transport bottlenecks, power loss after route changes, finite buffers, mass conservation, travel before production, split returns, reload, chronological revelation and actor-free replay snapshots. `idle_recovery` measures full capped recovery plus one bounded comparison with physical cargo simulation. `scripts/idle-recovery-native.ts` checks isolated WebView2 recovery, replay actors, command locking, Skip, checkpointing, reload and portrait rendering.
+
+Historical parity and calendar evidence remain unchanged. New campaign medians and 30/30 headquarters completion have not been measured for this idle model.
+
+Measured on the existing generator 6 fixture with 16 workers: capped eight-hour computation drops from 39.5 seconds to 18.7 seconds (2.11 times faster). Both adaptive builds excavate 300,880 cells and earn 15,329 credits; final mass accounting and save validation pass. These timings exclude native replay and checkpoint I/O. A short physical-vs-bulk comparison in the optimized build measures 260 ms versus 227 ms; most overall improvement comes from eliminating repeated clearance searches. The superseded coarse model was faster than its physical comparison but lost production at short work sites, so it is not shipped. Evidence is retained in [idle-recovery.json](balance/idle-recovery.json).
+
+Isolated custom-protocol WebView2 recovery, playback and checkpointing complete in 29.2 seconds for the same eight-hour fixture. Replay renders zero cargo and zero worker actors. Command locking, Skip, checkpoint-before-rewards, reload and portrait rendering pass without page errors. The final snapshot is 5,908,458 bytes. Portrait inspection retains five terrain textures, 16 worker actors and 15 cargo actors after recovery; sampled frame p95 is 46.2 ms during this short post-reload inspection, not a sustained frame-rate qualification. Native artifacts live in `test-results/idle-recovery-native`. Rust workspace tests pass (161 core and 29 native); all 37 Bun tests, typecheck and build pass. No campaign cohort or travel-progress script was rerun.
